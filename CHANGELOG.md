@@ -14,6 +14,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   A field of what is now a method value (`launchTargets`) becomes that method. A dev-mode reload of the same
   `-SNAPSHOT` runs no upgrade, so the SDK's `@Param` fields used to stay beside their group
   (`ManagedRepairs.leftoverFields`).
+- A plugin's parameter found in another group than its holder's moves there on bind (2026-11-05, params-cleanup
+  phase 2). The method moves whole, comments and value included, in `params/` and in its starting copy. The target
+  group is written when missing, and a group pair the move empties is deleted. A move is skipped, with a warning,
+  when the starting copy lacks the method, the target has a method of that name, or the bot would stop compiling
+  (`MisplacedParams`).
 
 ### Changed
 

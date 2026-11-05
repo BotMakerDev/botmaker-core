@@ -167,19 +167,7 @@ public final class ManagedHolders {
     private static TypeDeclaration groupClass(AST ast, PluginCoordinate plugin, String holder,
                                               List<ManagedValue<?>> declared, ValueGrammar grammar,
                                               TreeSet<String> imports) {
-        TypeDeclaration type = ast.newTypeDeclaration();
-        type.setName(ast.newSimpleName(holder));
-        type.setJavadoc(javadoc(ast, List.of("Parameters of " + plugin + " for this bot, each one method, whole: its"
-                        + " name, its type and,",
-                "as what it returns, its value on this computer. This file is never versioned; its starting copy",
-                "is, and <i>Make this the starting value</i> is what changes that.")));
-        @SuppressWarnings("unchecked")
-        List<IExtendedModifier> modifiers = type.modifiers();
-        MarkerAnnotation param = ast.newMarkerAnnotation();
-        param.setTypeName(ast.newSimpleName(Param.class.getSimpleName()));
-        modifiers.add(param);
-        modifiers.add(ast.newModifier(Modifier.ModifierKeyword.PUBLIC_KEYWORD));
-        imports.add(Param.class.getCanonicalName());
+        TypeDeclaration type = groupShell(ast, plugin, holder, imports);
         @SuppressWarnings("unchecked")
         List<BodyDeclaration> members = type.bodyDeclarations();
         for (ManagedValue<?> each : declared) {
@@ -193,6 +181,39 @@ public final class ManagedHolders {
             members.add(method);
         }
         return members.isEmpty() ? null : type;
+    }
+
+    /**
+     * The source of {@code plugin}'s group {@code holder} with no parameter yet, in its package under
+     * {@code params/}: the file a parameter written in another group moves into ({@link MisplacedParams}). Null
+     * when the plugin spells no package.
+     */
+    public static String emptyGroup(ProjectConfig config, PluginCoordinate plugin, String holder) {
+        String segment = segment(plugin);
+        if (segment == null || holder == null) return null;
+        AST ast = JavaLevel.LATEST.newAst();
+        TreeSet<String> imports = new TreeSet<>();
+        TypeDeclaration group = groupShell(ast, plugin, holder, imports);
+        return unit(ast, config.parametersPackage() + "." + segment, imports, group);
+    }
+
+    /** {@code @Param public class <holder>} with its doc comment and no member. */
+    private static TypeDeclaration groupShell(AST ast, PluginCoordinate plugin, String holder,
+                                              TreeSet<String> imports) {
+        TypeDeclaration type = ast.newTypeDeclaration();
+        type.setName(ast.newSimpleName(holder));
+        type.setJavadoc(javadoc(ast, List.of("Parameters of " + plugin + " for this bot, each one method, whole: its"
+                        + " name, its type and,",
+                "as what it returns, its value on this computer. This file is never versioned; its starting copy",
+                "is, and <i>Make this the starting value</i> is what changes that.")));
+        @SuppressWarnings("unchecked")
+        List<IExtendedModifier> modifiers = type.modifiers();
+        MarkerAnnotation param = ast.newMarkerAnnotation();
+        param.setTypeName(ast.newSimpleName(Param.class.getSimpleName()));
+        modifiers.add(param);
+        modifiers.add(ast.newModifier(Modifier.ModifierKeyword.PUBLIC_KEYWORD));
+        imports.add(Param.class.getCanonicalName());
+        return type;
     }
 
     /**

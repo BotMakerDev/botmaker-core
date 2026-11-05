@@ -31,6 +31,7 @@ import com.botmaker.core.project.managed.ManagedMethod;
 import com.botmaker.core.project.managed.ManagedMigrations;
 import com.botmaker.core.project.managed.ManagedRepairs;
 import com.botmaker.core.project.managed.ManagedSets;
+import com.botmaker.core.project.managed.MisplacedParams;
 import com.botmaker.core.project.params.JavaParameterEdits;
 import com.botmaker.core.project.params.JavaParameters;
 import com.botmaker.java.index.BotIndex;
@@ -39,6 +40,7 @@ import com.botmaker.core.project.vcs.VersionOrigin;
 import com.botmaker.core.services.BotSources;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.lang.reflect.Executable;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
@@ -48,6 +50,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Supplier;
@@ -402,8 +405,9 @@ public final class HostPluginValues implements PluginValues {
         }
         List<ManagedValue<?>> everyValue = allByPlugin.values().stream().flatMap(List::stream).toList();
         if (byPlugin.isEmpty()) {
-            return repairLeftovers(everyValue).stream()
-                    .map(file -> config.projectPath().relativize(file).toString()).toList();
+            Set<Path> files = new LinkedHashSet<>(moveMisplaced(allByPlugin));
+            files.addAll(repairLeftovers(everyValue));
+            return files.stream().map(file -> config.projectPath().relativize(file).toString()).toList();
         }
         java.util.Set<HolderFiles.Key> present = index().read(units -> HolderFiles.find(units, allByPlugin)).keySet();
         List<String> written = new ArrayList<>();
@@ -431,6 +435,9 @@ public final class HostPluginValues implements PluginValues {
                 params.put(plugin, declared.stream().filter(ManagedParam.class::isInstance).toList()));
         keep(ManagedHolders.valuesToKeep(config, index(), params))
                 .forEach(file -> written.add(config.projectPath().relativize(file).toString()));
+        // A parameter its plugin moved to another holder goes to that group, whole (2026-11-05), whether it
+        // applies to this bot or not: it is already written.
+        moveMisplaced(allByPlugin).forEach(file -> written.add(config.projectPath().relativize(file).toString()));
         // The old shape beside the new (2026-11-05): a field the group above now holds goes, on every bind.
         repairLeftovers(everyValue).forEach(file -> written.add(config.projectPath().relativize(file).toString()));
         return List.copyOf(written);
@@ -448,10 +455,7 @@ public final class HostPluginValues implements PluginValues {
         plan.left().forEach(sentence -> System.err.println("Warning: " + sentence));
         Set<Path> changed = new LinkedHashSet<>();
         if (plan.isEmpty()) return changed;
-        Set<Path> open = new LinkedHashSet<>();
-        for (ProjectFile file : state.getAllFiles()) {
-            if (file.getPath() != null) open.add(file.getPath().toAbsolutePath().normalize());
-        }
+        Set<Path> open = openFiles();
         snapshot();
         recorded(() -> BotSources.forEach(config, state, (file, source) -> {
             String after = plan.rewrites().get(file);
@@ -459,23 +463,90 @@ public final class HostPluginValues implements PluginValues {
             changed.add(file);
             return after;
         }));
-        for (Path gone : plan.deleted()) {
-            if (open.contains(gone)) {
-                System.err.println("Warning: " + gone + " is open in an editor, so it was not deleted.");
-                continue;
-            }
-            try {
-                if (Files.deleteIfExists(gone)) changed.add(gone);
-            } catch (IOException e) {
-                System.err.println("Warning: could not delete " + gone + ": " + e.getMessage());
-            }
-        }
+        deleteUnlessOpen(plan.deleted(), open, changed);
         plan.repaired().forEach(sentence -> System.err.println("Repaired: " + sentence));
         // A class deleted or a field made a method: the batch's next write reads the bot's types again.
         WriteSteps.Step step = WriteSteps.open();
         if (step != null) step.typesChanged();
         redraw(changed);
         return changed;
+    }
+
+    /**
+     * Applies {@link MisplacedParams#plan} after one snapshot an undo can return to: each group in {@code params/}
+     * on the live buffers, a new group written beside them, each starting copy on disk, and an emptied group pair
+     * deleted unless an editor tab holds it. Answers the files changed, created or deleted.
+     */
+    private Set<Path> moveMisplaced(Map<PluginCoordinate, List<ManagedValue<?>>> byPlugin) {
+        MisplacedParams.Moves moves = MisplacedParams.plan(config, index(), byPlugin);
+        moves.left().forEach(sentence -> System.err.println("Warning: " + sentence));
+        Set<Path> changed = new LinkedHashSet<>();
+        if (moves.isEmpty()) return changed;
+        // A group an editor tab holds would keep its parameter after the move, a second copy: nothing moves.
+        Set<Path> open = openFiles();
+        for (Path gone : moves.deleted()) {
+            if (open.contains(gone)) {
+                System.err.println("Warning: " + gone + " is open in an editor, so its parameters were not moved"
+                        + " to their groups; close it and open the bot again.");
+                return changed;
+            }
+        }
+        Set<Path> existing = Set.copyOf(index().sources().keySet());
+        snapshot();
+        // Where the parameter goes is written first: a write that fails leaves it where it was, never nowhere.
+        try {
+            moves.rewrites().forEach((file, text) -> {
+                if (!existing.contains(file) && ProjectWrites.create(config, file, text, HISTORY_LABEL)) {
+                    changed.add(file);
+                }
+            });
+            moves.starting().forEach((file, text) -> {
+                if (ProjectWrites.replace(config, file, text, HISTORY_LABEL)) changed.add(file);
+            });
+        } catch (UncheckedIOException e) {
+            System.err.println("Warning: parameters were not moved to their groups: " + e.getCause().getMessage());
+            redraw(changed);
+            return changed;
+        }
+        recorded(() -> BotSources.forEach(config, state, (file, source) -> {
+            String after = moves.rewrites().get(file);
+            if (after == null) return null;
+            changed.add(file);
+            return after;
+        }));
+        deleteUnlessOpen(moves.deleted(), open, changed);
+        moves.moved().forEach(sentence -> System.err.println("Repaired: " + sentence));
+        WriteSteps.Step step = WriteSteps.open();
+        if (step != null) step.typesChanged();
+        redraw(changed);
+        return changed;
+    }
+
+    /** Every file an editor tab holds, by its absolute path. */
+    private Set<Path> openFiles() {
+        Set<Path> open = new LinkedHashSet<>();
+        for (ProjectFile file : state.getAllFiles()) {
+            if (file.getPath() != null) open.add(file.getPath().toAbsolutePath().normalize());
+        }
+        return open;
+    }
+
+    /**
+     * Deletes each of {@code gone} but those in {@code open}, adding what it deleted to {@code changed}: an open
+     * buffer would write the file back on its next save, so it stays as it was until the next bind.
+     */
+    private static void deleteUnlessOpen(Set<Path> gone, Set<Path> open, Set<Path> changed) {
+        for (Path file : gone) {
+            if (open.contains(file)) {
+                System.err.println("Warning: " + file + " is open in an editor, so it was not deleted.");
+                continue;
+            }
+            try {
+                if (Files.deleteIfExists(file)) changed.add(file);
+            } catch (IOException e) {
+                System.err.println("Warning: could not delete " + file + ": " + e.getMessage());
+            }
+        }
     }
 
     /**
