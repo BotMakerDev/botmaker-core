@@ -181,12 +181,7 @@ public final class CoreEditor {
 
     /** The open file, by its path below the source root as a request names it. */
     public Optional<String> openFile() {
-        ProjectFile active = state.getActiveFile();
-        Path root = state.getSourcePath();
-        if (active == null) return Optional.empty();
-        Path file = active.getPath();
-        Path named = root != null && file.startsWith(root) ? root.relativize(file) : file;
-        return Optional.of(named.toString().replace('\\', '/'));
+        return state.activeFileName();
     }
 
     private Optional<Path> resolve(String file) {

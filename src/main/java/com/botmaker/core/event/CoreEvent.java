@@ -55,7 +55,10 @@ public sealed interface CoreEvent {
         }
     }
 
-    /** The compiler's problems in one file, all of them: an empty list clears the file's marks. */
+    /**
+     * The problems in one file, all of them: an empty list clears the file's marks. A run's check tells them before it
+     * compiles (since plan phase 7a): a slot left empty, a deprecated call, a {@code main} that never starts the bot.
+     */
     record Diagnostics(String file, List<Problem> problems) implements CoreEvent {
         public Diagnostics {
             requireFile(file);
@@ -71,7 +74,8 @@ public sealed interface CoreEvent {
             }
         }
 
-        public enum Severity { ERROR, WARNING }
+        /** {@code INFO} is advice that stops nothing, such as a {@code main} that never starts the bot. */
+        public enum Severity { ERROR, WARNING, INFO }
     }
 
     /** Where the bot's run is; {@code detail} says why it ended, or is empty. */

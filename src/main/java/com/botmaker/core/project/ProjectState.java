@@ -149,6 +149,16 @@ public class ProjectState implements SourceSet {
         return activeFile;
     }
 
+    /** The open file by its path below the source root, as the protocol names a file; empty when none is open. */
+    public Optional<String> activeFileName() {
+        ProjectFile active = activeFile;
+        if (active == null) return Optional.empty();
+        Path file = active.getPath();
+        Path root = getSourcePath();
+        Path named = root != null && file.startsWith(root) ? root.relativize(file) : file;
+        return Optional.of(named.toString().replace('\\', '/'));
+    }
+
     public Collection<ProjectFile> getAllFiles() {
         return Collections.unmodifiableCollection(openFiles.values());
     }

@@ -18,7 +18,7 @@ per user.
   `BlockId` path, as a string. Undo and redo are a `HistoryStep`, sent alone: the history is the project's, a
   request one file's.
 - `event`: what the core tells every client. `CoreEvent` is sealed: `MethodsChanged` (the methods whose source or
-  id changed, and the ids removed), `Diagnostics`, `RunState`, `RunOutput`, `RunLogged`, `InputAsked`, `Status`,
+  id changed, and the ids removed), `Diagnostics` (a run's check tells them), `RunState`, `RunOutput`, `RunLogged`, `InputAsked`, `Status`,
   `UiRequest`, `Refusal`.
 - `CoreJson`: the one mapper every protocol record is read and written with, strict on reading (a missing component
   or trailing text is refused); phase 10's channel carries exactly this.
@@ -48,6 +48,11 @@ per user.
   or redoes, `recordRewrite` records what a plugin already wrote, `rewritten` records an open-time migration, and
   `HistoryChanged` says what the Undo menu shows. An undo announces what it put back as `MethodsChanged` and records
   nothing. `EditorOutput.written` is the editor's own report; Studio draws nothing from it.
+- `run` (phase 7a, 2026-11-05) compiles, runs, tries and debugs the bot: `CodeExecutionService` tells `CoreEvent`s to a
+  `Consumer`, asks a `RunCheck` first (whose `Verdict`'s problems it tells as `Diagnostics`), and hands trace lines and
+  frames to `RunTelemetry.Listener`; `DebuggingService` shows through `debug.DebugView`. `RunAgentJar` cuts the agent's
+  jar from this module's classes by package path (`run/agent/`): a renamed package changes its strings too. `capture` is
+  the window and desktop grabs; the overlay's monitor grab stays Studio's.
 - JavaFX is `provided` for one reason: `PluginHost` binds a plugin's slot editors, whose methods return a `Node`.
   Construct no Node here; phase 8's UI port removes it.
 - The `tests` jar (`TestPlugins`, `TestValues`, `TestValue`, `TestOutcome`, `MigrationTypes`, `TestScreen`) is what Studio's tests
