@@ -29,6 +29,7 @@ import com.botmaker.core.project.managed.ManagedConstants;
 import com.botmaker.core.project.managed.ManagedIds;
 import com.botmaker.core.project.managed.ManagedMethod;
 import com.botmaker.core.project.managed.ManagedMigrations;
+import com.botmaker.core.project.managed.ManagedRepairs;
 import com.botmaker.core.project.managed.ManagedSets;
 import com.botmaker.core.project.params.JavaParameterEdits;
 import com.botmaker.core.project.params.JavaParameters;
@@ -37,12 +38,15 @@ import com.botmaker.core.project.vcs.Checkpoints;
 import com.botmaker.core.project.vcs.VersionOrigin;
 import com.botmaker.core.services.BotSources;
 
+import java.io.IOException;
 import java.lang.reflect.Executable;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.lang.reflect.Type;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -396,7 +400,11 @@ public final class HostPluginValues implements PluginValues {
                 // A plugin that cannot say what it manages gets no file; every other plugin still does.
             }
         }
-        if (byPlugin.isEmpty()) return List.of();
+        List<ManagedValue<?>> everyValue = allByPlugin.values().stream().flatMap(List::stream).toList();
+        if (byPlugin.isEmpty()) {
+            return repairLeftovers(everyValue).stream()
+                    .map(file -> config.projectPath().relativize(file).toString()).toList();
+        }
         java.util.Set<HolderFiles.Key> present = index().read(units -> HolderFiles.find(units, allByPlugin)).keySet();
         List<String> written = new ArrayList<>();
         for (ManagedHolders.Plan plan : ManagedHolders.missing(config, byPlugin, java.util.Set.copyOf(ids()),
@@ -423,7 +431,51 @@ public final class HostPluginValues implements PluginValues {
                 params.put(plugin, declared.stream().filter(ManagedParam.class::isInstance).toList()));
         keep(ManagedHolders.valuesToKeep(config, index(), params))
                 .forEach(file -> written.add(config.projectPath().relativize(file).toString()));
+        // The old shape beside the new (2026-11-05): a field the group above now holds goes, on every bind.
+        repairLeftovers(everyValue).forEach(file -> written.add(config.projectPath().relativize(file).toString()));
         return List.copyOf(written);
+    }
+
+    /**
+     * Applies {@link ManagedRepairs#leftoverFields} on the live buffers, after one snapshot an undo can return to,
+     * and answers the files changed or deleted. What it kept is said on the log, as the bind's other warnings are.
+     *
+     * <p>A holder the plan empties is deleted only when no editor tab holds it: an open buffer would write the old
+     * field back on its next save, so that file stays as it was, its duplicate harmless, until the next bind.
+     */
+    private Set<Path> repairLeftovers(List<ManagedValue<?>> live) {
+        ManagedRepairs.Planned plan = ManagedRepairs.leftoverFields(index(), live);
+        plan.left().forEach(sentence -> System.err.println("Warning: " + sentence));
+        Set<Path> changed = new LinkedHashSet<>();
+        if (plan.isEmpty()) return changed;
+        Set<Path> open = new LinkedHashSet<>();
+        for (ProjectFile file : state.getAllFiles()) {
+            if (file.getPath() != null) open.add(file.getPath().toAbsolutePath().normalize());
+        }
+        snapshot();
+        recorded(() -> BotSources.forEach(config, state, (file, source) -> {
+            String after = plan.rewrites().get(file);
+            if (after == null || plan.deleted().contains(file)) return null;
+            changed.add(file);
+            return after;
+        }));
+        for (Path gone : plan.deleted()) {
+            if (open.contains(gone)) {
+                System.err.println("Warning: " + gone + " is open in an editor, so it was not deleted.");
+                continue;
+            }
+            try {
+                if (Files.deleteIfExists(gone)) changed.add(gone);
+            } catch (IOException e) {
+                System.err.println("Warning: could not delete " + gone + ": " + e.getMessage());
+            }
+        }
+        plan.repaired().forEach(sentence -> System.err.println("Repaired: " + sentence));
+        // A class deleted or a field made a method: the batch's next write reads the bot's types again.
+        WriteSteps.Step step = WriteSteps.open();
+        if (step != null) step.typesChanged();
+        redraw(changed);
+        return changed;
     }
 
     /**

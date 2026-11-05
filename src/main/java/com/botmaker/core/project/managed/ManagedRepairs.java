@@ -45,6 +45,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Predicate;
 
 /**
  * A plugin's managed values in a bot, repaired during that plugin's upgrade the way the rest of the bot's code is
@@ -139,6 +140,44 @@ public final class ManagedRepairs {
      *                the contract on its classpath, {@link ReviewMarker#available})
      */
     public static Planned plan(BotIndex index, List<ManagedValue<?>> live, ValueGrammar grammar, String note) {
+        return plan(index, live, grammar, note, mark -> true, mark -> true);
+    }
+
+    /**
+     * The repair of {@code index}'s old-shape fields for the plugin declaring {@code live}, run on every bind
+     * (2026-11-05): a field the plugin's value is a method of now is rewritten as that method, and a parameter field
+     * whose id a group method also marks — the copy the bind wrote in {@code params/} — is removed, or kept unmarked
+     * while the bot names it. A field that is its value's only copy, and every value that is no field, are left to
+     * the upgrade. A dev-mode reload of the same {@code -SNAPSHOT} runs no upgrade, so without this the old field
+     * stayed beside its group (SwordXStaff, 2026-11-05).
+     */
+    public static Planned leftoverFields(BotIndex index, List<ManagedValue<?>> live) {
+        Map<String, ManagedValue<?>> byId = new LinkedHashMap<>();
+        Set<String> markers = new LinkedHashSet<>();
+        for (ManagedValue<?> value : live) {
+            if (value == null) continue;
+            byId.putIfAbsent(value.id(), value);
+            markers.add(value.marker());
+        }
+        Set<String> onMethods = new LinkedHashSet<>();
+        for (Mark mark : marks(index, live, markers)) {
+            if (mark.kind() == Kind.METHOD) onMethods.add(mark.id());
+        }
+        // Only a parameter's field with its group method beside it may go: that method holds the value now. A method
+        // value's field is only ever carried, so a field asMethod cannot carry stays, its value's one copy.
+        Predicate<Mark> removable = mark -> byId.get(mark.id()) instanceof ManagedParam<?>
+                && onMethods.contains(mark.id());
+        // Nothing here resets a value, so no grammar writes one and no @Refactor note is needed.
+        return plan(index, live, ValueGrammar.empty(), null, mark -> mark.kind() == Kind.FIELD
+                && (byId.get(mark.id()) instanceof ManagedMethod<?> || removable.test(mark)), removable);
+    }
+
+    /**
+     * @param repairs   the marks looked at; every other is left as written
+     * @param removable of those, the ones that may be removed or unmarked when declared another way now
+     */
+    private static Planned plan(BotIndex index, List<ManagedValue<?>> live, ValueGrammar grammar, String note,
+                                Predicate<Mark> repairs, Predicate<Mark> removable) {
         Map<String, ManagedValue<?>> byId = new LinkedHashMap<>();
         Set<String> markers = new LinkedHashSet<>();
         Set<String> holders = new LinkedHashSet<>();
@@ -154,6 +193,7 @@ public final class ManagedRepairs {
         List<String> left = new ArrayList<>();
 
         for (Mark first : marks(index, live, markers)) {
+            if (!repairs.test(first)) continue;
             Mark mark = marks(current, live, markers).stream().filter(first::same).findFirst().orElse(null);
             if (mark == null) continue;
             ManagedValue<?> value = byId.get(mark.id());
@@ -174,6 +214,7 @@ public final class ManagedRepairs {
                 }
             }
             if (value == null || !fits(mark, value)) {
+                if (!removable.test(mark)) continue;
                 String why = value == null ? "is no longer one of the plugin's values" : "is declared another way now";
                 Map<Path, String> without = without(sources, mark);
                 BotIndex after = current.replacing(without);

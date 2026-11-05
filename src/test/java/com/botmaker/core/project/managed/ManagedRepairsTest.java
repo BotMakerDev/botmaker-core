@@ -2,6 +2,7 @@ package com.botmaker.core.project.managed;
 
 import com.botmaker.core.project.managed.TestOutcome;
 import com.botmaker.core.project.managed.TestValue;
+import com.botmaker.plugin.api.params.Param;
 import com.botmaker.plugin.api.source.ManagedValue;
 import com.botmaker.java.grammar.ValueGrammar;
 import com.botmaker.core.project.ProjectConfig;
@@ -10,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -406,6 +408,145 @@ class ManagedRepairsTest {
         String after = plan.rewrites().get(values);
         assertTrue(after != null && after.contains("public static List<String> names()"), plan.sentences().toString());
         assertTrue(after.contains("return List.of(\"steam:1\");"), after);
+    }
+
+    private static final String OLD_SETUP_FIELD = """
+            package %s.plugins.test;
+
+            import %s;
+
+            public final class Sdk {
+                @TestValue(TestValue.Id.DO_SETUP)
+                public static boolean doSetup = true;
+            }
+            """;
+
+    private static final String SETUP_GROUP = """
+            package %s.params.test;
+
+            import %s;
+            import %s;
+
+            @Param
+            public class Sdk {
+                @TestValue(TestValue.Id.DO_SETUP)
+                public boolean doSetup() {
+                    return false;
+                }
+            }
+            """;
+
+    /** The old field and the group the bind wrote for the same id: what a bot opened on the new shape holds. */
+    private static Map<Path, String> fieldBesideGroup(ProjectConfig config) {
+        return Map.of(
+                holder(config, "Sdk"), OLD_SETUP_FIELD.formatted(config.mainPackage(), TestValue.class.getCanonicalName()),
+                group(config, "Sdk"), SETUP_GROUP.formatted(config.mainPackage(), TestValue.class.getCanonicalName(),
+                        Param.class.getCanonicalName()));
+    }
+
+    /**
+     * A plugin's old parameter field beside the group method that now holds its id is removed on bind (2026-11-05):
+     * the duplicate a dev-mode reload of the same {@code -SNAPSHOT} left, since only an upgrade repaired values.
+     */
+    @Test
+    void aPluginFieldBesideItsGroupMethodIsRemoved(@TempDir Path dir) {
+        ProjectConfig config = ProjectConfig.forDirectory(dir.resolve("bot"));
+
+        ManagedRepairs.Planned plan = ManagedRepairs.leftoverFields(index(config, fieldBesideGroup(config)),
+                List.of(SETUP));
+
+        assertEquals(Set.of(holder(config, "Sdk")), plan.deleted(), plan.sentences().toString());
+        assertTrue(!plan.rewrites().containsKey(group(config, "Sdk")), "the group method is the value now");
+    }
+
+    @Test
+    void aFieldTheBotReadsIsKeptUnmarked(@TempDir Path dir) {
+        ProjectConfig config = ProjectConfig.forDirectory(dir.resolve("bot"));
+        Map<Path, String> sources = new HashMap<>(fieldBesideGroup(config));
+        sources.put(config.mainPackageDir().resolve("Bot.java").toAbsolutePath().normalize(), """
+                package %s;
+
+                import %s.plugins.test.Sdk;
+
+                class Bot {
+                    boolean setUp() {
+                        return Sdk.doSetup;
+                    }
+                }
+                """.formatted(config.mainPackage(), config.mainPackage()));
+
+        ManagedRepairs.Planned plan = ManagedRepairs.leftoverFields(index(config, sources), List.of(SETUP));
+
+        assertTrue(plan.deleted().isEmpty(), "Bot.java still reads it");
+        String kept = plan.rewrites().get(holder(config, "Sdk"));
+        assertTrue(kept != null && !kept.contains("@TestValue") && kept.contains("doSetup = true"), kept);
+        assertTrue(plan.left().getFirst().contains("the bot still names it"), plan.left().toString());
+    }
+
+    @Test
+    void anAuthorOnlyFieldBecomesItsMethod(@TempDir Path dir) {
+        ProjectConfig config = ProjectConfig.forDirectory(dir.resolve("bot"));
+        Path values = holder(config, "Values");
+        BotIndex index = index(config, Map.of(values, """
+                package %s.plugins.test;
+
+                import %s;
+
+                public final class Values {
+                    @TestValue(TestValue.Id.GREETING)
+                    public static String greeting = "hello";
+                }
+                """.formatted(config.mainPackage(), TestValue.class.getCanonicalName())));
+
+        ManagedRepairs.Planned plan = ManagedRepairs.leftoverFields(index, List.of(GREETING));
+
+        String after = plan.rewrites().get(values);
+        assertTrue(after != null && after.contains("public static String greeting()")
+                && after.contains("return \"hello\";"), plan.sentences().toString());
+    }
+
+    /** A method value's field the bind cannot carry (no initialiser) is its value's one copy: kept, never removed. */
+    @Test
+    void anAuthorOnlyFieldItCannotCarryIsKept(@TempDir Path dir) {
+        ProjectConfig config = ProjectConfig.forDirectory(dir.resolve("bot"));
+        BotIndex index = index(config, Map.of(holder(config, "Values"), """
+                package %s.plugins.test;
+
+                import %s;
+
+                public final class Values {
+                    @TestValue(TestValue.Id.GREETING)
+                    public static String greeting;
+                }
+                """.formatted(config.mainPackage(), TestValue.class.getCanonicalName())));
+
+        ManagedRepairs.Planned plan = ManagedRepairs.leftoverFields(index, List.of(GREETING));
+
+        assertTrue(plan.isEmpty(), plan.sentences().toString());
+    }
+
+    /** With no group method for its id, the field is the only copy of the value: the bind leaves it. */
+    @Test
+    void aFieldWithNoGroupMethodIsLeftAlone(@TempDir Path dir) {
+        ProjectConfig config = ProjectConfig.forDirectory(dir.resolve("bot"));
+        BotIndex index = index(config, Map.of(holder(config, "Sdk"),
+                OLD_SETUP_FIELD.formatted(config.mainPackage(), TestValue.class.getCanonicalName())));
+
+        assertTrue(ManagedRepairs.leftoverFields(index, List.of(SETUP)).isEmpty());
+    }
+
+    /** Only fields: a value whose id is gone is the upgrade's to repair, not the bind's. */
+    @Test
+    void aMethodWhoseIdIsGoneIsLeftForTheUpgrade(@TempDir Path dir) {
+        ProjectConfig config = ProjectConfig.forDirectory(dir.resolve("bot"));
+        BotIndex index = index(config, Map.of(holder(config, "Greetings"), GREETINGS.formatted(config.mainPackage())));
+
+        assertTrue(ManagedRepairs.leftoverFields(index, LIVE).isEmpty());
+    }
+
+    private static Path group(ProjectConfig config, String className) {
+        return config.mainPackageDir().resolve("params").resolve("test").resolve(className + ".java")
+                .toAbsolutePath().normalize();
     }
 
     private static Path holder(ProjectConfig config, String className) {

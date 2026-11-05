@@ -7,6 +7,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- A plugin's old parameter fields are repaired on every bind (2026-11-05, params-cleanup phase 1), not only on an
+  upgrade. A field whose id the group in `params/` also marks is removed, or kept unmarked while the bot still names it.
+  A field of what is now a method value (`launchTargets`) becomes that method. A dev-mode reload of the same
+  `-SNAPSHOT` runs no upgrade, so the SDK's `@Param` fields used to stay beside their group
+  (`ManagedRepairs.leftoverFields`).
+
 ### Changed
 
 - Types compared as types (2026-11-05, clean-java phase 10): a signature edit asks `TypeNodes.writes` whether the file
