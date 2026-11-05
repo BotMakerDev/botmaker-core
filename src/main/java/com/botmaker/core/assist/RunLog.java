@@ -152,6 +152,31 @@ public final class RunLog implements AutoCloseable {
         return omitted + String.join("\n", picked.subList(Math.max(0, picked.size() - wanted), picked.size()));
     }
 
+    /**
+     * The whole lines kept from {@code from}, the {@link Since#next} of an earlier read, at most {@code most}, with
+     * where the runs stand: what a terminal following a run reads ({@code botmaker bot run}, plan phase 12). A negative
+     * {@code from} starts from now. A line not yet ended by a newline waits for the read after its end.
+     */
+    public synchronized Since since(long from, int most) {
+        long start = from < 0 ? nextSeq : from;
+        long oldest = lines.isEmpty() ? nextSeq : lines.getFirst().seq();
+        List<String> picked = new ArrayList<>();
+        long next = Math.max(start, oldest);
+        for (Line line : lines) {
+            if (line.seq() < start) continue;
+            if (picked.size() >= most) break;
+            picked.add(line.text());
+            next = line.seq() + 1;
+        }
+        return new Since(next, picked, Math.max(0, oldest - start), mark(), busy());
+    }
+
+    /**
+     * What {@link #since} read: the lines, the seq to read from next time, how many lines from the cursor on were no
+     * longer kept, the runs started and ended so far, and whether something is on the game.
+     */
+    public record Since(long next, List<String> lines, long skipped, Mark mark, boolean busy) {}
+
     /** Where the runs stand, read before asking for one: what {@link #awaitEnd} counts from. */
     public synchronized Mark mark() {
         return new Mark(starts, ends);

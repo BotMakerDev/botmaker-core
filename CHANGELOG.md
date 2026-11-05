@@ -9,6 +9,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- `read_trace` follows a run by cursor (2026-11-05, plan phase 12): given `from` (the `next` of an earlier answer, or
+  -1 for now), it answers with the whole lines since then. Its first line says `next=… starts=… ends=… busy=…
+  skipped=…` (`RunLog.since`). `botmaker bot run` streams a run with it.
 - The MCP without Studio (2026-11-05, plan phase 11). With no client attached the core serves `list_projects`,
   `open_project` and the run tools (`run_bot`, `stop`, `run_state`, `read_trace`, `reports`) itself (`CoreHome`), beside
   its edit tools. A project the MCP opened stays open until a client takes it. A run its client kept going on leaving

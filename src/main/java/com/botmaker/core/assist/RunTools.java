@@ -55,8 +55,15 @@ final class RunTools {
                  String level,
                  @Describe(value = "a past run's folder name: its run.jsonl instead of the live trace",
                          optional = true)
-                 String run) {
+                 String run,
+                 @Describe(value = "to follow a run: only the whole lines from this on, the next an earlier answer "
+                         + "gave; -1 starts from now. The answer's first line is then next=… starts=… ends=… "
+                         + "busy=… skipped=…", optional = true)
+                 Long from) {
     }
+
+    /** The most lines one read after a cursor gives; the next read gives the rest. */
+    private static final int FOLLOW_LINES = 1000;
 
     record Reports(@Describe(value = "owner/repo; the project's remote when not given", optional = true)
                    String repo,
@@ -138,8 +145,16 @@ final class RunTools {
         if (call.run() != null && !call.run().isBlank()) {
             return PastRuns.trace(project(driver), call.run(), level, lines);
         }
+        if (call.from() != null) return followed(log.since(call.from(), FOLLOW_LINES));
         return log.read(new RunLog.Read(lines, call.this_run() == null || call.this_run(),
                 level != null && level.problem()));
+    }
+
+    /** {@code since} as a terminal reads it: one line of where things stand, then the lines. */
+    static String followed(RunLog.Since since) {
+        String head = "next=" + since.next() + " starts=" + since.mark().starts() + " ends=" + since.mark().ends()
+                + " busy=" + since.busy() + " skipped=" + since.skipped();
+        return since.lines().isEmpty() ? head : head + "\n" + String.join("\n", since.lines());
     }
 
     private static Path project(BotRuns driver) {
