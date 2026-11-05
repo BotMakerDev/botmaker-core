@@ -2,6 +2,7 @@ package com.botmaker.core.server;
 
 import com.botmaker.core.assist.McpConfig;
 import com.botmaker.core.assist.McpEndpoint;
+import com.botmaker.core.config.AppPaths;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.File;
@@ -17,6 +18,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.security.SecureRandom;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Optional;
@@ -57,6 +59,11 @@ public final class CoreLauncher {
     @FunctionalInterface
     public interface Starter {
         void start(Path dir) throws IOException;
+
+        /** Whether what {@link #start} started has ended already, so waiting for it to answer is pointless. */
+        default boolean ended() {
+            return false;
+        }
     }
 
     /** A core of another version is in use, so this client cannot have one of its own. */
@@ -91,23 +98,51 @@ public final class CoreLauncher {
             Optional<Address> running = running(dir, token, version);
             if (running.isPresent()) return running.get();
             starter.start(dir);
-            return awaitStart(dir, token, version);
+            return awaitStart(dir, token, version, starter);
         } finally {
             IN_PROCESS.unlock();
         }
     }
 
-    /** Starts {@link CoreMain} in a new process with this process's Java and classpath, its output to a log. */
+    /**
+     * Starts {@link CoreMain} in a new process with this process's Java, classpath and module path (where
+     * {@code javafx:run} puts JavaFX, which the plugin contract's signatures name), its output to a log.
+     */
     public static Starter process() {
-        return dir -> {
-            Path java = Path.of(System.getProperty("java.home"), "bin", "java");
-            ProcessBuilder builder = new ProcessBuilder(List.of(java.toString(), "-cp",
-                    System.getProperty("java.class.path"), CoreMain.class.getName(), CoreMain.DIR, dir.toString()));
-            builder.redirectErrorStream(true);
-            builder.redirectOutput(ProcessBuilder.Redirect.appendTo(dir.resolve("core.log").toFile()));
-            builder.redirectInput(ProcessBuilder.Redirect.from(nullFile()));
-            builder.start();
+        return new Starter() {
+            private volatile Process started;
+
+            @Override
+            public void start(Path dir) throws IOException {
+                ProcessBuilder builder = new ProcessBuilder(command(dir));
+                builder.redirectErrorStream(true);
+                builder.redirectOutput(ProcessBuilder.Redirect.appendTo(dir.resolve("core.log").toFile()));
+                builder.redirectInput(ProcessBuilder.Redirect.from(nullFile()));
+                started = builder.start();
+            }
+
+            @Override
+            public boolean ended() {
+                Process process = started;
+                return process != null && !process.isAlive();
+            }
         };
+    }
+
+    /** The core's command line: this Java, the native access the bot's capture needs, both paths, its cache dir. */
+    static List<String> command(Path dir) {
+        List<String> command = new ArrayList<>();
+        command.add(Path.of(System.getProperty("java.home"), "bin", "java").toString());
+        command.add("--enable-native-access=ALL-UNNAMED");
+        String modules = System.getProperty("jdk.module.path");
+        if (modules != null && !modules.isBlank()) {
+            command.addAll(List.of("--module-path", modules, "--add-modules", "ALL-MODULE-PATH"));
+        }
+        String sandbox = System.getProperty(AppPaths.HOME_PROPERTY);
+        if (sandbox != null && !sandbox.isBlank()) command.add("-D" + AppPaths.HOME_PROPERTY + "=" + sandbox);
+        command.addAll(List.of("-cp", System.getProperty("java.class.path"), CoreMain.class.getName(),
+                CoreMain.DIR, dir.toString()));
+        return command;
     }
 
     /**
@@ -153,9 +188,13 @@ public final class CoreLauncher {
         throw new IOException("BotMaker's core " + old.version() + " did not quit within " + WAIT.toSeconds() + " s.");
     }
 
-    private static Address awaitStart(Path dir, String token, String version) throws IOException {
+    private static Address awaitStart(Path dir, String token, String version, Starter starter) throws IOException {
         long until = System.nanoTime() + WAIT.toNanos();
         while (System.nanoTime() < until) {
+            if (starter.ended()) {
+                throw new IOException("BotMaker's core stopped as it started; its log is " + dir.resolve("core.log")
+                        + ".");
+            }
             Optional<CoreFile> named = CoreFile.read(dir);
             if (named.isPresent() && named.get().version().equals(version)) {
                 Address at = new Address(named.get().port(), token);

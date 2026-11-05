@@ -26,6 +26,7 @@ public class ProjectState implements SourceSet {
 
     // --- File State ---
     private final Map<Path, ProjectFile> openFiles = new LinkedHashMap<>();
+    private volatile boolean savedByCore;
     private ProjectFile activeFile;
 
     // --- Build State ---
@@ -78,7 +79,8 @@ public class ProjectState implements SourceSet {
                            CompilationUnit compilationUnit,
                            List<String> resolvedClasspath,
                            List<SourceFile> files,
-                           ProjectTemplate template) {
+                           ProjectTemplate template,
+                           boolean savedByCore) {
 
         /**
          * Puts every file the editor holds on disk, as it stood in this snapshot. The editor keeps each change
@@ -89,6 +91,7 @@ public class ProjectState implements SourceSet {
          * <p>A library file is never ours to write. Blocking; off the FX thread.
          */
         public void writeSources() throws java.io.IOException {
+            if (savedByCore) return; // Every change is on disk already, and may be newer than this snapshot.
             for (SourceFile file : files) {
                 Path path = file.path();
                 if (path == null) continue;
@@ -126,7 +129,8 @@ public class ProjectState implements SourceSet {
                 openFiles.values().stream()
                         .map(f -> new SourceFile(f.getPath(), f.getContent()))
                         .toList(),
-                template);
+                template,
+                savedByCore);
     }
 
     // =========================================================================
@@ -143,6 +147,19 @@ public class ProjectState implements SourceSet {
 
     public void setActiveFile(Path path) {
         this.activeFile = openFiles.get(path);
+    }
+
+    /** No file is open now. */
+    public void clearActiveFile() {
+        this.activeFile = null;
+    }
+
+    /**
+     * Says that another process saves this state's sources as they change (Studio over the core, plan phase 10a1), so
+     * disk is newer than any snapshot and a {@link Snapshot#writeSources} would only put older text back.
+     */
+    public void setSavedByCore(boolean saved) {
+        this.savedByCore = saved;
     }
 
     public ProjectFile getActiveFile() {

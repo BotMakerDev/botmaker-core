@@ -299,7 +299,14 @@ public class CodeExecutionService {
         Map<Path, String> written = paramSources();
         stateThread.later(() -> written.forEach((file, text) -> state.getFile(file).ifPresent(open -> {
             String merged = ParamValues.withRunsValues(state.level(), open.getContent(), atStart.getOrDefault(file, ""), text);
-            if (!merged.equals(open.getContent())) open.setContent(merged);
+            if (merged.equals(open.getContent())) return;
+            open.setContent(merged);
+            // On disk now: the core reads its sources there, and no later compile writes the editor's over them.
+            try {
+                Files.writeString(file, merged);
+            } catch (IOException e) {
+                warn("WARN " + file.getFileName() + " could not be saved: " + e.getMessage());
+            }
         })));
     }
 

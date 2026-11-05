@@ -4,6 +4,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
 import java.net.ServerSocket;
 import java.nio.file.Path;
 import java.util.List;
@@ -86,6 +87,24 @@ class CoreLauncherTest {
         });
         assertEquals(1, starts.get());
         assertEquals("1.0", CoreLauncher.info(at).orElseThrow().version());
+    }
+
+    @Test
+    void aCoreThatDiesAsItStartsFailsAtOnce() {
+        CoreLauncher.Starter dies = new CoreLauncher.Starter() {
+            @Override
+            public void start(Path d) {
+            }
+
+            @Override
+            public boolean ended() {
+                return true;
+            }
+        };
+        long before = System.nanoTime();
+        IOException failed = assertThrows(IOException.class, () -> CoreLauncher.connect(dir, "1.0", dies));
+        assertTrue(failed.getMessage().contains("core.log"), failed.getMessage());
+        assertTrue(System.nanoTime() - before < TimeUnit.SECONDS.toNanos(5), "no wait for a dead core");
     }
 
     private CoreMain.Running start(Path d, String version) {

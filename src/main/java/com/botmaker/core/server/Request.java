@@ -3,8 +3,11 @@ package com.botmaker.core.server;
 import com.botmaker.core.edit.Edit;
 import com.botmaker.core.edit.EditRequest;
 import com.botmaker.core.edit.HistoryStep;
+import com.botmaker.core.events.FileEdit;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
+
+import java.util.List;
 
 /**
  * What a client asks the core over its {@link Channel}, one message each, written by {@code CoreJson}. The core answers
@@ -19,6 +22,9 @@ import com.fasterxml.jackson.annotation.JsonTypeInfo;
         @JsonSubTypes.Type(value = Request.UserEdit.class, name = "userEdit"),
         @JsonSubTypes.Type(value = Request.Step.class, name = "step"),
         @JsonSubTypes.Type(value = Request.Commit.class, name = "commit"),
+        @JsonSubTypes.Type(value = Request.Rewritten.class, name = "rewritten"),
+        @JsonSubTypes.Type(value = Request.Recorded.class, name = "recorded"),
+        @JsonSubTypes.Type(value = Request.Reload.class, name = "reload"),
         @JsonSubTypes.Type(value = Request.Close.class, name = "close")})
 public sealed interface Request {
 
@@ -70,6 +76,32 @@ public sealed interface Request {
             if (file == null || file.isBlank()) throw new IllegalArgumentException("a commit names its file");
             if (original == null || source == null) throw new IllegalArgumentException("a commit carries both texts");
         }
+    }
+
+    /**
+     * A write of the open file a client made outside an edit (an open-time migration), landed as one step while the
+     * file still reads {@code original}. Java text from a client, as {@link Commit} is (2026-11-05, plan phase 10a1).
+     */
+    record Rewritten(long id, String file, String original, String source) implements Request {
+        public Rewritten {
+            if (file == null || file.isBlank()) throw new IllegalArgumentException("a rewrite names its file");
+            if (original == null || source == null) throw new IllegalArgumentException("a rewrite carries both texts");
+        }
+    }
+
+    /**
+     * What a client's plugin already wrote, buffer and disk, recorded as one step named {@code label}; the core takes
+     * the new texts as its own. Java text from a client until the plan's phase 10c runs a plugin's writes in the core.
+     */
+    record Recorded(long id, String label, List<FileEdit> edits) implements Request {
+        public Recorded {
+            if (edits == null) throw new IllegalArgumentException("a record carries its writes");
+            edits = List.copyOf(edits);
+        }
+    }
+
+    /** The project's libraries changed: the core resolves them again and binds their plugins again. */
+    record Reload(long id) implements Request {
     }
 
     /** Detaches the client from its project; the last client to leave closes it. */

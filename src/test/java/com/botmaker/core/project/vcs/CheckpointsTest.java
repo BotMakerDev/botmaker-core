@@ -22,9 +22,13 @@ class CheckpointsTest {
         new ProjectVcs(dir).init();
 
         ProjectState.Snapshot editor = new ProjectState.Snapshot("", null, List.of(),
-                List.of(new ProjectState.SourceFile(bot, "class Bot { int edited; }")), null);
+                List.of(new ProjectState.SourceFile(bot, "class Bot { int edited; }")), null, false);
         Checkpoints.take(dir, editor, VersionOrigin.AI, "AI: Claude Code");
 
+        assertEquals("class Bot { int edited; }", Files.readString(bot));
+        // A client whose core saves each change never puts a snapshot's older text back.
+        new ProjectState.Snapshot("", null, List.of(), List.of(new ProjectState.SourceFile(bot, "older")), null, true)
+                .writeSources();
         assertEquals("class Bot { int edited; }", Files.readString(bot));
         ProjectVcs.CommitInfo last = new ProjectVcs(dir).history().getFirst();
         assertEquals(VersionOrigin.AI, last.origin());

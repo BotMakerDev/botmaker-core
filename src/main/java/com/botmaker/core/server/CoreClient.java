@@ -6,10 +6,12 @@ import com.botmaker.core.edit.EditRequest;
 import com.botmaker.core.edit.EditResult;
 import com.botmaker.core.edit.HistoryStep;
 import com.botmaker.core.event.CoreEvent;
+import com.botmaker.core.events.FileEdit;
 
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -82,6 +84,21 @@ public final class CoreClient implements AutoCloseable {
     /** An assistant's finished session, by its texts; see {@link Request.Commit}. */
     public EditResult commit(String file, String original, String source, String label) throws IOException {
         return ask(new Request.Commit(ids.incrementAndGet(), file, original, source, label), ANSWER_TIMEOUT);
+    }
+
+    /** A write of the open file made outside an edit; see {@link Request.Rewritten}. */
+    public EditResult rewritten(String file, String original, String source) throws IOException {
+        return ask(new Request.Rewritten(ids.incrementAndGet(), file, original, source), ANSWER_TIMEOUT);
+    }
+
+    /** What a plugin already wrote, recorded as one step; see {@link Request.Recorded}. */
+    public EditResult recorded(String label, List<FileEdit> edits) throws IOException {
+        return ask(new Request.Recorded(ids.incrementAndGet(), label, edits), ANSWER_TIMEOUT);
+    }
+
+    /** The project's libraries changed; given as long as an open, since Maven may download. */
+    public EditResult reload() throws IOException {
+        return ask(new Request.Reload(ids.incrementAndGet()), OPEN_TIMEOUT);
     }
 
     /** Detaches from the project; the channel stays open for another. */

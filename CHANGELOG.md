@@ -9,6 +9,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Phase 10a1 (2026-11-05), the core's side of Studio's cut-over. `OpenProject.open` makes the open-time writes (the
+  remotes' names, the contract's dependency, a plugin's editor libraries). Two requests, `Rewritten` and `Recorded`,
+  carry a client's migration and a plugin's writes; a recorded text becomes the core's. `Reload` resolves changed
+  libraries again. The sources and settings are read from disk before each request, so a write made outside the core is
+  never overwritten, and a new text of the open file is told as `MethodsChanged`. A refused show leaves no file open. A
+  pom that does not resolve still opens. Sources are read without following links. `ProjectState.setSavedByCore` stops a
+  client's snapshot writing sources, and a run's kept values go to disk at once. `CoreLauncher.process` passes the module
+  path and the sandbox, and a core that dies as it starts fails the connect at once.
 - `server` (2026-11-05): the core as its own process, not yet used by Studio. `CoreMain` serves on a free port of
   `127.0.0.1` behind the MCP's token and hello, says where in `core.json` in the cache directory, and ends after ten
   idle minutes or on a quit while nothing uses it. `CoreServer` serves the MCP, `/core` (what it is), `/core/quit` and

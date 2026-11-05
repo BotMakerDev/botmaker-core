@@ -30,7 +30,7 @@ per user.
   (phase 10) needs its own.
 - The edit engine came too (phase 6b, 2026-11-05): `parser` (`CodeEditor`, its handlers, factories and guard),
   `state`, `project.managed`, `project.params`, `migrate`, `index`, part of `validation` and `nav`. `CodeEditor` reports
-  through `parser.EditorOutput`, which Studio's `BusEditorOutput` turns into its events.
+  through `parser.EditorOutput`, which `server.OpenProject` tells its clients (Studio's tests: `BusEditorOutput`).
 - `edit.CoreEditor` (phase 6c, 2026-11-05) is the one way a typed edit reaches the open bot: it finds its target by
   `BlockId` in the tree. A request runs as an `EditSession`, over `EditStage`s it edits with `CodeEditor`: whole or not
   at all, one write. `EditRequest.Guard` says how far the compiler judges it: `EVERY_EDIT` for an assistant,
@@ -72,7 +72,8 @@ per user.
   `server.Request`s, each answered by a `Reply.Answer` holding an `EditResult`, and `Reply.Told` with each `CoreEvent`
   (phase 10a); a new request is registered in its `@JsonSubTypes` and round-tripped in `RequestJsonTest`. `OpenProject`
   runs a project's asks on its one thread, in arrival order, and saves each accepted change as it lands; `Projects`
-  holds one project per core; `CoreClient` is a client's side. Studio uses it from phase 10a1.
+  holds one project per core; `CoreClient` is a client's side. Studio edits through it since phase 10a1 (`CoreEdits`);
+  its `Commit`, `Rewritten` and `Recorded` carry Java text from a client until phases 10c and 10d run those in the core.
 - JavaFX stays `provided` because the contract's signatures name it: `PluginHost` binds slot editors that return a
   `Node`, and `HostServices` implements `StudioServices`, whose `Theme` and `Dialogs` name `Scene` and `Window`.
   Import no javafx and construct no Node here.

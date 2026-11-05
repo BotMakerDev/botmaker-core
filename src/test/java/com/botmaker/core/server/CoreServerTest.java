@@ -6,6 +6,7 @@ import com.botmaker.core.edit.Edit;
 import com.botmaker.core.edit.EditRequest;
 import com.botmaker.core.edit.EditResult;
 import com.botmaker.core.event.CoreEvent;
+import com.botmaker.core.events.FileEdit;
 import com.botmaker.core.project.ProjectConfig;
 import com.botmaker.core.project.ProjectState;
 import com.botmaker.java.edit.BlockId;
@@ -17,6 +18,7 @@ import org.eclipse.jdt.core.dom.TypeDeclaration;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -116,7 +118,7 @@ class CoreServerTest {
     /** The project's libraries are this test's classpath; nothing is resolved or bound. */
     private static final OpenProject.Libraries TEST_LIBRARIES = new OpenProject.Libraries() {
         @Override
-        public List<String> classpath(ProjectConfig config) {
+        public List<String> classpath(ProjectConfig config, ProjectState state) {
             return TestSources.runtimeClassPath();
         }
 
@@ -131,6 +133,10 @@ class CoreServerTest {
 
         @Override
         public void unbind() {
+        }
+
+        @Override
+        public void reindex(ProjectAnalyzer analyzer, List<String> classpath) {
         }
     };
 
@@ -175,6 +181,111 @@ class CoreServerTest {
                 List<String> toB = changes(heardByB, accepted);
                 assertEquals(toA, toB, "both clients hear every change, in one order");
                 assertEquals(toA.getLast(), Files.readString(source), "the disk holds the last accepted edit");
+            }
+        }
+    }
+
+    /** A write another process made, or one a plugin recorded, is what the next edit lands on: never overwritten. */
+    @Test
+    void anEditLandsOnWhatWasWrittenOutsideTheCore(@TempDir Path cache, @TempDir Path projects) throws Exception {
+        Path project = projects.resolve("mybot");
+        Path source = project.resolve("src/main/java").resolve(FILE);
+        Files.createDirectories(source.getParent());
+        Files.writeString(source, BOT);
+        CompilationUnit tree = ProjectAnalyzer.createCompilationUnit(List.of(), BOT, source.getParent());
+        Block body = ((TypeDeclaration) tree.types().getFirst()).getMethods()[0].getBody();
+        String second = BlockId.of((ASTNode) body.statements().get(1));
+        String outside = BOT.replace("int a = 1;", "int a = 7;");
+        String recorded = outside.replace("int a = 7;", "int a = 8;");
+
+        try (CoreMain.Running core = CoreMain.serve(cache, "1.0", SLOW, TEST_LIBRARIES, () -> { })) {
+            CoreLauncher.Address at = new CoreLauncher.Address(core.server().port(), CoreLauncher.token(cache));
+            try (CoreClient client = CoreClient.connect(at, "1.0", event -> { }, () -> { })) {
+                client.open(project);
+                client.show(FILE);
+
+                Files.writeString(source, outside);
+                assertInstanceOf(EditResult.Accepted.class,
+                        client.recorded("A plugin's value", List.of(new FileEdit(source, outside, recorded))));
+                Files.writeString(source, recorded);
+                assertInstanceOf(EditResult.Accepted.class,
+                        client.apply(new EditRequest(FILE, List.of(new Edit.Delete(second)))));
+
+                String saved = Files.readString(source);
+                assertTrue(saved.contains("int a = 8;"), saved);
+                assertFalse(saved.contains("int b"), saved);
+            }
+        }
+    }
+
+    /** A client's mirror hears of a write it did not make; a file refused leaves nothing for an edit to land on. */
+    @Test
+    void aWriteOutsideTheCoreIsToldAndARefusedShowLeavesNoFileOpen(@TempDir Path cache, @TempDir Path projects)
+            throws Exception {
+        Path project = projects.resolve("mybot");
+        Path source = project.resolve("src/main/java").resolve(FILE);
+        Files.createDirectories(source.getParent());
+        Files.writeString(source, BOT);
+        CompilationUnit tree = ProjectAnalyzer.createCompilationUnit(List.of(), BOT, source.getParent());
+        Block body = ((TypeDeclaration) tree.types().getFirst()).getMethods()[0].getBody();
+        String second = BlockId.of((ASTNode) body.statements().get(1));
+        String outside = BOT.replace("int a = 1;", "int a = 7;");
+        List<CoreEvent> heard = new CopyOnWriteArrayList<>();
+
+        try (CoreMain.Running core = CoreMain.serve(cache, "1.0", SLOW, TEST_LIBRARIES, () -> { })) {
+            CoreLauncher.Address at = new CoreLauncher.Address(core.server().port(), CoreLauncher.token(cache));
+            try (CoreClient client = CoreClient.connect(at, "1.0", heard::add, () -> { })) {
+                client.open(project);
+                client.show(FILE);
+                Files.writeString(source, outside);
+                assertInstanceOf(EditResult.Accepted.class, client.userEdit(new Edit.Delete(second)));
+                assertTrue(heard.stream().anyMatch(event -> event instanceof CoreEvent.MethodsChanged changed
+                        && changed.source().equals(outside)), heard::toString);
+
+                String kept = Files.readString(source);
+                assertInstanceOf(EditResult.Refused.class, client.show("../outside.java"));
+                assertInstanceOf(EditResult.Refused.class, client.userEdit(new Edit.Delete(second)));
+                assertEquals(kept, Files.readString(source));
+            }
+        }
+    }
+
+    /** A pom that does not resolve still opens, so the user can repair it. */
+    @Test
+    void aProjectWhoseLibrariesFailStillOpens(@TempDir Path cache, @TempDir Path projects) throws Exception {
+        Path project = projects.resolve("mybot");
+        Path source = project.resolve("src/main/java").resolve(FILE);
+        Files.createDirectories(source.getParent());
+        Files.writeString(source, BOT);
+        OpenProject.Libraries failing = new OpenProject.Libraries() {
+            @Override
+            public List<String> classpath(ProjectConfig config, ProjectState state) throws IOException {
+                throw new IOException("Couldn't resolve the bot's libraries");
+            }
+
+            @Override
+            public ProjectAnalyzer analyzer(List<String> classpath, ProjectState state) {
+                return TEST_LIBRARIES.analyzer(classpath, state);
+            }
+
+            @Override
+            public void bind(ProjectConfig config, List<String> classpath) {
+            }
+
+            @Override
+            public void unbind() {
+            }
+
+            @Override
+            public void reindex(ProjectAnalyzer analyzer, List<String> classpath) {
+            }
+        };
+
+        try (CoreMain.Running core = CoreMain.serve(cache, "1.0", SLOW, failing, () -> { })) {
+            CoreLauncher.Address at = new CoreLauncher.Address(core.server().port(), CoreLauncher.token(cache));
+            try (CoreClient client = CoreClient.connect(at, "1.0", event -> { }, () -> { })) {
+                assertInstanceOf(EditResult.Accepted.class, client.open(project));
+                assertInstanceOf(EditResult.Refused.class, client.reload());
             }
         }
     }
