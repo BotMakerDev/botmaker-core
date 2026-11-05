@@ -16,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class HomeToolsTest {
 
     /** A shell that lists {@code bots} and records what it was asked to open. */
-    private record Stub(List<Listed> bots, List<Path> opened) implements HomeEndpoint.Shell {
+    private record Stub(List<Listed> bots, List<Path> opened) implements HomeTools.Shell {
         Stub() {
             this(List.of(), new ArrayList<>());
         }
@@ -60,7 +60,7 @@ class HomeToolsTest {
 
     @Test
     void listProjectsReadsTheShellsBots() {
-        Stub shell = new Stub(List.of(new HomeEndpoint.Shell.Listed(Path.of("/bots/Farm"), "Farm", Optional.of("ann"),
+        Stub shell = new Stub(List.of(new HomeTools.Shell.Listed(Path.of("/bots/Farm"), "Farm", Optional.of("ann"),
                 Optional.of("v1.2.0"), LocalDateTime.MIN, true, false, Optional.empty())), new ArrayList<>());
         assertEquals("Farm  (by ann, v1.2.0, its folder is gone)  /bots/Farm", HomeTools.listProjects(shell));
         assertEquals("My bots is empty: create_project makes one.", HomeTools.listProjects(new Stub()));

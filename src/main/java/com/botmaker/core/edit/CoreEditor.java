@@ -179,23 +179,6 @@ public final class CoreEditor {
         return land(session, label, liveSource);
     }
 
-    /**
-     * Lands a session that ran in another process, by its texts: {@code source} as one step named {@code label}, refused
-     * when {@code file} is not the open one, the session kept nothing, or the open file no longer reads {@code original}.
-     * The session judged its own edits; this is {@link #commit(EditSession, String, String)} across a channel, until the
-     * plan's phase 10d runs the assistant's session here.
-     */
-    public EditResult commit(String file, String original, String source, String label) {
-        if (resolve(file).isEmpty()) return refused(file, file + " is not the file open here.");
-        if (source.equals(original)) return refused(file, "No edit was kept, so there is nothing to apply.");
-        if (!original.equals(state.getCurrentCode())) {
-            return refused(file, "The file changed in Studio meanwhile. Read the tree again.");
-        }
-        EditorOutput.Write write = new EditorOutput.Write(source, original, false, label, List.of());
-        output.written(write);
-        return new EditResult.Accepted(announce(write).changed());
-    }
-
     /** The open file, by its path below the source root as a request names it. */
     public Optional<String> openFile() {
         return state.activeFileName();

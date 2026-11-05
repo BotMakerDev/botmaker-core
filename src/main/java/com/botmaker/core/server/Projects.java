@@ -27,6 +27,7 @@ public final class Projects implements AutoCloseable {
     private static final ObjectMapper LENIENT = new ObjectMapper();
 
     private final OpenProject.Libraries libraries;
+    private final ServedTools tools;
     private final Map<Channel, OpenProject> attached = new ConcurrentHashMap<>();
     private final ExecutorService opener = Executors.newSingleThreadExecutor(work -> {
         Thread thread = new Thread(work, "core-open");
@@ -37,7 +38,13 @@ public final class Projects implements AutoCloseable {
     private volatile OpenProject open;
 
     public Projects(OpenProject.Libraries libraries) {
+        this(libraries, new ServedTools());
+    }
+
+    /** Projects whose open one's own tools, and each client's, {@code tools} serves. */
+    Projects(OpenProject.Libraries libraries, ServedTools tools) {
         this.libraries = libraries;
+        this.tools = tools;
     }
 
     /** Serves {@code channel}'s requests from now on; what {@link CoreServer.Hooks#opened} is given. */
@@ -61,6 +68,21 @@ public final class Projects implements AutoCloseable {
         }
         switch (request) {
             case Request.Open ask -> inTurn(() -> answer(channel, ask.id(), open(channel, ask.project())));
+            // A client's tools and its answers to the core's calls need no project, and never wait behind one.
+            case Request.Tools registered -> {
+                EditResult result;
+                try {
+                    tools.register(channel, registered);
+                    result = new EditResult.Accepted(List.of());
+                } catch (IllegalArgumentException e) {
+                    result = new EditResult.Refused(e.getMessage());
+                }
+                answer(channel, registered.id(), result);
+            }
+            case Request.Called called -> {
+                tools.called(channel, called);
+                answer(channel, called.id(), new EditResult.Accepted(List.of()));
+            }
             case Request.Close ask -> inTurn(() -> {
                 OpenProject project = attached.get(channel);
                 if (project != null) project.drain();
@@ -133,6 +155,7 @@ public final class Projects implements AutoCloseable {
                 System.err.println("[core] A plugin's missing values were not written: " + e);
             }
             open.fitParams();
+            tools.own(open.bot());
         }
         // A channel that ended while the project opened heard nothing and never will: let it go now.
         if (!channel.isOpen()) leave(channel);
@@ -146,7 +169,10 @@ public final class Projects implements AutoCloseable {
 
     private void closeIfLeft(OpenProject project, Channel channel) {
         if (!project.detach(channel)) return;
-        if (project == open) open = null;
+        if (project == open) {
+            open = null;
+            tools.own(null);
+        }
         try {
             project.close();
         } catch (IOException e) {
@@ -164,6 +190,7 @@ public final class Projects implements AutoCloseable {
         opener.shutdownNow();
         OpenProject project = open;
         open = null;
+        tools.own(null);
         attached.clear();
         if (project == null) return;
         try {

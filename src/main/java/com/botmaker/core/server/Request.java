@@ -9,6 +9,7 @@ import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
 
 import javax.lang.model.SourceVersion;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -24,8 +25,8 @@ import java.util.Set;
         @JsonSubTypes.Type(value = Request.Apply.class, name = "apply"),
         @JsonSubTypes.Type(value = Request.UserEdit.class, name = "userEdit"),
         @JsonSubTypes.Type(value = Request.Step.class, name = "step"),
-        @JsonSubTypes.Type(value = Request.Commit.class, name = "commit"),
-        @JsonSubTypes.Type(value = Request.Rewritten.class, name = "rewritten"),
+        @JsonSubTypes.Type(value = Request.Tools.class, name = "tools"),
+        @JsonSubTypes.Type(value = Request.Called.class, name = "called"),
         @JsonSubTypes.Type(value = Request.PluginWriting.class, name = "pluginWriting"),
         @JsonSubTypes.Type(value = Request.Batch.class, name = "batch"),
         @JsonSubTypes.Type(value = Request.Reload.class, name = "reload"),
@@ -154,25 +155,22 @@ public sealed interface Request {
     }
 
     /**
-     * An assistant's finished session, whole: the file's text as the session started from it and as it ended. It lands
-     * only while the open file still reads {@code original}. Java text from a client, until the plan's phase 10d runs
-     * the assistant's session in the core and this goes (2026-11-05, the user's call).
+     * The MCP tools this client serves through the core from now on, replacing what it registered before (plan phase
+     * 10d): each an MCP {@code Tool} as its JSON. The core serves them beside its own and forwards each call as a
+     * {@link Reply.Call}. {@code admits}: the client has a screen whose questions the core's own tools wait for, so the
+     * core asks it before each of them ({@link Reply.Call.Kind#ADMIT}). Answered at once; a channel that ends takes
+     * its tools with it. Needs no open project.
      */
-    record Commit(long id, String file, String original, String source, String label) implements Request {
-        public Commit {
-            if (file == null || file.isBlank()) throw new IllegalArgumentException("a commit names its file");
-            if (original == null || source == null) throw new IllegalArgumentException("a commit carries both texts");
+    record Tools(long id, List<String> tools, boolean admits) implements Request {
+        public Tools {
+            tools = tools == null ? List.of() : List.copyOf(tools);
         }
     }
 
-    /**
-     * A write of the open file a client made outside an edit (an open-time migration), landed as one step while the
-     * file still reads {@code original}. Java text from a client, as {@link Commit} is (2026-11-05, plan phase 10a1).
-     */
-    record Rewritten(long id, String file, String original, String source) implements Request {
-        public Rewritten {
-            if (file == null || file.isBlank()) throw new IllegalArgumentException("a rewrite names its file");
-            if (original == null || source == null) throw new IllegalArgumentException("a rewrite carries both texts");
+    /** The client's answer to the core's {@link Reply.Call} {@code call}: an MCP {@code CallToolResult} as its JSON. */
+    record Called(long id, long call, String result) implements Request {
+        public Called {
+            if (result == null || result.isBlank()) throw new IllegalArgumentException("a call's answer carries its result");
         }
     }
 

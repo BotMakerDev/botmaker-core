@@ -30,8 +30,9 @@ class RequestJsonTest {
                 new Request.Apply(3, new EditRequest("com/mybot/MyBot.java", List.of(new Edit.Delete("0.1.2")))),
                 new Request.UserEdit(4, new Edit.Rename("0.1", "count")),
                 new Request.Step(5, HistoryStep.REDO),
-                new Request.Commit(6, "com/mybot/MyBot.java", "class A {}", "class B {}", "Rename A"),
-                new Request.Rewritten(8, "com/mybot/MyBot.java", "class A {}", "class A { }"),
+                new Request.Tools(6, List.of("{\"name\":\"ui\",\"inputSchema\":{\"type\":\"object\"}}"), true),
+                new Request.Tools(22, List.of(), false),
+                new Request.Called(8, 4, "{\"content\":[],\"isError\":false}"),
                 new Request.PluginWriting(9, new PluginWrite.MoveBefore("sdk:SCREENS", "Home", "Shop")),
                 new Request.Batch(19, "Record the walk", true),
                 new Request.Batch(20, "", false),
@@ -113,7 +114,9 @@ class RequestJsonTest {
         List<Reply> replies = List.of(
                 new Reply.Answer(1, new EditResult.Refused("No project is open.")),
                 new Reply.Answer(2, new EditResult.Accepted(List.of())),
-                new Reply.Told(new CoreEvent.Status("Saved.")));
+                new Reply.Told(new CoreEvent.Status("Saved.")),
+                new Reply.Call(3, Reply.Call.Kind.RUN, "ui", "{\"action\":\"look\"}"),
+                new Reply.Call(4, Reply.Call.Kind.ADMIT, "edit_code", "{}"));
         for (Reply reply : replies) {
             assertEquals(reply, CoreJson.read(CoreJson.write(reply), Reply.class));
         }

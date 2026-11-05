@@ -1,13 +1,5 @@
 package com.botmaker.core.assist;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import io.modelcontextprotocol.json.McpJsonMapper;
-import io.modelcontextprotocol.json.jackson2.JacksonMcpJsonMapper;
-import io.modelcontextprotocol.server.McpServer;
-import io.modelcontextprotocol.server.McpServerFeatures;
-import io.modelcontextprotocol.server.McpSyncServer;
-import io.modelcontextprotocol.server.transport.HttpServletStreamableServerTransportProvider;
-import io.modelcontextprotocol.spec.McpSchema;
 import jakarta.servlet.DispatcherType;
 import jakarta.servlet.Filter;
 import jakarta.servlet.http.HttpServlet;
@@ -16,200 +8,45 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.eclipse.jetty.ee11.servlet.FilterHolder;
 import org.eclipse.jetty.ee11.servlet.ServletContextHandler;
 import org.eclipse.jetty.ee11.servlet.ServletHolder;
-import org.eclipse.jetty.server.Server;
-import org.eclipse.jetty.server.ServerConnector;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.io.IOException;
-import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
-import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
 import java.util.EnumSet;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.HexFormat;
-import java.util.List;
-import java.util.Objects;
-import java.util.Set;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Serves {@link McpTools} over MCP's streamable HTTP transport, so any MCP client — Claude Code, Cursor, Codex,
- * Gemini CLI, opencode, a local runner — can edit the bot open in Studio through the host's own edit checks,
- * and run it.
- * The Assistant tab starts it when it opens an AI tool ({@link AiTool}), and points that tool here.
+ * Where an MCP client — Claude Code, Cursor, Codex, Gemini CLI, opencode, a local runner — reaches BotMaker, and how
+ * that address is guarded. The core's server ({@code server.CoreServer}) serves it since plan phase 10d, on
+ * {@link McpConfig}'s port: {@link McpTools#own} over the open bot, and the tools Studio registers over its channel.
  *
  * <p><b>Local and authenticated.</b> Bound to {@code 127.0.0.1} only, and every request must carry
  * {@code Authorization: Bearer <token>}: a loopback port is reachable by every process on the machine and, via
  * DNS rebinding, by a web page in its browser, and this one can rewrite the user's code. The token is
  * {@link McpConfig}'s, in a file only the user can read.
  */
-public final class McpEndpoint implements AutoCloseable {
+public final class McpEndpoint {
 
     public static final String PATH = "/mcp";
     /**
-     * Where a client proves this is Studio before it sends the token: a process that took the port while Studio was
+     * Where a client proves this is BotMaker before it sends the token: a process that took the port while the core was
      * down would be handed it otherwise. {@code ?nonce=<hex>} answers HMAC-SHA256 of the nonce under the token, in hex;
      * the only path the token is not asked for, and it says nothing of the token.
      */
     public static final String HELLO = "/mcp-hello";
 
-    private final Server jetty;
-    private final McpSyncServer mcp;
-    private final int port;
-    private final ToolGroup group;
-    private final AtomicBoolean closed = new AtomicBoolean();
-
-    private McpEndpoint(Server jetty, McpSyncServer mcp, int port, ToolGroup group) {
-        this.jetty = jetty;
-        this.mcp = mcp;
-        this.port = port;
-        this.group = group;
+    private McpEndpoint() {
     }
 
-    /**
-     * Starts serving {@code bot} and {@code driver} on {@code port} ({@code 0} for any free one). The plugins'
-     * tools are the ones {@code driver} offers now, and again each time a tool adds or removes a plugin; a plugin
-     * changed another way (Plugins &amp; Libraries) is served on the endpoint's next start.
-     *
-     * @param log   what runs and what it printed; the caller closes it
-     * @param group what the client with a screen attaches ({@link ToolGroup#NONE} for none)
-     * @throws Exception when the port is taken or Jetty will not start; nothing is left running
-     */
-    public static McpEndpoint start(int port, String token, LiveBot bot, StudioDriver driver, RunLog log,
-                                    ToolGroup group) throws Exception {
-        Objects.requireNonNull(token, "token");
-        McpJsonMapper json = new JacksonMcpJsonMapper(new ObjectMapper());
-        HttpServletStreamableServerTransportProvider transport = HttpServletStreamableServerTransportProvider.builder()
-                .jsonMapper(json).mcpEndpoint(PATH).build();
-        AtomicReference<Runnable> refresh = new AtomicReference<>(() -> { });
-        List<McpServerFeatures.SyncToolSpecification> own =
-                McpTools.studio(json, bot, driver, log, group, () -> refresh.get().run());
-        Set<String> ownNames = McpTools.names(own);
-        List<McpServerFeatures.SyncToolSpecification> theirs = McpTools.pluginTools(json, driver, group, ownNames);
-        List<McpServerFeatures.SyncToolSpecification> tools = new ArrayList<>(own);
-        tools.addAll(theirs);
-        McpSyncServer mcp = McpServer.sync(transport)
-                .serverInfo("botmaker-studio", "1")
-                .instructions(McpTools.instructions(driver.pluginGuides()))
-                .capabilities(McpSchema.ServerCapabilities.builder().tools(true).build())
-                .tools(tools)
-                .build();
-        refresh.set(new PluginToolRefresh(mcp, json, driver, group, ownNames,McpTools.names(theirs))::run);
-        return serve(port, token, transport, mcp, group);
-    }
-
-    /**
-     * Serves only {@code tools} on {@code port}, with no project behind them: the bot list's endpoint in a dev
-     * Studio ({@link HomeEndpoint}), so the {@code ui} tool answers before any project opens. {@code group} is what
-     * a close waits for.
-     */
-    static McpEndpoint startHome(int port, String token, List<McpServerFeatures.SyncToolSpecification> tools,
-                                 ToolGroup group) throws Exception {
-        Objects.requireNonNull(token, "token");
-        HttpServletStreamableServerTransportProvider transport = HttpServletStreamableServerTransportProvider.builder()
-                .jsonMapper(new JacksonMcpJsonMapper(new ObjectMapper())).mcpEndpoint(PATH).build();
-        McpSyncServer mcp = McpServer.sync(transport)
-                .serverInfo("botmaker-studio", "1")
-                .instructions(HomeEndpoint.INSTRUCTIONS)
-                .capabilities(McpSchema.ServerCapabilities.builder().tools(true).build())
-                .tools(tools)
-                .build();
-        return serve(port, token, transport, mcp, group);
-    }
-
-    /** {@code mcp} on {@code port} behind the token; nothing is left running when it cannot start. */
-    private static McpEndpoint serve(int port, String token, HttpServletStreamableServerTransportProvider transport,
-                                     McpSyncServer mcp, ToolGroup group) throws Exception {
-        Server jetty = new Server(new InetSocketAddress("127.0.0.1", port));
-        ServletContextHandler context = new ServletContextHandler();
-        context.setContextPath("/");
-        context.addServlet(new ServletHolder(transport), PATH);
-        guard(context, token);
-        jetty.setHandler(context);
-        try {
-            jetty.start();
-        } catch (Exception e) {
-            mcp.close();
-            jetty.stop();
-            throw e;
-        }
-        int bound = ((ServerConnector) jetty.getConnectors()[0]).getLocalPort();
-        return new McpEndpoint(jetty, mcp, bound, group);
-    }
-
-    public int port() {
-        return port;
-    }
-
-    /** What a client is pointed at. */
-    public String url() {
+    /** What a client is pointed at, on {@code port}. */
+    public static String url(int port) {
         return "http://127.0.0.1:" + port + PATH;
     }
 
-    /**
-     * Closes once the group's calls in flight have answered ({@link ToolGroup#whenQuiet}): a {@code ui} press that
-     * opens or closes a project hands the port over mid-call, and its client would read the cut call as Studio being
-     * down.
-     */
-    @Override
-    public void close() {
-        if (!closed.compareAndSet(false, true)) return;
-        group.whenQuiet(this::shut);
-    }
-
-    private void shut() {
-        try {
-            mcp.close();
-        } finally {
-            try {
-                jetty.stop();
-            } catch (Exception ignored) {
-                // Stopping is best-effort: the port is released with the process in any case.
-            }
-        }
-    }
-
-    /**
-     * Serves the plugins' tools anew after a tool added or removed a plugin: the ones served go, the bound
-     * plugins' now come, and clients are told the list changed. One at a time: two plugin changes racing would
-     * each remove what the other added.
-     */
-    private static final class PluginToolRefresh {
-        private final McpSyncServer mcp;
-        private final McpJsonMapper json;
-        private final StudioDriver driver;
-        private final ToolGroup group;
-        private final Set<String> own;
-        private Set<String> served;
-
-        PluginToolRefresh(McpSyncServer mcp, McpJsonMapper json, StudioDriver driver, ToolGroup group,
-                          Set<String> own, Set<String> served) {
-            this.mcp = mcp;
-            this.json = json;
-            this.driver = driver;
-            this.group = group;
-            this.own = own;
-            this.served = served;
-        }
-
-        synchronized void run() {
-            try {
-                List<McpServerFeatures.SyncToolSpecification> now = McpTools.pluginTools(json, driver, group, own);
-                for (String name : served) mcp.removeTool(name);
-                now.forEach(mcp::addTool);
-                served = McpTools.names(now);
-                mcp.notifyToolsListChanged();
-            } catch (RuntimeException e) {
-                // The change itself is done; a client that is not told lists the tools again on its next start.
-                System.err.println("Warning: the plugins' assistant tools could not be served anew: " + e.getMessage());
-            }
-        }
-    }
-
-    /** Answers {@link #HELLO}: the nonce signed with the token, so a client knows it talks to this Studio. */
+    /** Answers {@link #HELLO}: the nonce signed with the token, so a client knows it talks to this BotMaker. */
     private static final class Hello extends HttpServlet {
         private final String token;
 
@@ -229,10 +66,7 @@ public final class McpEndpoint implements AutoCloseable {
         }
     }
 
-    /**
-     * Puts {@code context} behind {@code token}: {@link #HELLO} answers the proof, and every other path refuses a
-     * request without the bearer token. The core's server ({@code server.CoreServer}) guards itself the same way.
-     */
+    /** Puts {@code context} behind {@code token}: {@link #HELLO} answers the proof, and every other path refuses a request without the bearer token. */
     public static void guard(ServletContextHandler context, String token) {
         context.addServlet(new ServletHolder(new Hello(token)), HELLO);
         context.addFilter(new FilterHolder(bearer(token)), "/*", EnumSet.of(DispatcherType.REQUEST));

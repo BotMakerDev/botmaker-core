@@ -9,6 +9,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Phase 10d (2026-11-05), one way in.
+  - The core serves the MCP for every client. Its own edit tools run on the open project's thread (`OpenProject.bot()`).
+    A client registers its tools over its channel (`Request.Tools`), and the core forwards each call (`Reply.Call`).
+    The client answers with `Request.Called`. Before each of its own tools runs, the core asks the client with a screen
+    (`ADMIT`). `ServedTools` keeps the list, and a client's tools go when its channel ends. The core's own
+    tools are served only while a client with a screen admits them, so a Studio that stops serving stops them too; a
+    change removes and adds only the tools that changed.
+  - `CoreLink` keeps a client tied to the core. When the core stops, the link starts a new one and `Rejoin` reopens the
+    project and the open file. A client hears `stopped` and `restarted`, or `lost` after three failed tries.
+  - The open-time passes (`ProjectOpenMigrations`) run in the core before it reads the sources.
+    `CoreEvent.Opened` tells a client what they did.
+  - The core binds the MCP port saved in `mcp.json`, and a free port when that one is taken.
+  - `TypeCatalog` moved here from Studio.
 - Phase 10c (2026-11-05), plugins through the core.
   - A client's plugin writes the bot through the core. Each write is a `PluginWrite` in `Request.PluginWriting`.
     `Request.Batch` opens and ends a batch, and what a batch writes is one step of the core's history.
@@ -22,6 +35,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Removed
 
+- Phase 10d (2026-11-05): `Request.Commit` and `Request.Rewritten`, `CoreEditor.commit(file, original, source, label)`,
+  `HomeEndpoint`, and `McpEndpoint.start`. Java text no longer crosses from a client to the core, and the core's server
+  is the only MCP.
 - `Request.Recorded` and `CoreClient.recorded`, since a plugin's writes are the core's. `CoreEvent.UiRequest`, never
   sent: the core forwards no window, and its `hasUi()` is false.
 

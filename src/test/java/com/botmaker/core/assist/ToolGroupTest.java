@@ -26,7 +26,6 @@ class ToolGroupTest {
 
     private static final String LOOK = "look_here";
     private final McpJsonMapper json = new JacksonMcpJsonMapper(new ObjectMapper());
-    private final LiveBot bot = Stubs.of(LiveBot.class);
     private final StudioDriver driver = Stubs.of(StudioDriver.class);
     private final RunLog log = new RunLog(Clock.systemUTC(), () -> false);
 
@@ -61,7 +60,7 @@ class ToolGroupTest {
     }
 
     private List<SyncToolSpecification> tools(ToolGroup group) {
-        return McpTools.studio(json, bot, driver, log, group, () -> { });
+        return McpTools.studio(json, driver, log, group, () -> { });
     }
 
     @Test
@@ -78,13 +77,20 @@ class ToolGroupTest {
 
     @Test
     void aQuestionOnScreenRefusesTheOwnToolsButNotTheOneThatAnswersIt() {
-        Map<String, SyncToolSpecification> byName = tools(screen("A question is on screen.", List.of())).stream()
+        ToolGroup screen = screen("A question is on screen.", List.of());
+        Map<String, SyncToolSpecification> byName = tools(screen).stream()
                 .collect(Collectors.toMap(t -> t.tool().name(), t -> t));
 
-        String refused = text(call(byName.get("list_files")));
+        String refused = text(call(byName.get("set_target")));
+        // The core's own tools are admitted by the client with the screen before they run (plan phase 10d).
+        CallToolResult admitted = McpTools.admit(driver, screen, new CallToolRequest("list_files", Map.of()));
         String answered = text(call(byName.get(LOOK)));
 
         assertTrue(refused.startsWith("REFUSED: A question is on screen."), refused);
+        assertTrue(admitted.isError() && text(admitted).startsWith("REFUSED: A question is on screen."),
+                text(admitted));
+        assertFalse(McpTools.admit(driver, screen("", List.of()), new CallToolRequest("list_files", Map.of()))
+                .isError());
         assertEquals("seen", answered);
     }
 

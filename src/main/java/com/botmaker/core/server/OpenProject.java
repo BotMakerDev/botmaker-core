@@ -1,7 +1,13 @@
 package com.botmaker.core.server;
 
 import com.botmaker.core.CoreJson;
+import com.botmaker.core.assist.AssistTurn;
+import com.botmaker.core.assist.LiveBot;
 import com.botmaker.core.edit.CoreEditor;
+import com.botmaker.core.edit.EditWorkspace;
+import com.botmaker.core.edit.TypeCatalog;
+import com.botmaker.java.index.BotIndex;
+import com.botmaker.java.index.nav.Refactor;
 import com.botmaker.core.edit.EditResult;
 import com.botmaker.core.edit.HistoryStep;
 import com.botmaker.core.event.CoreEvent;
@@ -19,6 +25,7 @@ import com.botmaker.core.plugin.WriteSteps;
 import com.botmaker.core.project.ProjectConfig;
 import com.botmaker.core.project.ProjectFile;
 import com.botmaker.core.project.ProjectMode;
+import com.botmaker.core.project.ProjectOpenMigrations;
 import com.botmaker.core.project.ProjectRepair;
 import com.botmaker.core.project.ProjectState;
 import com.botmaker.core.project.ProjectTemplate;
@@ -259,6 +266,9 @@ public final class OpenProject implements AutoCloseable {
             state.setSettings(settings);
             state.setTemplate(settings.template() != null ? settings.template()
                     : ProjectRepair.looksLikeGameBot(config) ? ProjectTemplate.GAME_BOT : ProjectTemplate.EMPTY);
+            // The open-time passes, here since plan phase 10d: before the sources are read, so no file is held yet
+            // that a pass could rewrite behind it.
+            state.setOpenReport(ProjectOpenMigrations.run(config, state, (now, before) -> { }));
             readSources(config.sourceRoot()).forEach(state::addFile);
             MavenService.Resolution resolution;
             try {
@@ -306,6 +316,7 @@ public final class OpenProject implements AutoCloseable {
         MavenService.Resolution resolved = resolution;
         channel.send(CoreJson.write(new Reply.Told(new CoreEvent.LibrariesResolved(resolved.jars(),
                 resolved.problems()))));
+        channel.send(CoreJson.write(new Reply.Told(new CoreEvent.Opened(state.openReport()))));
     }
 
     /**
@@ -436,9 +447,6 @@ public final class OpenProject implements AutoCloseable {
             case Request.Step step -> editor.step(step.step()) ? new EditResult.Accepted(List.of())
                     : new EditResult.Refused(step.step() == HistoryStep.UNDO ? "There is nothing to undo."
                     : "There is nothing to redo.");
-            case Request.Commit commit -> editor.commit(commit.file(), commit.original(), commit.source(),
-                    commit.label());
-            case Request.Rewritten rewritten -> rewritten(rewritten);
             case Request.PluginWriting writing -> perform(writing.write())
                     .<EditResult>map(EditResult.Refused::new).orElseGet(() -> new EditResult.Accepted(List.of()));
             case Request.Batch batched -> {
@@ -455,6 +463,7 @@ public final class OpenProject implements AutoCloseable {
             case Request.Control steer -> steer(steer);
             case Request.Open open -> new EditResult.Refused("The project is open already.");
             case Request.Close close -> new EditResult.Refused("A close is the core's to handle.");
+            case Request.Tools _, Request.Called _ -> new EditResult.Refused("A client's tools are the core's to handle.");
         };
     }
 
@@ -721,18 +730,96 @@ public final class OpenProject implements AutoCloseable {
         }
     }
 
-    /** A client's write of the open file outside an edit (an open-time migration), landed as one step. */
-    private EditResult rewritten(Request.Rewritten rewritten) {
-        if (editor.openFile().filter(rewritten.file()::equals).isEmpty()) {
-            return new EditResult.Refused(rewritten.file() + " is not the file open here.");
+    /** The bot's files as the core's own MCP tools read and edit them (plan phase 10d). */
+    LiveBot bot() {
+        return new CoreBot();
+    }
+
+    /**
+     * An assistant's turn, run in the core: begun on a file's text as the project holds it, and landed on the project's
+     * thread as one step. A turn on the open file lands through the editor, so every client redraws it; on another file
+     * it is written and recorded as one step, and every client told the file changed.
+     */
+    private final class CoreBot implements LiveBot {
+        @Override
+        public Optional<AssistTurn> begin(String file) {
+            return Optional.of(onOwner(() -> {
+                readDiskAgain();
+                Path path;
+                if (file == null || file.isBlank()) {
+                    ProjectFile active = state.getActiveFile();
+                    if (active == null) {
+                        throw new IllegalArgumentException("No file is open. Give `file`; list_files names them.");
+                    }
+                    path = active.getPath();
+                } else {
+                    path = LiveBot.resolve(paths(), config.sourceRoot(), file);
+                }
+                String source = state.getFile(path).map(ProjectFile::getContent).orElseThrow(() ->
+                        new IllegalArgumentException("The core cannot read " + file + "."));
+                EditWorkspace workspace = EditWorkspace.of(config, state,
+                        analyzer == null ? null : analyzer.libraryIndex(), path);
+                return new AssistTurn(workspace, source, TypeCatalog::declarable);
+            }));
         }
-        // Disk may hold the rewrite already, read before this ask.
-        String current = state.getCurrentCode();
-        if (!rewritten.original().equals(current) && !rewritten.source().equals(current)) {
-            return new EditResult.Refused("The file changed meanwhile.");
+
+        @Override
+        public String commit(AssistTurn turn, String label) {
+            return onOwner(() -> {
+                readDiskAgain();
+                String name = turn.file().getFileName().toString();
+                String original = turn.session().original();
+                if (turn.acceptedEdits() == 0 || turn.source().equals(original)) {
+                    return "Not applied: No edit was kept, so there is nothing to apply.";
+                }
+                String step = AssistTurn.labelOf(label);
+                ProjectFile active = state.getActiveFile();
+                if (active != null && active.getPath().equals(turn.file())) {
+                    if (editor.commit(turn.session(), state.getCurrentCode(), step) instanceof EditResult.Refused no) {
+                        return "Not applied: " + no.reason();
+                    }
+                } else {
+                    ProjectFile known = state.getFile(turn.file()).orElse(null);
+                    if (known == null) return "Not applied: " + name + " is gone.";
+                    if (!original.equals(known.getContent())) {
+                        return "Not applied: The file changed meanwhile. Read the tree again.";
+                    }
+                    try {
+                        Files.writeString(turn.file(), turn.source());
+                    } catch (IOException e) {
+                        return "Not applied: " + name + " could not be saved (" + e.getMessage() + ").";
+                    }
+                    known.setContent(turn.source());
+                    known.setAst(null);
+                    editor.recordRewrite(step, List.of(new FileEdit(turn.file(), original, turn.source())));
+                    tell(new CoreEvent.SourcesChanged(List.of(named(turn.file()))));
+                }
+                tell(new CoreEvent.Status("An MCP client changed " + name + "."));
+                return "Applied to " + name + " and saved; Undo takes it back.";
+            });
         }
-        editor.rewritten(new EditorOutput.Write(rewritten.source(), rewritten.original(), false, null, List.of()));
-        return new EditResult.Accepted(List.of());
+
+        @Override
+        public List<String> files() {
+            return onOwner(() -> paths().stream().filter(LiveBot::isJava)
+                    .map(p -> LiveBot.relative(config.sourceRoot(), p)).toList());
+        }
+
+        @Override
+        public Optional<String> breaksElsewhere(AssistTurn turn) {
+            // The sources are read on the project's thread; the whole bot is compiled here, on the caller's.
+            BotIndex index = onOwner(() -> BotSources.prepareIndex(config, state)).get();
+            Path file = turn.file().toAbsolutePath().normalize();
+            return switch (Refactor.checked(index, new Refactor.Planned("", Map.of(file, turn.source())),
+                    "That change")) {
+                case Refactor.Refused refused -> Optional.of(refused.reason());
+                case Refactor.Planned ignored -> Optional.empty();
+            };
+        }
+
+        private List<Path> paths() {
+            return state.getAllFiles().stream().map(ProjectFile::getPath).toList();
+        }
     }
 
     /**

@@ -61,10 +61,13 @@ per user.
 - `sharing` came whole in phase 9 (2026-11-05), with `services.LocalBuilds`, `project.ClassKind` and `run.RunEntries`.
 - `parser.StatementKind` and `parser.StatementBodies` (phase 9a, 2026-11-05) say what a statement is and which bodies it
   holds; Studio's `BlockConverter` draws by them and `read_tree` reads by them, so a new statement kind goes there first.
-- `assist` (phase 9b, 2026-11-05) is the MCP: `McpEndpoint` serves `McpTools` for an open bot and `HomeEndpoint` with no
-  project open. A client with a screen attaches a `ToolGroup` (its tools, what waits on screen, whether Claude drives it,
-  what the home serves of it); Studio's `StudioToolGroup` holds `ui` and `quit_studio`. `assist.Stubs` (tests jar) gives
-  Studio's tests a tool's interfaces answering nothing.
+- `assist` (phase 9b, 2026-11-05) is the MCP's tools: `McpTools.own` the core's edit tools over a `LiveBot`,
+  `McpTools.all`/`studio` a client's (its screen, runs, versions, plugins), `HomeTools.served` what a client serves with
+  no project open, `McpTools.admit` the check a client with a screen makes before each of the core's own tools runs.
+  `McpEndpoint` is only the guard (HELLO proof, bearer token) and the URL: since phase 10d the core's server is the one
+  MCP. A client with a screen attaches a `ToolGroup` (its tools, what waits on screen, whether Claude drives it);
+  Studio's `StudioToolGroup` holds `ui` and `quit_studio`. `assist.Stubs` (tests jar) gives Studio's tests a tool's
+  interfaces answering nothing.
 - `server` (phase 10, 2026-11-05) is the core's own process: `CoreMain`, `CoreServer` (the MCP, `/core`, `/core/quit`,
   the `/studio` channels), `CoreLauncher` (find or start one core per user, `core.json` and `core.lock` in the cache
   directory), `ProjectLock` (`.botmaker/core.lock` per open project). A channel is a stream of JSON lines from the core
@@ -72,8 +75,14 @@ per user.
   `server.Request`s, each answered by a `Reply.Answer` holding an `EditResult`, and `Reply.Told` with each `CoreEvent`
   (phase 10a); a new request is registered in its `@JsonSubTypes` and round-tripped in `RequestJsonTest`. `OpenProject`
   runs a project's asks on its one thread, in arrival order, and saves each accepted change as it lands; `Projects`
-  holds one project per core; `CoreClient` is a client's side. Studio edits through it since phase 10a1 (`CoreEdits`);
-  its `Commit` and `Rewritten` carry Java text from a client until phase 10d runs those in the core.
+  holds one project per core; `CoreClient` is a client's side. Studio edits through it since phase 10a1 (`CoreEdits`).
+- Since phase 10d (2026-11-05) the core serves the MCP for every client: its own edit tools over the open project
+  (`OpenProject.bot()`, an `AssistTurn` run on the project's thread and committed there), and each client's tools,
+  registered over its channel (`Request.Tools`) and called back (`Reply.Call`, `RUN` or `ADMIT`; the client answers
+  `Request.Called`). `ServedTools` keeps the list: own first, then each client's, the first of a name wins; a client's
+  tools go with its channel. `CoreLink` is a client's lasting tie: a core that stops is started again and `Rejoin`
+  reopens what the client was on. The open-time passes (`ProjectOpenMigrations`) run in the core before it reads the
+  sources, and a client hears what they did as `CoreEvent.Opened`. The core binds `McpConfig`'s port, else a free one.
 - A project's runs happen in `OpenProject` since phase 10b (2026-11-05): `Compile`, `Run`, `RunEntry`, `Try` and `Debug`
   are asks on its one thread, which only start the work. A `Try` carries a `run.trial.TrialAsk`, and the core plans it
   and writes its caller (phase 10c). A `Request.Control` (`Stop`,

@@ -34,6 +34,7 @@ import java.util.OptionalInt;
         @JsonSubTypes.Type(value = CoreEvent.SourcesChanged.class, name = "sourcesChanged"),
         @JsonSubTypes.Type(value = CoreEvent.InputAsked.class, name = "inputAsked"),
         @JsonSubTypes.Type(value = CoreEvent.Status.class, name = "status"),
+        @JsonSubTypes.Type(value = CoreEvent.Opened.class, name = "opened"),
         @JsonSubTypes.Type(value = CoreEvent.LibrariesResolved.class, name = "librariesResolved"),
         @JsonSubTypes.Type(value = CoreEvent.Refusal.class, name = "refusal")})
 public sealed interface CoreEvent {
@@ -227,6 +228,17 @@ public sealed interface CoreEvent {
             kind = kind == null ? "" : kind;
             prompt = prompt == null ? "" : prompt;
             choices = choices == null ? List.of() : List.copyOf(choices);
+        }
+    }
+
+    /**
+     * What the open did to the project (plan phase 10d): one line per migration, restored file or absent plugin owner,
+     * in the order it happened ({@code ProjectOpenMigrations}). Told to a client as it attaches, after
+     * {@link LibrariesResolved}.
+     */
+    record Opened(List<String> report) implements CoreEvent {
+        public Opened {
+            report = report == null ? List.of() : List.copyOf(report);
         }
     }
 

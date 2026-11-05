@@ -27,6 +27,7 @@ public class ProjectState implements SourceSet {
     // --- File State ---
     private final Map<Path, ProjectFile> openFiles = new LinkedHashMap<>();
     private volatile boolean savedByCore;
+    private volatile List<String> openReport = List.of();
     private ProjectFile activeFile;
 
     // --- Build State ---
@@ -160,6 +161,16 @@ public class ProjectState implements SourceSet {
      */
     public void setSavedByCore(boolean saved) {
         this.savedByCore = saved;
+    }
+
+    /** What the open did to the project, one line each ({@code ProjectOpenMigrations}); empty when nothing. */
+    public List<String> openReport() {
+        return openReport;
+    }
+
+    /** What the open did to the project, as the core that opened it said (plan phase 10d). */
+    public void setOpenReport(List<String> report) {
+        this.openReport = List.copyOf(report);
     }
 
     public ProjectFile getActiveFile() {

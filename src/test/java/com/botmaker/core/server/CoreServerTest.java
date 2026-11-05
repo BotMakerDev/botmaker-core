@@ -120,7 +120,7 @@ class CoreServerTest {
     private static final String FILE = "com/mybot/Mybot.java";
 
     /** The project's libraries are this test's classpath; nothing is resolved or bound. */
-    private static final OpenProject.Libraries TEST_LIBRARIES = new OpenProject.Libraries() {
+    static final OpenProject.Libraries TEST_LIBRARIES =new OpenProject.Libraries() {
         @Override
         public MavenService.Resolution resolve(ProjectConfig config, ProjectState state) {
             return new MavenService.Resolution(TestSources.runtimeClassPath(), List.of());

@@ -1,6 +1,7 @@
 package com.botmaker.core.server;
 
 import com.botmaker.core.assist.McpEndpoint;
+import com.botmaker.core.assist.McpTools;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.modelcontextprotocol.json.jackson2.JacksonMcpJsonMapper;
 import io.modelcontextprotocol.server.McpServer;
@@ -52,8 +53,6 @@ public final class CoreServer implements AutoCloseable {
     /** The version a client is; a channel opens only for a client of the core's own version. */
     public static final String VERSION_HEADER = "X-BotMaker-Version";
 
-    static final String INSTRUCTIONS = "BotMaker's core is running with no bot open.";
-
     /** How long the core waits with nothing to do before it ends, and how often it looks. */
     public record Idle(Duration after, Duration every) {
         /** Ten minutes (the spec's, Claude's call), looked at every 30 seconds, which also beats each channel. */
@@ -96,7 +95,7 @@ public final class CoreServer implements AutoCloseable {
                 .jsonMapper(new JacksonMcpJsonMapper(new ObjectMapper())).mcpEndpoint(McpEndpoint.PATH).build();
         this.mcp = McpServer.sync(transport)
                 .serverInfo("botmaker-core", version)
-                .instructions(INSTRUCTIONS)
+                .instructions(McpTools.instructions(List.of()))
                 .capabilities(McpSchema.ServerCapabilities.builder().tools(true).build())
                 .tools(List.of())
                 .build();
@@ -147,6 +146,11 @@ public final class CoreServer implements AutoCloseable {
 
     public int port() {
         return port;
+    }
+
+    /** The MCP server, whose tools {@link ServedTools} keeps; a test serves its own on it. */
+    public McpSyncServer mcp() {
+        return mcp;
     }
 
     /** The clients whose channel is open now. */

@@ -12,6 +12,7 @@ import com.botmaker.core.run.trial.TrialAsk;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -50,8 +51,18 @@ public final class CoreClient implements AutoCloseable {
      */
     public static CoreClient connect(CoreLauncher.Address at, String version, Consumer<CoreEvent> told,
                                      Runnable ended) throws IOException {
+        return connect(at, version, told, call -> { }, ended);
+    }
+
+    /**
+     * As {@link #connect(CoreLauncher.Address, String, Consumer, Runnable)}, with {@code called} hearing each call the
+     * core makes of this client's tools ({@link Reply.Call}), on the reader thread: it answers with {@link #called}
+     * from another, since the answer is read on this one.
+     */
+    public static CoreClient connect(CoreLauncher.Address at, String version, Consumer<CoreEvent> told,
+                                     Consumer<Reply.Call> called, Runnable ended) throws IOException {
         CoreClient client = new CoreClient();
-        client.channel = ChannelClient.open(at, version, text -> client.received(text, told), () -> {
+        client.channel = ChannelClient.open(at, version, text -> client.received(text, told, called), () -> {
             client.ended = true;
             client.failWaiting();
             ended.run();
@@ -82,14 +93,14 @@ public final class CoreClient implements AutoCloseable {
         return ask(new Request.Step(ids.incrementAndGet(), step), ANSWER_TIMEOUT);
     }
 
-    /** An assistant's finished session, by its texts; see {@link Request.Commit}. */
-    public EditResult commit(String file, String original, String source, String label) throws IOException {
-        return ask(new Request.Commit(ids.incrementAndGet(), file, original, source, label), ANSWER_TIMEOUT);
+    /** The MCP tools this client serves through the core from now on, each as its JSON; see {@link Request.Tools}. */
+    public EditResult tools(List<String> tools, boolean admits) throws IOException {
+        return ask(new Request.Tools(ids.incrementAndGet(), tools, admits), ANSWER_TIMEOUT);
     }
 
-    /** A write of the open file made outside an edit; see {@link Request.Rewritten}. */
-    public EditResult rewritten(String file, String original, String source) throws IOException {
-        return ask(new Request.Rewritten(ids.incrementAndGet(), file, original, source), ANSWER_TIMEOUT);
+    /** This client's answer, an MCP result as its JSON, to the core's call {@code call}; see {@link Reply.Call}. */
+    public EditResult called(long call, String result) throws IOException {
+        return ask(new Request.Called(ids.incrementAndGet(), call, result), ANSWER_TIMEOUT);
     }
 
     /** A write of the bot's values a client's plugin asked for; see {@link Request.PluginWriting}. */
@@ -178,13 +189,14 @@ public final class CoreClient implements AutoCloseable {
         }
     }
 
-    private void received(String text, Consumer<CoreEvent> told) {
+    private void received(String text, Consumer<CoreEvent> told, Consumer<Reply.Call> called) {
         switch (CoreJson.read(text, Reply.class)) {
             case Reply.Answer answer -> {
                 CompletableFuture<EditResult> asked = waiting.get(answer.id());
                 if (asked != null) asked.complete(answer.result());
             }
             case Reply.Told change -> told.accept(change.event());
+            case Reply.Call call -> called.accept(call);
         }
     }
 

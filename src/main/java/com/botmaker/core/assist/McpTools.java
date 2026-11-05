@@ -121,28 +121,62 @@ public final class McpTools {
     static final String NO_PROJECT = "No project is open in BotMaker Studio. Open one and try again.";
     private static final ObjectMapper JSON = new ObjectMapper();
 
-    /** Studio's own tools, {@code group}'s and the plugins' as they are now. */
-    public static List<SyncToolSpecification> all(McpJsonMapper json, LiveBot bot, StudioDriver driver, RunLog log,
-                                                  ToolGroup group) {
-        List<SyncToolSpecification> tools = new ArrayList<>(studio(json, bot, driver, log, group, () -> { }));
+    /**
+     * The core's own tools, over the open project's files (plan phase 10d): reading and editing the bot's Java, which
+     * the core does itself. A client's tools are served beside them through the core.
+     */
+    public static List<SyncToolSpecification> own(McpJsonMapper json, LiveBot bot) {
+        return FileTools.of(bot).stream().map(t -> served(json, t)).toList();
+    }
+
+    /** Studio's own tools, {@code group}'s and the plugins' as they are now: what a Studio serves through the core. */
+    public static List<SyncToolSpecification> all(McpJsonMapper json, StudioDriver driver, RunLog log, ToolGroup group,
+                                                  Runnable pluginsChanged) {
+        List<SyncToolSpecification> tools = new ArrayList<>(studio(json, driver, log, group, pluginsChanged));
         tools.addAll(pluginTools(json, driver, group, names(tools)));
         return tools;
     }
 
     /**
-     * Studio's own tools and {@code group}'s, without the plugins'.
+     * Studio's own tools and {@code group}'s, without the plugins' and without the core's own ({@link #own}).
      *
      * @param group          what a client with a screen attaches: its tools, and what of its screen a call waits for
      * @param pluginsChanged run after a tool added or removed a plugin, so the plugins' tools are served anew
      */
-    public static List<SyncToolSpecification> studio(McpJsonMapper json, LiveBot bot, StudioDriver driver, RunLog log,
-                                              ToolGroup group, Runnable pluginsChanged) {
-        List<AssistantTool<?>> tools = new ArrayList<>(FileTools.of(bot));
-        tools.addAll(StudioTools.of(driver));
+    public static List<SyncToolSpecification> studio(McpJsonMapper json, StudioDriver driver, RunLog log,
+                                                     ToolGroup group, Runnable pluginsChanged) {
+        List<AssistantTool<?>> tools = new ArrayList<>(StudioTools.of(driver));
         tools.addAll(RunTools.of(driver, log));
         tools.addAll(ProjectTools.of(driver, log, pluginsChanged));
         tools.addAll(group.tools());
         return tools.stream().map(t -> guarded(driver, group, served(json, t))).toList();
+    }
+
+    /**
+     * Whether a call of the core's own tool may run now, by what {@code driver} and {@code group} have going: a refusal
+     * (an error result) as {@link #guarded} would answer, else a result holding what to add after the tool's answer
+     * ({@link ToolGroup#news}), empty when nothing is.
+     */
+    public static CallToolResult admit(StudioDriver driver, ToolGroup group, CallToolRequest request) {
+        String refusal = refusal(driver, group, request);
+        if (!refusal.isEmpty()) return withNews(group, result(refusal, true));
+        return withNews(group, CallToolResult.builder().content(List.of()).isError(false).build());
+    }
+
+    /** Why {@code request} may not run now, or empty. */
+    private static String refusal(StudioDriver driver, ToolGroup group, CallToolRequest request) {
+        String name = request.name();
+        boolean passes = WHILE_MOVING.contains(name) || WHILE_MOVING.contains(name + " " + actionOf(request));
+        if (driver.reloading()) {
+            return "REFUSED: Studio is switching the project (after a revert, or to a project create_project made). "
+                    + "Reconnect and call again once it is open.";
+        }
+        boolean presses = group.answering().contains(name);
+        String moving = passes || presses && driver.pluginAsked() ? "" : driver.pluginMoving();
+        if (!moving.isEmpty()) return "REFUSED: " + moving + " Wait for it: plugins list says when it is done.";
+        String asked = passes || presses && group.asking() ? "" : group.busy();
+        if (!asked.isEmpty()) return "REFUSED: " + asked + " Wait for it: an answer after it says how it ended.";
+        return "";
     }
 
     /**
@@ -156,23 +190,11 @@ public final class McpTools {
     private static SyncToolSpecification guarded(StudioDriver driver, ToolGroup group, SyncToolSpecification tool) {
         String name = tool.tool().name();
         return SyncToolSpecification.builder().tool(tool.tool()).callHandler((exchange, request) -> {
-            boolean passes = WHILE_MOVING.contains(name) || WHILE_MOVING.contains(name + " " + actionOf(request));
             long start = System.nanoTime();
             CallToolResult answer = null;
             try {
-                if (driver.reloading()) {
-                    answer = result("REFUSED: Studio is switching the project (after a revert, or to a project "
-                            + "create_project made). Reconnect and call again once it is open.", true);
-                } else {
-                    boolean presses = group.answering().contains(name);
-                    String moving = passes || presses && driver.pluginAsked() ? "" : driver.pluginMoving();
-                    String asked = passes || presses && group.asking() ? "" : group.busy();
-                    answer = !moving.isEmpty()
-                            ? result("REFUSED: " + moving + " Wait for it: plugins list says when it is done.", true)
-                            : !asked.isEmpty()
-                            ? result("REFUSED: " + asked + " Wait for it: an answer after it says how it ended.", true)
-                            : tool.callHandler().apply(exchange, request);
-                }
+                String refusal = refusal(driver, group, request);
+                answer = refusal.isEmpty() ? tool.callHandler().apply(exchange, request) : result(refusal, true);
                 answer = withNews(group, answer);
                 return answer;
             } finally {
