@@ -1,8 +1,10 @@
 package com.botmaker.core.project.params;
 
+import com.botmaker.java.grammar.JavaValue;
 import com.botmaker.plugin.api.params.Param;
 
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * One row of the Parameters window — one parameter, as everything that draws or edits one reads it.
@@ -21,16 +23,20 @@ import java.util.Objects;
  * consumers actually use is the spelling: to label the row, to compare two rows, and to find the type's
  * editor. That is {@link #typeName()}.
  *
- * <h2>The value is one source string, because a composite has no other canonical form</h2>
+ * <h2>The value is one expression, because a composite has no other canonical form</h2>
  *
  * <p>It was a {@code List<String>} of wires until 2026-09-20 — one entry for an ordinary row, one per item
  * for a list-shaped one — and that list was only ever there to carry the <em>list</em> shape. It could not
  * encode {@code Map<String, List<Duration>>}, which a bot may perfectly well declare, so the value crosses
- * as <b>the Java initialiser the field takes</b>. {@code 32-generic-values.md} decision 6.
+ * as <b>the Java expression the parameter takes</b>. {@code 32-generic-values.md} decision 6.
  *
  * <p>That is not a wire encoding in a different spelling. A wire existed so a <em>bot</em> could read a
  * value with the contract jar absent; nothing at runtime reads a value once the model is compiled code. The
  * source is the artifact, and a value's canonical form is the source that produces it.
+ *
+ * <p><b>A node, not its text</b> (2026-11-05): the expression is a {@link JavaValue}, the node the file was read
+ * into, so whoever writes it back or reads it copies the tree and never parses the text again. The text a cell
+ * shows is derived from it ({@link #valueText()}).
  *
  * <h2>No section here, deliberately</h2>
  *
@@ -48,7 +54,7 @@ public final class ParameterRow {
 
     private final String name;
     private final String typeName;
-    private final String value;
+    private final JavaValue value;
     private final String description;
     private final String category;
     private final Visibility visibility;
@@ -58,7 +64,7 @@ public final class ParameterRow {
         this.changes = b.changes == null ? Param.Changes.OUTSIDE_RUN : b.changes;
         this.name = b.name;
         this.typeName = b.typeName;
-        this.value = b.value == null ? "" : b.value;
+        this.value = b.value;
         this.description = b.description == null ? "" : b.description;
         this.category = b.category == null ? "" : b.category.trim();
         this.visibility = b.visibility == null ? Visibility.PUBLIC : b.visibility;
@@ -86,12 +92,19 @@ public final class ParameterRow {
         return typeName;
     }
 
-    /**
-     * The value, as the Java initialiser a field of this {@link #typeName()} takes. Never {@code null};
-     * blank when there is none.
-     */
-    public String value() {
-        return value;
+    /** The value, as the Java expression a parameter of this {@link #typeName()} takes; empty when there is none. */
+    public Optional<JavaValue> value() {
+        return Optional.ofNullable(value);
+    }
+
+    /** The value as a cell shows it: the expression as written, or blank when there is none. */
+    public String valueText() {
+        return value == null ? "" : value.source();
+    }
+
+    /** Whether {@code other} holds the same value, compared as trees ({@link JavaValue#sameJava}). */
+    public boolean sameValue(ParameterRow other) {
+        return value == null ? other.value == null : value.sameJava(other.value);
     }
 
     /** A sentence explaining what the value is for, in the user's words. May be empty. */
@@ -141,7 +154,7 @@ public final class ParameterRow {
      * This row with another value and everything else unchanged — what a plugin answers an edit with once it
      * has stored, and possibly normalised, what the host sent.
      */
-    public ParameterRow withValue(String newValue) {
+    public ParameterRow withValue(JavaValue newValue) {
         return toBuilder().value(newValue).build();
     }
 
@@ -155,28 +168,29 @@ public final class ParameterRow {
                 .changes(changes);
     }
 
-    /** Equal when every component is: what makes "did anything change" answerable. */
+    /** Equal when every component is, the value as a tree: what makes "did anything change" answerable. */
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
         if (!(o instanceof ParameterRow other)) return false;
         return name.equals(other.name)
                 && typeName.equals(other.typeName)
-                && value.equals(other.value)
+                && sameValue(other)
                 && description.equals(other.description)
                 && category.equals(other.category)
                 && visibility == other.visibility
                 && changes == other.changes;
     }
 
+    /** Without the value: two trees that match may be laid out differently, so no hash of one is stable. */
     @Override
     public int hashCode() {
-        return Objects.hash(name, typeName, value, description, category, visibility, changes);
+        return Objects.hash(name, typeName, description, category, visibility, changes);
     }
 
     @Override
     public String toString() {
-        return "ParameterRow[" + name + " : " + typeName + " = " + value + "]";
+        return "ParameterRow[" + name + " : " + typeName + " = " + valueText() + "]";
     }
 
     /** Collects a row. Every setter is optional; {@link #named(String, String)} carries the two that are not. */
@@ -184,7 +198,7 @@ public final class ParameterRow {
 
         private final String name;
         private final String typeName;
-        private String value = "";
+        private JavaValue value;
         private String description;
         private String category;
         private Visibility visibility;
@@ -196,10 +210,15 @@ public final class ParameterRow {
             this.typeName = typeName == null ? "" : typeName.trim();
         }
 
-        /** The value, as the Java initialiser a field of this type takes. {@code null} is no value. */
-        public Builder value(String value) {
-            this.value = value == null ? "" : value;
+        /** The value, as the Java expression a parameter of this type takes. {@code null} is no value. */
+        public Builder value(JavaValue value) {
+            this.value = value;
             return this;
+        }
+
+        /** The same, from {@link #value()}'s answer. */
+        public Builder value(Optional<JavaValue> value) {
+            return value(value.orElse(null));
         }
 
         /** The sentence a user reads instead of the field name. */

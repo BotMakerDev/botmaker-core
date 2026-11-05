@@ -341,11 +341,11 @@ public final class JavaParameters {
             if (held == null) return gone(parameter);
         }
 
-        if (!wanted.value().equals(before.value()) && held.editable()) {
+        if (!wanted.sameValue(before) && held.editable()) {
             // The row's value is Java some version of this file held — a snapshot being restored — so it is
             // written back as that expression, kept.
             JavaParameter target = held;
-            JavaValue.parse(wanted.value()).ifPresent(value -> writeValue(config, state, target, value));
+            wanted.value().ifPresent(value -> writeValue(config, state, target, value));
         }
         return reread(config, state, className, name, grammar)
                 .<Outcome>map(Outcome.Stored::new).orElseGet(() -> gone(parameter));
@@ -761,14 +761,15 @@ public final class JavaParameters {
             }
             rewriteStarting(config, parameter.file(), shown);
         }
-        if (!wanted.value().equals(before.value())) {
+        if (!wanted.sameValue(before)) {
             if (before.duringRun() || !parameter.editable()) {
                 return new Outcome.Refused(parameter.name() + "'s value cannot be set here: "
                         + (before.duringRun() ? "the bot writes it during a run." : parameter.note()));
             }
-            Optional<JavaValue> value = JavaValue.parse(wanted.value());
+            Optional<JavaValue> value = wanted.value();
             if (value.isEmpty() || !writeValue(config, state, parameter, value.get())) {
-                return new Outcome.Refused(parameter.name() + "'s value “" + wanted.value() + "” could not be written.");
+                return new Outcome.Refused(parameter.name() + "'s value “" + wanted.valueText()
+                        + "” could not be written.");
             }
         }
         return reread(config, state, parameter.className(), parameter.name(), grammar)
@@ -849,7 +850,7 @@ public final class JavaParameters {
             Optional<Instant> kept = currentSource(state, parameter.file()).flatMap(
                     source -> ParamValues.keptAt(level, source, parameter.className(), parameter.name()));
             out.add(new RunParameter(parameter.className(), parameter.name(), parameter.row().typeName(),
-                    parameter.row().value(), kept));
+                    parameter.row().valueText(), kept));
         }
         return List.copyOf(out);
     }

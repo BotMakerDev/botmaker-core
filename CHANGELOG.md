@@ -7,6 +7,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+
+- A parameter's value crosses as a node (2026-11-05, clean-java phase 5): `ParameterRow.value()` is the
+  `JavaValue` the file was read into, `valueText()` what a cell shows, and two rows are equal when their values
+  match as trees. Nothing parses a row's value again to write it. A migration step's parameter name is a name node.
+
+### Removed
+
+- `RunnerValues` and the `<data>/runner-values/` copy of a runner's values (2026-11-05): `params/` is the only store.
+  An update keeps it (`UnpackedBots.moveValues`, and git for a merged tag), and nothing reads the old files.
+  Removing a run copy now forgets its values.
+
 ### Added
 
 - `read_trace` follows a run by cursor (2026-11-05, plan phase 12): given `from` (the `next` of an earlier answer, or

@@ -1,8 +1,10 @@
 package com.botmaker.core.project.params;
 
+import com.botmaker.java.grammar.JavaValue;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -20,6 +22,10 @@ class ParameterRowTest {
         return ParameterRow.named(name, "String");
     }
 
+    private static JavaValue java(String source) {
+        return JavaValue.parse(source).orElseThrow();
+    }
+
     @Test
     void aRowNeedsAName() {
         assertThrows(IllegalArgumentException.class, () -> ParameterRow.named("  ", "String"));
@@ -31,7 +37,8 @@ class ParameterRowTest {
     void everyDefaultIsTheSafeReading() {
         ParameterRow bare = row("rest").build();
 
-        assertEquals("", bare.value());
+        assertEquals(Optional.empty(), bare.value());
+        assertEquals("", bare.valueText());
         assertEquals("", bare.description());
         assertEquals("rest", bare.displayLabel());
         assertEquals("", bare.category());
@@ -43,10 +50,10 @@ class ParameterRowTest {
     /** A row with no type at all is blank rather than a {@code null} the host would trip over. */
     @Test
     void aRowWithNoTypeHoldsABlankOne() {
-        ParameterRow untyped = ParameterRow.named("legacy", null).value("kept").build();
+        ParameterRow untyped = ParameterRow.named("legacy", null).value(java("kept")).build();
 
         assertEquals("", untyped.typeName());
-        assertEquals("kept", untyped.value());
+        assertEquals("kept", untyped.valueText());
     }
 
     @Test
@@ -60,19 +67,32 @@ class ParameterRowTest {
     @Test
     void withValueKeepsEverythingElseAndEqualityIsByComponent() {
         ParameterRow declared = ParameterRow.named("rest", "java.time.Duration")
-                .value("java.time.Duration.ofSeconds(3)").description("How long to wait").category("Timing")
+                .value(java("java.time.Duration.ofSeconds(3)")).description("How long to wait").category("Timing")
                 .visibility(Visibility.EDITOR_ONLY)
                 .build();
 
-        ParameterRow edited = declared.withValue("java.time.Duration.ofSeconds(5)");
+        ParameterRow edited = declared.withValue(java("java.time.Duration.ofSeconds(5)"));
 
-        assertEquals("java.time.Duration.ofSeconds(5)", edited.value());
+        assertEquals("java.time.Duration.ofSeconds(5)", edited.valueText());
         assertNotEquals(declared, edited);
-        assertEquals(declared, edited.withValue("java.time.Duration.ofSeconds(3)"));
-        assertEquals(declared.hashCode(), edited.withValue("java.time.Duration.ofSeconds(3)").hashCode());
+        assertEquals(declared, edited.withValue(java("java.time.Duration.ofSeconds(3)")));
+        assertEquals(declared.hashCode(), edited.withValue(java("java.time.Duration.ofSeconds(3)")).hashCode());
         assertEquals(declared, declared.toBuilder().build());
         assertEquals("How long to wait", edited.displayLabel());
         assertEquals("Timing", edited.categoryOrGeneral());
+    }
+
+    /** The value is a tree (2026-11-05): two spellings of one expression are one value, and its text is what was written. */
+    @Test
+    void aValueIsComparedAsATreeAndShownAsWritten() {
+        ParameterRow spaced = row("rest").value(java("Duration.ofSeconds( 3 )")).build();
+        ParameterRow tight = row("rest").value(java("Duration.ofSeconds(3)")).build();
+
+        assertEquals(spaced, tight);
+        assertEquals(spaced.hashCode(), tight.hashCode());
+        assertTrue(spaced.sameValue(tight));
+        assertEquals("Duration.ofSeconds( 3 )", spaced.valueText());
+        assertNotEquals(spaced, row("rest").build());
     }
 
     /** A category is free text the window files a row under — trimmed, and never a vocabulary. */

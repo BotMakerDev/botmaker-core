@@ -125,7 +125,8 @@ public final class UnpackedBots {
 
     /**
      * Deletes the bot whose tag {@code dir} is, every tag of it, from {@link #root()}; refused for a folder outside
-     * it or no unpacked bot. The runner's values are kept elsewhere, so a later open gets them back.
+     * it or no unpacked bot. The runner's values go with it: they are its {@code params/} (2026-11-05), and a later
+     * open starts from the author's starting values.
      */
     public static void remove(Path dir) throws IOException {
         remove(root(), dir);
@@ -146,8 +147,8 @@ public final class UnpackedBots {
 
     /**
      * Deletes every tag of {@code dir}'s bot older than {@code dir} (2026-10-25, the user's call: one folder per run
-     * copy), once {@code dir} is checked; a newer tag stays. The runner's values are keyed by {@code owner/repo}, so
-     * they stay too. So do the plugins' states ({@link PluginState#ROOT}, 2026-11-03): the newest older tag's move into
+     * copy), once {@code dir} is checked; a newer tag stays. The runner's values, each {@code params} package, move into
+     * {@code dir} ({@link #moveValues}). So do the plugins' states ({@link PluginState#ROOT}, 2026-11-03): the newest older tag's move into
      * {@code dir} when it has none of its own. A folder that will not go is left for the next open to try again: it
      * never fails this one. Its {@link #CHECKED} goes first, so a delete cut short (a jar Windows holds) leaves no
      * folder that passes for a bot.

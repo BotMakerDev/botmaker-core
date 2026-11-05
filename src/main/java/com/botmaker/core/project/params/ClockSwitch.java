@@ -43,7 +43,8 @@ public final class ClockSwitch {
                                               ValueGrammar grammar) {
         Type to = other(parameter.form()).orElse(null);
         if (to == null) return Optional.empty();
-        Optional<Object> kept = grammar.valueOf(parameter.form(), parameter.row().value()).map(ClockSwitch::flipped);
+        Optional<Object> kept = parameter.row().value()
+                .flatMap(value -> grammar.valueOf(parameter.form(), value.written())).map(ClockSwitch::flipped);
         Optional<ParameterRow> retyped = JavaParameters.declare(config, state, parameter, parameter.row(), to,
                 grammar).stored();
         if (retyped.isEmpty() || kept.isEmpty()) return retyped;

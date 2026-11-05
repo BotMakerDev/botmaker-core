@@ -81,7 +81,7 @@ class JavaParameterSourceTest {
         assertEquals("Parameters.maxAttempts", parameter.qualified());
         assertEquals(TestValues.WHOLE_NUMBER, ValueTypes.leaf(parameter.form()));
         assertEquals("int", parameter.row().typeName());
-        assertEquals("10", parameter.row().value());
+        assertEquals("10", parameter.row().valueText());
         assertTrue(parameter.editable(), parameter.note());
     }
 
@@ -107,7 +107,7 @@ class JavaParameterSourceTest {
                     public static String speed = "fast";
                 """)).getFirst();
 
-        assertEquals("\"fast\"", parameter.row().value());
+        assertEquals("\"fast\"", parameter.row().valueText());
     }
 
     @Test
@@ -133,8 +133,8 @@ class JavaParameterSourceTest {
 
         assertEquals(TestValues.DURATION, ValueTypes.leaf(found.get(0).form()));
         assertEquals(TestValues.DURATION, ValueTypes.leaf(found.get(1).form()));
-        assertEquals("java.time.Duration.ofMillis(3000L)", found.get(0).row().value());
-        assertEquals("java.time.Duration.ofMillis(1000L)", found.get(1).row().value());
+        assertEquals("java.time.Duration.ofMillis(3000L)", found.get(0).row().valueText());
+        assertEquals("java.time.Duration.ofMillis(1000L)", found.get(1).row().valueText());
     }
 
     @Test
@@ -149,7 +149,7 @@ class JavaParameterSourceTest {
         assertEquals(ValueTypes.listOf(TestValues.DURATION), parameter.form());
         assertEquals(TestValues.DURATION, ValueTypes.leaf(parameter.form()));
         assertEquals(List.of(Duration.ofMillis(3000), Duration.ofMillis(60000)), TestValues.GRAMMAR
-                .valueOf(parameter.form(), parameter.row().value()).orElseThrow());
+                .valueOf(parameter.form(), parameter.row().valueText()).orElseThrow());
         assertTrue(parameter.editable(), parameter.note());
     }
 
@@ -258,7 +258,7 @@ class JavaParameterSourceTest {
                 """));
 
         assertEquals(List.of("a", "b"), found.stream().map(JavaParameter::name).toList());
-        assertEquals("2", found.get(1).row().value());
+        assertEquals("2", found.get(1).row().valueText());
     }
 
     @Test

@@ -89,7 +89,8 @@ class JavaParametersTest {
                 read.initializer(), read.editable(), read.note(), "The plugin reads it.", "");
 
         JavaParameters.Outcome renamed = JavaParameters.declare(config, null, plugins,
-                ParameterRow.named("attempts", read.row().typeName()).value("10").category("Run").build(),
+                ParameterRow.named("attempts", read.row().typeName()).value(JavaValue.parse("10")).category("Run")
+                        .build(),
                 read.form(), TestValues.GRAMMAR);
         assertInstanceOf(JavaParameters.Outcome.Refused.class, renamed);
         JavaParameters.Outcome retyped = JavaParameters.declare(config, null, plugins, read.row(), TestValues.TEXT,
@@ -101,7 +102,7 @@ class JavaParametersTest {
         assertInstanceOf(JavaParameters.Outcome.Refused.class, JavaParameters.remove(config, null, plugins));
 
         JavaParameters.Outcome valued = JavaParameters.declare(config, null, plugins,
-                read.row().toBuilder().value("3").build(), read.form(), TestValues.GRAMMAR);
+                read.row().toBuilder().value(JavaValue.parse("3")).build(), read.form(), TestValues.GRAMMAR);
         assertInstanceOf(JavaParameters.Outcome.Stored.class, valued);
         String source = Files.readString(config.mainPackageDir().resolve("Parameters.java"));
         assertTrue(source.contains("public static int tries = 3;"), source);
@@ -143,7 +144,7 @@ class JavaParametersTest {
 
         JavaParameter tries = only(config);
         assertTrue(tries.group() && tries.editable(), tries.note());
-        assertEquals("10", tries.row().value());
+        assertEquals("10", tries.row().valueText());
         assertEquals("Limits", tries.row().category());
         assertEquals("How many tries", tries.row().description());
     }
@@ -160,7 +161,7 @@ class JavaParametersTest {
         JavaParameter tries = only(config);
 
         assertEquals("3", JavaParameters.setValue(config, null, tries, java("3"), TestValues.GRAMMAR)
-                .orElseThrow().value());
+                .orElseThrow().valueText());
         assertTrue(Files.readString(groupOf(config, "bot", "RunChoices")).contains("return 3;"));
         assertTrue(Files.readString(starting).contains("return 10;"), "the starting copy keeps its value");
 
@@ -169,7 +170,7 @@ class JavaParametersTest {
                 now.row().toBuilder().category("Run").build(), now.form(), TestValues.GRAMMAR));
         assertTrue(Files.readString(starting).contains("category = \"Run\""), Files.readString(starting));
         assertTrue(Files.readString(starting).contains("return 10;"));
-        assertEquals("3", only(config).row().value());
+        assertEquals("3", only(config).row().valueText());
 
         assertTrue(JavaParameters.makeStarting(config, null, only(config)));
         assertTrue(Files.readString(starting).contains("return 3;"), Files.readString(starting));
@@ -190,9 +191,9 @@ class JavaParametersTest {
         assertTrue(level.row().duringRun());
         assertFalse(level.editable(), "the bot writes it");
         assertTrue(JavaParameters.setValue(config, null, level, java("2"), TestValues.GRAMMAR).isEmpty());
-        assertEquals("7", only(config).row().value());
+        assertEquals("7", only(config).row().valueText());
 
-        assertEquals("1", JavaParameters.forget(config, null, level, TestValues.GRAMMAR).orElseThrow().value());
+        assertEquals("1", JavaParameters.forget(config, null, level, TestValues.GRAMMAR).orElseThrow().valueText());
     }
 
     /**
@@ -204,7 +205,7 @@ class JavaParametersTest {
         ProjectConfig config = project(root);
 
         assertEquals("5", JavaParameters.add(config, null, "RunChoices", "tries", TestValues.WHOLE_NUMBER,
-                java("5"), "Limits", "", TestValues.GRAMMAR).orElseThrow().value());
+                java("5"), "Limits", "", TestValues.GRAMMAR).orElseThrow().valueText());
 
         Path mine = groupOf(config, "bot", "RunChoices");
         Path starting = startingOf(config, "bot", "RunChoices");
@@ -221,7 +222,7 @@ class JavaParametersTest {
 
         ParamsFitter.onDisk(LATEST, config.parametersPackageDir(), config.projectPath().resolve(ParamsFitter.STARTING),
                 config.projectPath().resolve(".botmaker/values-removed"));
-        assertEquals("5", only(config).row().value(), "a blank starting value takes nothing from this computer");
+        assertEquals("5", only(config).row().valueText(), "a blank starting value takes nothing from this computer");
     }
 
     /**
@@ -248,7 +249,7 @@ class JavaParametersTest {
         JavaParameters.Outcome outcome = JavaParameters.declare(config, null, tries, renamed(tries.row(), "attempts"),
                 tries.form(), TestValues.GRAMMAR);
 
-        assertEquals("5", outcome.stored().orElseThrow().value(), outcome.toString());
+        assertEquals("5", outcome.stored().orElseThrow().valueText(), outcome.toString());
         Path starting = startingOf(config, "bot", "RunChoices");
         for (Path file : List.of(mine, starting)) {
             String source = Files.readString(file).replaceAll("\\s+", " ");
@@ -437,7 +438,7 @@ class JavaParametersTest {
                 TestValues.WHOLE_NUMBER, java("10"), "Limits", "How many times to try", TestValues.GRAMMAR);
 
         assertTrue(stored.isPresent());
-        assertEquals("10", stored.get().value());
+        assertEquals("10", stored.get().valueText());
         // A group since 2026-11-04: params/bot/, private, beside its starting copy.
         String source = Files.readString(groupOf(config, "bot", "Parameters"));
         assertTrue(source.startsWith("package com.refbot.params.bot;"), "its own package, which Studio keeps");
@@ -632,7 +633,7 @@ class JavaParametersTest {
 
         assertEquals("String", stored.typeName());
         // The old type's text is not carried across: a value written for one type is not a value of another.
-        assertEquals("\"\"", stored.value());
+        assertEquals("\"\"", stored.valueText());
         assertTrue(Files.readString(config.mainPackageDir().resolve("Parameters.java"))
                 .contains("public static String maxAttempts"));
     }
@@ -650,7 +651,7 @@ class JavaParametersTest {
         ParameterRow stored = JavaParameters.setValue(config, null, only(config),
                 java("java.time.Duration.ofMillis(60000L)"), TestValues.GRAMMAR).orElseThrow();
 
-        assertEquals("java.time.Duration.ofMillis(60000L)", stored.value());
+        assertEquals("java.time.Duration.ofMillis(60000L)", stored.valueText());
         assertTrue(Files.readString(config.mainPackageDir().resolve("Parameters.java"))
                 .contains("java.time.Duration.ofMillis(60000L)"));
     }

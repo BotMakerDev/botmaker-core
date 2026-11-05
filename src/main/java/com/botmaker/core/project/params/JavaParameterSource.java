@@ -4,6 +4,7 @@ import com.botmaker.plugin.api.params.Param;
 import com.botmaker.plugin.api.source.ManagedValue;
 import com.botmaker.java.grammar.BotAnnotation;
 import com.botmaker.java.grammar.BotNames;
+import com.botmaker.java.grammar.JavaValue;
 import com.botmaker.java.grammar.ParamValues;
 import com.botmaker.java.grammar.ParamsFitter;
 import com.botmaker.java.grammar.SourceNode;
@@ -156,7 +157,7 @@ public final class JavaParameterSource {
         // be edited still has to show what the field holds, and the reading above decides only whether it
         // may be replaced.
         ParameterRow row = ParameterRow.named(name, ValueTypes.sourceName(form))
-                .value(initializer)
+                .value(kept(fragment.getInitializer(), source))
                 .description(string(members, "description"))
                 .category(string(members, "category"))
                 .visibility(Visibility.fromId(string(members, "visibility")))
@@ -189,7 +190,7 @@ public final class JavaParameterSource {
                 : whyNotEditable(grammar, form, records, readable, initializer, value != null);
 
         ParameterRow row = ParameterRow.named(name, ValueTypes.sourceName(form))
-                .value(initializer)
+                .value(kept(value, source))
                 .description(string(shown, "description"))
                 .category(either(shown, shared, "category"))
                 .changes(changes)
@@ -321,6 +322,14 @@ public final class JavaParameterSource {
     private static String string(Map<String, Object> members, String name) {
         Object value = members.get(name);
         return value instanceof String text ? text : "";
+    }
+
+    /**
+     * {@code node} of the file {@code source} is, as its author wrote it and detached from the file's tree, so a row
+     * pins neither; null for no node.
+     */
+    private static JavaValue kept(Expression node, String source) {
+        return node == null ? null : JavaValue.detached(new SourceNode(node, source));
     }
 
     /** The source text a node occupies, exactly as written — whitespace, comments and all. */

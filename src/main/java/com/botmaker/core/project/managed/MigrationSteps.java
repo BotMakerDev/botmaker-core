@@ -484,9 +484,9 @@ public final class MigrationSteps {
             Optional<JavaValue> part = switch (choices.get(i)) {
                 case Choice.From from -> {
                     forms.set(from.part(), wanted.type());
-                    yield JavaValue.parse(names.get(from.part()));
+                    yield named(ast, names.get(from.part()));
                 }
-                case Choice.Built built -> JavaValue.parse(names.get(built.part()))
+                case Choice.Built built -> named(ast, names.get(built.part()))
                         .flatMap(name -> grammar.call(wanted.type(), List.of(name)));
                 case Choice.Fixed fixed -> Optional.ofNullable(fixed.value());
             };
@@ -544,6 +544,12 @@ public final class MigrationSteps {
         } catch (IllegalArgumentException e) {
             return Optional.empty();
         }
+    }
+
+    /** The method parameter {@code name} as a value its body uses: a name node, never text parsed; empty for no name. */
+    private static Optional<JavaValue> named(AST ast, String name) {
+        if (name == null || !SourceVersion.isIdentifier(name) || SourceVersion.isKeyword(name)) return Optional.empty();
+        return Optional.of(JavaValue.built(ast.newSimpleName(name), List.of()));
     }
 
     /** Each part's label as a Java name, unique: {@code file}, {@code threshold}; {@code part2} where it is not one. */

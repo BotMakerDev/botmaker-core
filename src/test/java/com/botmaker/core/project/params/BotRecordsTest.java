@@ -68,7 +68,7 @@ class BotRecordsTest {
 
         assertEquals(point(), origin.form());
         assertTrue(origin.editable(), origin.note());
-        assertEquals("new Point(1, 2)", origin.row().value());
+        assertEquals("new Point(1, 2)", origin.row().valueText());
     }
 
     /** Without the bot's other sources the same field is exactly what it was before: an unknown leaf. */
@@ -130,7 +130,7 @@ class BotRecordsTest {
 
         assertFalse(origin.editable());
         assertEquals("written by hand as Point.origin(), which is kept rather than replaced", origin.note());
-        assertEquals("Point.origin()", origin.row().value());
+        assertEquals("Point.origin()", origin.row().valueText());
     }
 
     @Test

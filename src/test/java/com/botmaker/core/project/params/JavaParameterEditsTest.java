@@ -94,7 +94,7 @@ class JavaParameterEditsTest {
         // And it reads back, which is the property the window depends on.
         JavaParameter parameter = JavaParameterSource.read(null, edited, TestValues.GRAMMAR).stream()
                 .filter(p -> p.name().equals("restBetween")).findFirst().orElseThrow();
-        assertEquals("java.time.Duration.ofMillis(5000L)", parameter.row().value());
+        assertEquals("java.time.Duration.ofMillis(5000L)", parameter.row().valueText());
         assertTrue(parameter.editable());
     }
 
@@ -339,8 +339,8 @@ class JavaParameterEditsTest {
         JavaParameter parameter = JavaParameterSource.read(null, edited, TestValues.GRAMMAR).stream()
                 .filter(p -> p.name().equals("label")).findFirst().orElseThrow();
 
-        assertEquals("\"a \\\"quoted\\\" value\"", parameter.row().value());
-        assertEquals("a \"quoted\" value", TestValues.GRAMMAR.valueOf(TEXT, parameter.row().value()).orElseThrow());
+        assertEquals("\"a \\\"quoted\\\" value\"", parameter.row().valueText());
+        assertEquals("a \"quoted\" value", TestValues.GRAMMAR.valueOf(TEXT, parameter.row().valueText()).orElseThrow());
         assertEquals("Naming", parameter.row().category());
         assertTrue(parameter.editable(), parameter.note());
     }

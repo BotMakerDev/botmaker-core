@@ -79,14 +79,14 @@ class ClockSwitchTest {
         JavaParameter utc = JavaParameters.scan(config, null, GRAMMAR).getFirst();
         assertEquals(OffsetTime.class, utc.form());
         assertEquals(Optional.of(OffsetTime.of(7, 30, 0, 0, ZoneOffset.UTC)),
-                GRAMMAR.valueOf(utc.form(), utc.row().value()));
+                GRAMMAR.valueOf(utc.form(), utc.row().valueText()));
         assertTrue(Files.readString(file).contains("ZoneOffset.UTC"), Files.readString(file));
 
         ClockSwitch.flip(config, null, utc, GRAMMAR).orElseThrow();
 
         JavaParameter back = JavaParameters.scan(config, null, GRAMMAR).getFirst();
         assertEquals(LocalTime.class, back.form());
-        assertEquals(Optional.of(LocalTime.of(7, 30)), GRAMMAR.valueOf(back.form(), back.row().value()));
+        assertEquals(Optional.of(LocalTime.of(7, 30)), GRAMMAR.valueOf(back.form(), back.row().valueText()));
     }
 
     // ---- fixtures ------------------------------------------------------------------------------------------
