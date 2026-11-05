@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!--
+      groupId is com.github.BotMakerDev for the same reason as every other published module: JitPack serves
+      this repo as com.github.BotMakerDev:botmaker-core:<tag> whatever this pom says. The version is real:
+      -SNAPSHOT on main, the release version on a tag; only the release moves it (umbrella
+      docs/refactor/43-real-versions.md).
+    -->
+    <groupId>com.github.BotMakerDev</groupId>
+    <artifactId>botmaker-core</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+
+    <name>BotMaker Core</name>
+    <description>
+        The headless process that owns an open bot: it opens the project, edits its Java, compiles and runs it, and
+        serves the MCP. Studio is one client of it.
+    </description>
+
+    <properties>
+        <maven.compiler.release>25</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <junit.version>5.10.2</junit.version>
+        <!-- Kept in step with the cli's, the nearest copy among the upstreams. -->
+        <jackson.version>2.17.2</jackson.version>
+        <!-- Each upstream's main version; a release commit sets the released one (doc 43). -->
+        <botmaker.studioapi.version>0.14.2-SNAPSHOT</botmaker.studioapi.version>
+        <botmaker.java.version>0.1.0-SNAPSHOT</botmaker.java.version>
+        <botmaker.pluginhost.version>0.10.2-SNAPSHOT</botmaker.pluginhost.version>
+        <botmaker.runlog.version>0.1.0-SNAPSHOT</botmaker.runlog.version>
+        <botmaker.cli.version>0.10.2-SNAPSHOT</botmaker.cli.version>
+        <botmaker.shared.version>0.6.2-SNAPSHOT</botmaker.shared.version>
+        <botmaker.session.version>0.6.2-SNAPSHOT</botmaker.session.version>
+    </properties>
+
+    <repositories>
+        <repository>
+            <id>jitpack.io</id>
+            <url>https://jitpack.io</url>
+        </repository>
+    </repositories>
+
+    <dependencies>
+        <!-- The contract at compile scope: the core is a host, like Studio, and loads the bot's plugins against
+             this one copy. botmaker-java and botmaker-plugin-host have it `provided`. -->
+        <dependency>
+            <groupId>com.github.BotMakerDev</groupId>
+            <artifactId>botmaker-studio-api</artifactId>
+            <version>${botmaker.studioapi.version}</version>
+        </dependency>
+
+        <!-- The bot's Java: parse, edit and the value grammar. -->
+        <dependency>
+            <groupId>com.github.BotMakerDev</groupId>
+            <artifactId>botmaker-java</artifactId>
+            <version>${botmaker.java.version}</version>
+        </dependency>
+
+        <!-- The plugin loader over the project's resolved classpath. -->
+        <dependency>
+            <groupId>com.github.BotMakerDev</groupId>
+            <artifactId>botmaker-plugin-host</artifactId>
+            <version>${botmaker.pluginhost.version}</version>
+        </dependency>
+
+        <!-- A run's run.jsonl, its writer and readers. -->
+        <dependency>
+            <groupId>com.github.BotMakerDev</groupId>
+            <artifactId>botmaker-runlog</artifactId>
+            <version>${botmaker.runlog.version}</version>
+        </dependency>
+
+        <!-- The cli's main jar, a silent library: publish, the catalog, repair. -->
+        <dependency>
+            <groupId>com.github.BotMakerDev</groupId>
+            <artifactId>botmaker-cli</artifactId>
+            <version>${botmaker.cli.version}</version>
+        </dependency>
+
+        <!-- The host platform (windows, capture, GitHub) and private display sessions, for runs. -->
+        <dependency>
+            <groupId>com.github.BotMakerDev</groupId>
+            <artifactId>botmaker-shared</artifactId>
+            <version>${botmaker.shared.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.github.BotMakerDev</groupId>
+            <artifactId>botmaker-session</artifactId>
+            <version>${botmaker.session.version}</version>
+        </dependency>
+
+        <!-- The protocol's JSON (CoreJson). -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>${jackson.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>${junit.version}</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!-- Pinned for JitPack: its Maven defaults the compiler plugin to 3.1, which ignores
+                 maven.compiler.release. 3.11.0 because 3.12.0 needs a newer Maven than JitPack's
+                 (botmaker-studio-api/pom.xml has the full account). -parameters: Jackson reads a record's
+                 components by name either way, and plugins' factories need it in phase 8. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.11.0</version>
+                <configuration>
+                    <parameters>true</parameters>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.2.5</version>
+            </plugin>
+
+            <!-- Bakes every ${botmaker.*.version} into the published pom. flattenMode=oss strips the jitpack
+                 repository unless kept. 1.4.1 for JitPack's Maven (botmaker-plugin-toolkit/pom.xml). -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>flatten-maven-plugin</artifactId>
+                <version>1.4.1</version>
+                <configuration>
+                    <flattenMode>oss</flattenMode>
+                    <pomElements>
+                        <repositories>keep</repositories>
+                    </pomElements>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>flatten</id>
+                        <phase>process-resources</phase>
+                        <goals>
+                            <goal>flatten</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>flatten-clean</id>
+                        <phase>clean</phase>
+                        <goals>
+                            <goal>clean</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

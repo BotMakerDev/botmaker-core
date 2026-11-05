@@ -1,0 +1,53 @@
+# JReleaser — what ONE release of this repository looks like.
+#
+# The split with the umbrella's release library is the whole design:
+#
+#   * the release library knows the CONSTELLATION — which repositories changed, what each one's next version is,
+#     the order the tags go out in, and which upstream ref each downstream pins. Nothing in JReleaser can
+#     express that: its unit of work is one repository, one version, one release.
+#   * this file knows what a release IS — the tag, the GitHub Release, and the notes on it.
+#
+# WHERE THIS RUNS: this repository's own CI, on a version tag, and nowhere else — .github/workflows/ci.yml, the
+# `release` job, through jreleaser/release-action. Not from the umbrella working copy: in a submodule checkout
+# `.git` is a FILE (`gitdir: ../.git/modules/<mod>`) and JReleaser's JGit reports "repository not found"
+# (measured 2026-08-28, botmaker-java's jreleaser.yml has the account).
+#
+# THE VERSION ARRIVES AS JRELEASER_PROJECT_VERSION, set by the workflow from the tag that triggered it.
+#
+# NOTHING HERE TOUCHES AN ORDINARY BUILD: no Maven plugin, no lifecycle binding, nothing to download.
+
+project:
+  name: botmaker-core
+  description: The headless BotMaker process that owns an open bot.
+  longDescription: |
+    Opens a bot's project, edits its Java, compiles and runs it, and serves the MCP. Studio is one client of
+    it, the assistant another; edits arrive as typed commands and changes leave as events.
+  authors:
+    - LiQiyeDev
+  license: CC0-1.0
+  copyright: LiQiyeDev
+  inceptionYear: '2026'
+  links:
+    homepage: https://github.com/BotMakerDev/botmaker-core
+  languages:
+    java:
+      groupId: com.github.BotMakerDev
+      artifactId: botmaker-core
+      version: '21'
+
+release:
+  github:
+    owner: BotMakerDev
+    name: botmaker-core
+    tagName: 'v{{projectVersion}}'
+    releaseName: 'v{{projectVersion}}'
+    # The release library created and pushed the tag, and that push started the workflow running this.
+    skipTag: true
+    # A pushed tag cannot be edited and a published release should not be silently replaced.
+    overwrite: false
+    update:
+      enabled: false
+    # The CHANGELOG.md section for exactly this version, extracted by tools/changelog-section.sh — the same
+    # script the release gate reads it with.
+    changelog:
+      external: target/jreleaser-changelog.md

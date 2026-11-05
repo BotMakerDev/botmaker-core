@@ -1,0 +1,139 @@
+name: CI
+
+# Three jobs, the same shape as the other BotMaker library repos: `build` on every push and PR, `release`
+# and `jitpack` only on a version tag.
+#
+# Every upstream is resolved from source, not from JitPack: this repo's pom pins each ${botmaker.*.version} at
+# that upstream's main -SNAPSHOT — the version the umbrella reactor and a local `mvn install` produce — so there
+# is no published artifact under those coordinates to download. Each is installed before what builds on it.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check out botmaker-studio-api
+        uses: actions/checkout@v7
+        with:
+          repository: BotMakerDev/botmaker-studio-api
+          path: .deps/botmaker-studio-api
+
+      - name: Check out botmaker-java
+        uses: actions/checkout@v7
+        with:
+          repository: BotMakerDev/botmaker-java
+          path: .deps/botmaker-java
+
+      - name: Check out botmaker-plugin-host
+        uses: actions/checkout@v7
+        with:
+          repository: BotMakerDev/botmaker-plugin-host
+          path: .deps/botmaker-plugin-host
+
+      # The cli bundles the example plugin, which names the plugin parent, which pins the toolkit.
+      - name: Check out botmaker-plugin-toolkit
+        uses: actions/checkout@v7
+        with:
+          repository: BotMakerDev/botmaker-plugin-toolkit
+          path: .deps/botmaker-plugin-toolkit
+
+      - name: Check out botmaker-plugin-parent
+        uses: actions/checkout@v7
+        with:
+          repository: BotMakerDev/botmaker-plugin-parent
+          path: .deps/botmaker-plugin-parent
+
+      - name: Check out botmaker-plugin-archetype
+        uses: actions/checkout@v7
+        with:
+          repository: BotMakerDev/botmaker-plugin-archetype
+          path: .deps/botmaker-plugin-archetype
+
+      - name: Check out botmaker-runlog
+        uses: actions/checkout@v7
+        with:
+          repository: BotMakerDev/botmaker-runlog
+          path: .deps/botmaker-runlog
+
+      - name: Check out botmaker-cli
+        uses: actions/checkout@v7
+        with:
+          repository: BotMakerDev/botmaker-cli
+          path: .deps/botmaker-cli
+
+      - name: Check out botmaker-shared
+        uses: actions/checkout@v7
+        with:
+          repository: BotMakerDev/botmaker-shared
+          path: .deps/botmaker-shared
+
+      - name: Check out botmaker-session
+        uses: actions/checkout@v7
+        with:
+          repository: BotMakerDev/botmaker-session
+          path: .deps/botmaker-session
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      # RETRIED — Maven Central answers 429 to GitHub-hosted runners; see .github/mvn-retry.sh.
+      - name: Install the upstreams (their main -SNAPSHOT)
+        run: |
+          source .github/mvn-retry.sh
+          for repo in botmaker-studio-api botmaker-java botmaker-plugin-host botmaker-plugin-toolkit \
+                      botmaker-plugin-parent botmaker-plugin-archetype botmaker-runlog botmaker-cli \
+                      botmaker-shared botmaker-session; do
+            mvn_retry mvn -B -f ".deps/${repo}/pom.xml" install -DskipTests
+          done
+
+      - name: Build and test
+        run: mvn -B verify
+
+  # The GitHub Release, published by JReleaser from the tag the release library pushed (jreleaser.yml says why
+  # it runs here and not from the umbrella).
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # The same script the release gate reads the section with.
+      - name: Extract the changelog section
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          mkdir -p target
+          tools/changelog-section.sh "$version" > target/jreleaser-changelog.md
+          echo "JRELEASER_PROJECT_VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Publish the release
+        uses: jreleaser/release-action@v2
+        with:
+          version: 1.25.0
+          arguments: full-release
+        env:
+          JRELEASER_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # JitPack builds the artifact itself from the pushed tag; this just asks it to start eagerly so the first
+  # consumer doesn't wait. No secrets required.
+  jitpack:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger JitPack build for ${{ github.ref_name }}
+        run: |
+          curl -sf "https://jitpack.io/api/builds/com.github.${{ github.repository_owner }}/${{ github.event.repository.name }}/${{ github.ref_name }}" || true
