@@ -112,7 +112,8 @@ public final class Projects implements AutoCloseable {
             return new EditResult.Refused(open.directory().getFileName()
                     + " is open in BotMaker's core; close it before opening " + dir.getFileName() + ".");
         }
-        if (open == null) {
+        boolean first = open == null;
+        if (first) {
             try {
                 open = OpenProject.open(dir, libraries);
             } catch (IOException | RuntimeException e) {
@@ -122,6 +123,8 @@ public final class Projects implements AutoCloseable {
         OpenProject was = attached.put(channel, open);
         if (was != null && was != open) closeIfLeft(was, channel);
         open.attach(channel);
+        // With a client on it: a value the fit moved or reset is said once, and that client is who must hear it.
+        if (first) open.fitParams();
         // A channel that ended while the project opened heard nothing and never will: let it go now.
         if (!channel.isOpen()) leave(channel);
         return new EditResult.Accepted(List.of());

@@ -1,16 +1,13 @@
 package com.botmaker.core.run;
 
 import com.botmaker.core.event.CoreEvent;
-import com.botmaker.core.events.EventBus;
 import com.botmaker.core.runtime.JavacRelease;
 import com.botmaker.core.runtime.RunFolders;
-import com.botmaker.java.grammar.ParamValues;
 import com.botmaker.java.grammar.ParamsFitter;
 import com.botmaker.shared.ipc.TelemetryServer;
 import com.botmaker.core.project.ProjectConfig;
 import com.botmaker.core.project.vcs.Checkpoints;
 import com.botmaker.core.project.vcs.VersionOrigin;
-import com.botmaker.core.project.ProjectFile;
 import com.botmaker.core.project.ProjectState;
 import com.botmaker.java.index.BotIndex;
 import com.botmaker.core.run.tryhost.TryHost;
@@ -25,9 +22,7 @@ import java.nio.file.StandardCopyOption;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
@@ -36,15 +31,16 @@ import java.util.function.Supplier;
 /**
  * Compiles, runs and tries the open bot, and says how it goes as {@link CoreEvent}s: {@code RunState},
  * {@code RunOutput}, {@code Status}, {@code RunLogged} and the bot's questions as {@code InputAsked} (plan phase 7). It
- * names nothing a client draws: what the bot's code may not run with is the {@link RunCheck}'s to say, and the editor's
- * copies of what a compile wrote change on {@code stateThread}, the thread that owns {@link ProjectState}.
+ * names nothing a client draws: what the bot's code may not run with is the {@link RunCheck}'s to say. Disk is where the
+ * sources are: what a compile or a run wrote there is read back by whoever owns the {@link ProjectState}, which
+ * {@code sourcesWritten} tells.
  */
 public class CodeExecutionService {
 
     private final RunCheck check;
     private final ProjectConfig config;
     private final ProjectState state;
-    private final EventBus.UiThread stateThread;
+    private final Runnable sourcesWritten;
     private final Consumer<CoreEvent> events;
     private final RunTelemetry.Listener telemetry;
 
@@ -89,16 +85,16 @@ public class CodeExecutionService {
     }
 
     /**
-     * @param stateThread where the editor's copies of a file a compile or a run rewrote are changed
-     * @param events      what every client hears of a compile, a run or a try, told from the thread doing it
-     * @param telemetry   who hears the run's trace lines and the frames relayed to plugins
+     * @param events         what every client hears of a compile, a run or a try, told from the thread doing it
+     * @param telemetry      who hears the run's trace lines and the frames relayed to plugins
+     * @param sourcesWritten told, from the thread doing it, that a fit, a reset or a run changed sources on disk
      */
-    public CodeExecutionService(ProjectConfig config, ProjectState state, EventBus.UiThread stateThread,
-                                RunCheck check, Consumer<CoreEvent> events, RunTelemetry.Listener telemetry) {
+    public CodeExecutionService(ProjectConfig config, ProjectState state, RunCheck check, Consumer<CoreEvent> events,
+                                RunTelemetry.Listener telemetry, Runnable sourcesWritten) {
         this.check = check;
         this.config = config;
         this.state = state;
-        this.stateThread = stateThread;
+        this.sourcesWritten = sourcesWritten;
         this.events = events;
         this.telemetry = telemetry;
         Runtime.getRuntime().addShutdownHook(shutdownHook);
@@ -184,7 +180,6 @@ public class CodeExecutionService {
 
         new Thread(() -> {
             boolean ran = false;
-            Map<Path, String> paramsAtStart = Map.of();
             try {
                 status("Compiling...");
                 phase(CoreEvent.RunState.Phase.COMPILING);
@@ -246,9 +241,9 @@ public class CodeExecutionService {
                         .directory(config.projectPath().toFile());
 
                 startTelemetry(pb);
-                paramsAtStart = paramSources();
                 currentRunningProcess = pb.start();
                 ran = true;
+                events.accept(new CoreEvent.RunProcess(currentRunningProcess.pid()));
                 // A stop that landed between the last check and the start found no process to kill.
                 if (cancelled.get()) killRunningProcess();
 
@@ -277,8 +272,8 @@ public class CodeExecutionService {
                 trying = false;
                 // This run's folder, read while no next run can have made its own.
                 String endedRun = ran ? RunFolders.latest(config.projectPath()).map(Path::toString).orElse("") : "";
-                // While this still counts as running: a next run compiles the editor's copies, values merged.
-                if (ran) takeRunsValues(paramsAtStart);
+                // What the run wrote to its parameters is on disk: read back, so the next edit lands on it.
+                if (ran) sourcesWritten.run();
                 isRunning.set(false);
                 currentRunningProcess = null;
                 closeConsole();
@@ -290,42 +285,6 @@ public class CodeExecutionService {
         }, "CodeRunner").start();
     }
 
-    /**
-     * Brings the during-a-run parameters the run wrote to disk into the editor's copies, whose text the next compile
-     * writes back ({@code ProjectState.Snapshot.writeSources}), so that compile keeps them. A value the run did not
-     * change stays as edited, in the window or the file's tab.
-     */
-    private void takeRunsValues(Map<Path, String> atStart) {
-        Map<Path, String> written = paramSources();
-        stateThread.later(() -> written.forEach((file, text) -> state.getFile(file).ifPresent(open -> {
-            String merged = ParamValues.withRunsValues(state.level(), open.getContent(), atStart.getOrDefault(file, ""), text);
-            if (merged.equals(open.getContent())) return;
-            open.setContent(merged);
-            // On disk now: the core reads its sources there, and no later compile writes the editor's over them.
-            try {
-                Files.writeString(file, merged);
-            } catch (IOException e) {
-                warn("WARN " + file.getFileName() + " could not be saved: " + e.getMessage());
-            }
-        })));
-    }
-
-    /** Every group file under {@code params/} as it is on disk now; empty when they cannot be read. */
-    private Map<Path, String> paramSources() {
-        Path params = config.parametersPackageDir().toAbsolutePath().normalize();
-        if (!Files.isDirectory(params)) return Map.of();
-        Map<Path, String> sources = new LinkedHashMap<>();
-        try (var walk = Files.walk(params)) {
-            for (Path file : walk.filter(p -> p.toString().endsWith(".java")).toList()) {
-                sources.put(file, Files.readString(file));
-            }
-        } catch (IOException | UncheckedIOException e) {
-            warn("WARN what the run wrote to its parameters could not be read: " + e.getMessage());
-            return Map.of();
-        }
-        return sources;
-    }
-
     /** The project's warm try JVM, made at the first try. */
     private synchronized WarmTries tries() {
         if (tries == null) {
@@ -333,6 +292,7 @@ public class CodeExecutionService {
             ConsoleBatcher console = console();
             tryConsole = console;
             tries = new WarmTries(console::append, console::flushNow, pb -> RunTelemetry.start(events, telemetry, pb));
+            tries.onProcess = pid -> events.accept(new CoreEvent.RunProcess(pid));
         }
         return tries;
     }
@@ -475,10 +435,10 @@ public class CodeExecutionService {
                 Files.copy(file, pass.resolve(relative), StandardCopyOption.REPLACE_EXISTING);
                 String reset = Files.readString(starting);
                 Files.writeString(file, reset);
-                stateThread.later(() -> state.getFile(file).ifPresent(open -> open.setContent(reset)));
                 warn("WARN " + config.projectPath().relativize(file) + " did not compile and was reset to its"
                         + " starting copy. A copy is in " + config.projectPath().relativize(pass) + ".");
             }
+            sourcesWritten.run();
             compiled = compileSources(snapshot, compiledOutputPath, new StringBuilder());
         }
         // Only if the disk still holds what javac read: a write since would make a state nobody compiled the good one.
@@ -490,9 +450,9 @@ public class CodeExecutionService {
     private static final String VALUES_BACKUPS = ".botmaker/values-removed";
 
     /**
-     * Fits {@code params/} to {@code starting-params/} ({@link ParamsFitter#onDisk}), one WARN per file changed, and
-     * makes the editor match: run before each compile and on open, which fills a fresh copy. Never throws: a fit
-     * that fails leaves the files as they were.
+     * Fits {@code params/} to {@code starting-params/} ({@link ParamsFitter#onDisk}), one WARN per file changed: run
+     * before each compile and on open, which fills a fresh copy. Never throws: a fit that fails leaves the files as
+     * they were.
      */
     public void fitParams() {
         Path params = config.parametersPackageDir().toAbsolutePath().normalize();
@@ -506,12 +466,7 @@ public class CodeExecutionService {
         }
         if (fitted.isEmpty()) return;
         fitted.forEach(each -> warn("WARN params/" + each.sentence() + " A copy is in " + VALUES_BACKUPS + "."));
-        stateThread.later(() -> fitted.forEach(each -> {
-            Path file = params.resolve(each.file());
-            each.source().ifPresentOrElse(text -> state.getFile(file).ifPresentOrElse(open -> open.setContent(text),
-                            () -> state.addFile(new ProjectFile(file, text))),
-                    () -> state.removeFile(file));
-        }));
+        sourcesWritten.run();
     }
 
     /**
@@ -595,12 +550,8 @@ public class CodeExecutionService {
             status("Stopping before it starts…");
             return;
         }
+        // The run's thread sees its process gone and says the run ended, once per run: a client counts on that.
         killRunningProcess();
-        closeConsole();
-        stopTelemetry();
-        // Force state update immediately on hard kill
-        isRunning.set(false);
-        phase(CoreEvent.RunState.Phase.ENDED);
     }
 
     /**
@@ -627,6 +578,8 @@ public class CodeExecutionService {
      * closed or the Studio quits — see {@link #shutdownHook} for why both paths exist.
      */
     public void close() {
+        // A run still compiling has no process to kill: told here, it starts none, with nobody left to stop it.
+        cancelled.set(true);
         try {
             Runtime.getRuntime().removeShutdownHook(shutdownHook);
         } catch (IllegalStateException alreadyShuttingDown) {

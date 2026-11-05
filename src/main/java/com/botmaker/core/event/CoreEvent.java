@@ -1,10 +1,17 @@
 package com.botmaker.core.event;
 
 import com.botmaker.core.edit.ChangedMethod;
+import com.botmaker.core.run.debug.DebugSnapshot;
+import com.botmaker.plugin.api.TraceLine;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
 
+import java.time.Instant;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.OptionalInt;
 
 /**
  * What the core tells every client attached to a project, whoever caused it: Studio redraws a method another client
@@ -18,6 +25,13 @@ import java.util.List;
         @JsonSubTypes.Type(value = CoreEvent.RunState.class, name = "runState"),
         @JsonSubTypes.Type(value = CoreEvent.RunOutput.class, name = "runOutput"),
         @JsonSubTypes.Type(value = CoreEvent.RunLogged.class, name = "runLogged"),
+        @JsonSubTypes.Type(value = CoreEvent.RunTraced.class, name = "runTraced"),
+        @JsonSubTypes.Type(value = CoreEvent.RunFrame.class, name = "runFrame"),
+        @JsonSubTypes.Type(value = CoreEvent.RunProcess.class, name = "runProcess"),
+        @JsonSubTypes.Type(value = CoreEvent.DebugSession.class, name = "debugSession"),
+        @JsonSubTypes.Type(value = CoreEvent.DebugPaused.class, name = "debugPaused"),
+        @JsonSubTypes.Type(value = CoreEvent.DebugFollowed.class, name = "debugFollowed"),
+        @JsonSubTypes.Type(value = CoreEvent.SourcesChanged.class, name = "sourcesChanged"),
         @JsonSubTypes.Type(value = CoreEvent.InputAsked.class, name = "inputAsked"),
         @JsonSubTypes.Type(value = CoreEvent.Status.class, name = "status"),
         @JsonSubTypes.Type(value = CoreEvent.UiRequest.class, name = "uiRequest"),
@@ -106,6 +120,99 @@ public sealed interface CoreEvent {
     record RunLogged(String folder) implements CoreEvent {
         public RunLogged {
             folder = folder == null ? "" : folder;
+        }
+    }
+
+    /**
+     * One line of the running bot's trace, the contract's {@link TraceLine} in plain parts: {@code level} is its
+     * level's id, {@code atLine} its source line ({@code -1} when the bot did not know), {@code where} the part of the
+     * screen it is about, or null.
+     */
+    record RunTraced(long atMillis, String level, String source, String text, int count, String writerClass,
+                     String writerMethod, String className, int atLine, Region where,
+                     Map<String, String> values) implements CoreEvent {
+
+        /** A part of the screen, in desktop pixels. */
+        public record Region(int x, int y, int width, int height) {
+        }
+
+        public static RunTraced of(TraceLine line) {
+            return new RunTraced(line.at().toEpochMilli(), line.level().id(), line.source(), line.text(), line.count(),
+                    line.writerClass(), line.writerMethod(), line.className(), line.line().orElse(-1),
+                    line.where().map(at -> new Region(at.x(), at.y(), at.width(), at.height())).orElse(null),
+                    line.values());
+        }
+
+        /** The contract's line this event carries. */
+        public TraceLine traceLine() {
+            return new TraceLine(Instant.ofEpochMilli(atMillis), TraceLine.Level.fromId(level), source, text, count,
+                    writerClass, writerMethod, className, atLine > 0 ? OptionalInt.of(atLine) : OptionalInt.empty(),
+                    where == null ? Optional.empty()
+                            : Optional.of(new TraceLine.Region(where.x(), where.y(), where.width(), where.height())),
+                    values);
+        }
+    }
+
+    /** A telemetry frame the core does not read, as the bytes the bot wrote: what a plugin's listener decodes. */
+    record RunFrame(byte[] payload) implements CoreEvent {
+        public RunFrame {
+            if (payload == null) throw new IllegalArgumentException("a frame has its bytes");
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            return other instanceof RunFrame frame && Arrays.equals(payload, frame.payload);
+        }
+
+        @Override
+        public int hashCode() {
+            return Arrays.hashCode(payload);
+        }
+    }
+
+    /** The bot's process started as {@code pid}, what a client's pause signals; it is gone at the run's end. */
+    record RunProcess(long pid) implements CoreEvent {
+    }
+
+    /** A debug session started, ran on after a pause, or finished. */
+    record DebugSession(Phase phase) implements CoreEvent {
+        public DebugSession {
+            if (phase == null) throw new IllegalArgumentException("a debug session has a phase");
+        }
+
+        public enum Phase { STARTED, RESUMED, FINISHED }
+    }
+
+    /**
+     * The debuggee stopped at {@code line} of {@code file}, or outside the bot's own code when {@code file} is empty,
+     * its frames read in {@code snapshot}.
+     */
+    record DebugPaused(String file, int line, DebugSnapshot snapshot) implements CoreEvent {
+        public DebugPaused {
+            file = file == null ? "" : file;
+            if (snapshot == null) throw new IllegalArgumentException("a pause has its snapshot");
+        }
+    }
+
+    /** One window of Follow: the line the bot was last on, every line it ran, and whether it came round to one again. */
+    record DebugFollowed(Place latest, List<Place> hits, boolean looping) implements CoreEvent {
+        public DebugFollowed {
+            if (latest == null) throw new IllegalArgumentException("a window of Follow saw a line");
+            hits = hits == null ? List.of() : List.copyOf(hits);
+        }
+
+        /** A line of one of the bot's files. */
+        public record Place(String file, int line) {
+        }
+    }
+
+    /**
+     * Files other than the open one changed on disk, by another's write: read them there. The names go without their
+     * text: a parameter's value stays on disk, and a client reads what is there by the time it looks.
+     */
+    record SourcesChanged(List<String> files) implements CoreEvent {
+        public SourcesChanged {
+            files = files == null ? List.of() : List.copyOf(files);
         }
     }
 

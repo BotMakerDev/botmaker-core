@@ -26,6 +26,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -33,6 +34,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Predicate;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -246,6 +248,110 @@ class CoreServerTest {
                 assertInstanceOf(EditResult.Refused.class, client.show("../outside.java"));
                 assertInstanceOf(EditResult.Refused.class, client.userEdit(new Edit.Delete(second)));
                 assertEquals(kept, Files.readString(source));
+            }
+        }
+    }
+
+    private static final String RUNS = """
+            package com.mybot;
+            public class Mybot {
+                public static void main(String[] args) throws Exception {
+                    System.out.println("hello from the bot");
+                    if (java.nio.file.Files.exists(java.nio.file.Path.of("loop"))) {
+                        Thread.sleep(600_000);
+                    }
+                }
+            }
+            """;
+
+    private static void awaitHeard(List<CoreEvent> heard, Predicate<CoreEvent> wanted) throws InterruptedException {
+        long until = System.nanoTime() + TimeUnit.MINUTES.toNanos(2);
+        while (heard.stream().noneMatch(wanted)) {
+            assertTrue(System.nanoTime() < until, () -> "never heard it: " + heard);
+            Thread.sleep(20);
+        }
+    }
+
+    /**
+     * Compile, run, output, the process and stop, all over the channel; what is written beside the open file is told by
+     * name. The run happens in the core, with no client's state behind it.
+     */
+    @Test
+    void aBotRunsInTheCoreAndIsStoppedOverTheChannel(@TempDir Path cache, @TempDir Path projects) throws Exception {
+        Path project = projects.resolve("mybot");
+        Path source = project.resolve("src/main/java").resolve(FILE);
+        Files.createDirectories(source.getParent());
+        Files.writeString(source, RUNS);
+        List<CoreEvent> heard = new CopyOnWriteArrayList<>();
+        Predicate<CoreEvent> ended = event -> event instanceof CoreEvent.RunState state
+                && state.phase() == CoreEvent.RunState.Phase.ENDED;
+
+        try (CoreMain.Running core = CoreMain.serve(cache, "1.0", SLOW, TEST_LIBRARIES, () -> { })) {
+            CoreLauncher.Address at = new CoreLauncher.Address(core.server().port(), CoreLauncher.token(cache));
+            try (CoreClient client = CoreClient.connect(at, "1.0", heard::add, () -> { })) {
+                client.open(project);
+                client.show(FILE);
+
+                assertInstanceOf(EditResult.Accepted.class, client.run());
+                awaitHeard(heard, ended);
+                awaitHeard(heard, event -> event instanceof CoreEvent.RunLogged);
+                assertTrue(heard.stream().anyMatch(event -> event instanceof CoreEvent.RunProcess), heard::toString);
+                assertTrue(heard.stream().anyMatch(event -> event instanceof CoreEvent.RunOutput output
+                        && output.text().contains("hello from the bot")), heard::toString);
+
+                heard.clear();
+                Files.writeString(project.resolve("loop"), "");
+                assertInstanceOf(EditResult.Accepted.class, client.run());
+                awaitHeard(heard, event -> event instanceof CoreEvent.RunProcess);
+                assertInstanceOf(EditResult.Accepted.class, client.stop());
+                awaitHeard(heard, ended);
+
+                Path beside = source.resolveSibling("Beside.java");
+                Files.writeString(beside, "package com.mybot;\nclass Beside {}\n");
+                heard.clear();
+                assertInstanceOf(EditResult.Accepted.class, client.show(FILE));
+                assertTrue(heard.contains(new CoreEvent.SourcesChanged(List.of("com/mybot/Beside.java"))),
+                        heard::toString);
+
+                // The last client leaving ends the bot: no process outlives the Studio that started it.
+                heard.clear();
+                assertInstanceOf(EditResult.Accepted.class, client.run());
+                awaitHeard(heard, event -> event instanceof CoreEvent.RunProcess);
+                long pid = heard.stream().filter(CoreEvent.RunProcess.class::isInstance)
+                        .map(CoreEvent.RunProcess.class::cast).findFirst().orElseThrow().pid();
+                client.leave();
+                long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+                while (ProcessHandle.of(pid).filter(ProcessHandle::isAlive).isPresent()) {
+                    assertTrue(System.nanoTime() < until, "the bot outlived its project");
+                    Thread.sleep(20);
+                }
+            }
+        }
+    }
+
+    /** A debug session over the channel: it stops where the core says, in the file's own name, and goes on when told. */
+    @Test
+    void aDebugSessionPausesAndResumesOverTheChannel(@TempDir Path cache, @TempDir Path projects) throws Exception {
+        Path project = projects.resolve("mybot");
+        Path source = project.resolve("src/main/java").resolve(FILE);
+        Files.createDirectories(source.getParent());
+        Files.writeString(source, RUNS);
+        List<CoreEvent> heard = new CopyOnWriteArrayList<>();
+
+        try (CoreMain.Running core = CoreMain.serve(cache, "1.0", SLOW, TEST_LIBRARIES, () -> { })) {
+            CoreLauncher.Address at = new CoreLauncher.Address(core.server().port(), CoreLauncher.token(cache));
+            try (CoreClient client = CoreClient.connect(at, "1.0", heard::add, () -> { })) {
+                client.open(project);
+                client.show(FILE);
+
+                assertInstanceOf(EditResult.Accepted.class, client.debug(false, Map.of()));
+                awaitHeard(heard, event -> event instanceof CoreEvent.DebugPaused paused && paused.file().equals(FILE)
+                        && paused.snapshot().frames().getFirst().inBot());
+                assertInstanceOf(EditResult.Accepted.class, client.debugging(Request.Debugging.Step.CONTINUE));
+                awaitHeard(heard, event -> event instanceof CoreEvent.DebugSession session
+                        && session.phase() == CoreEvent.DebugSession.Phase.FINISHED);
+                assertTrue(heard.stream().anyMatch(event -> event instanceof CoreEvent.RunOutput output
+                        && output.text().contains("hello from the bot")), heard::toString);
             }
         }
     }

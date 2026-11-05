@@ -2,10 +2,13 @@ package com.botmaker.core.event;
 
 import com.botmaker.core.CoreJson;
 import com.botmaker.core.edit.ChangedMethod;
+import com.botmaker.core.run.debug.DebugSnapshot;
 import org.junit.jupiter.api.Test;
 
+import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -33,6 +36,21 @@ class CoreEventJsonTest {
             new CoreEvent.RunState(CoreEvent.RunState.Phase.ENDED, "stopped by the user"),
             new CoreEvent.RunOutput(CoreEvent.RunOutput.Stream.ERR, "Ore not found\n"),
             new CoreEvent.RunLogged("/home/me/BotMakerProjects/MyBot/runs/20261105-101500"),
+            new CoreEvent.RunTraced(1_000, "warn", "Vision", "no ore", 3, "com.mybot.Mouse", "click", "com.mybot.Main",
+                    14, new CoreEvent.RunTraced.Region(1, 2, 3, 4), Map.of("screen", "Home")),
+            new CoreEvent.RunTraced(0, "", "", "hi", 1, "", "", "", -1, null, Map.of()),
+            new CoreEvent.RunFrame(new byte[]{1, 2, -3}),
+            new CoreEvent.RunProcess(4242),
+            new CoreEvent.DebugSession(CoreEvent.DebugSession.Phase.RESUMED),
+            new CoreEvent.DebugPaused(FILE, 18, new DebugSnapshot("main", List.of(
+                    new DebugSnapshot.Frame("play", "com.mybot.Main", Path.of("/bots/mybot/Main.java"), 18, List.of(
+                            new DebugSnapshot.Variable("ore", "int", "3", List.of(
+                                    new DebugSnapshot.Variable("left", "int", "1", List.of(), 2))))),
+                    new DebugSnapshot.Frame("… 3 more", "", null, 0, List.of())))),
+            new CoreEvent.DebugPaused("", 7, DebugSnapshot.empty()),
+            new CoreEvent.DebugFollowed(new CoreEvent.DebugFollowed.Place(FILE, 4),
+                    List.of(new CoreEvent.DebugFollowed.Place(FILE, 4), new CoreEvent.DebugFollowed.Place(FILE, 5)), true),
+            new CoreEvent.SourcesChanged(List.of("params/bot/Bot.java")),
             new CoreEvent.InputAsked(3, "choice", "Which ore?", List.of("Iron", "Gold"), 12),
             new CoreEvent.Status("Compiling..."),
             new CoreEvent.UiRequest("7", CoreEvent.UiRequest.Kind.WINDOW, "Screens"),

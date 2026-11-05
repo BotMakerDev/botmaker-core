@@ -53,6 +53,21 @@ public final class RunTelemetry {
         void frame(byte[] payload);
     }
 
+    /** A listener that tells each line and frame as the protocol's event, what the core's clients hear. */
+    public static Listener told(Consumer<CoreEvent> events) {
+        return new Listener() {
+            @Override
+            public void trace(TraceLine line) {
+                events.accept(CoreEvent.RunTraced.of(line));
+            }
+
+            @Override
+            public void frame(byte[] payload) {
+                events.accept(new CoreEvent.RunFrame(payload));
+            }
+        };
+    }
+
     /**
      * Starts the server and tells the bot where it is through {@code pb}'s environment; null when it could not
      * bind, in which case the bot runs without telemetry (the SDK opens no socket when the variables are absent).

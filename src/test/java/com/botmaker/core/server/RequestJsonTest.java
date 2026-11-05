@@ -11,6 +11,8 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -31,6 +33,14 @@ class RequestJsonTest {
                         new FileEdit(Path.of("/home/me/BotMakerProjects/MyBot/src/main/java/com/mybot/Sdk.java"),
                                 "class Sdk {}", "class Sdk { }"))),
                 new Request.Reload(10),
+                new Request.Compile(11),
+                new Request.Run(12),
+                new Request.RunEntry(13, "Explore map", "com.example.ExploreMap"),
+                new Request.Try(14, "com.mybot.BotMakerTry", "class BotMakerTry {}", "this line"),
+                new Request.Debug(15, true, Map.of("com/mybot/MyBot.java", Set.of("0.1.2"))),
+                new Request.Stop(16),
+                new Request.Answer(17, 3, "Iron"),
+                new Request.Debugging(18, Request.Debugging.Step.CONTINUE),
                 new Request.Close(7));
         for (Request request : requests) {
             assertEquals(request, CoreJson.read(CoreJson.write(request), Request.class));

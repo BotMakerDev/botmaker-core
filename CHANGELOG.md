@@ -9,6 +9,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Phase 10b (2026-11-05), runs in the core. `OpenProject` owns `CodeExecutionService` and `DebuggingService`. New
+  requests: `Compile`, `Run`, `RunEntry`, `Try`, `Debug`, and the `Request.Control`s `Stop`, `Answer`, `Debugging`, which
+  run on a thread of their own so a stop never waits behind a slow ask. New events: `RunTraced`, `RunFrame`, `RunProcess`,
+  `DebugSession`, `DebugPaused`, `DebugFollowed`, and `SourcesChanged`, which names files beside the open one that
+  changed on disk without their text, so a parameter's value stays off the channel. `params/` is fitted when the project
+  opens. Closing a project ends its bot, and so does the last client leaving. `HostRuns` takes the pid as a supplier.
+  `CodeExecutionService` no longer holds a UI thread or merges a run's parameter values into a client's copies: disk
+  holds them and its `sourcesWritten` has the owner read them back.
 - Phase 10a1 (2026-11-05), the core's side of Studio's cut-over. `OpenProject.open` makes the open-time writes (the
   remotes' names, the contract's dependency, a plugin's editor libraries). Two requests, `Rewritten` and `Recorded`,
   carry a client's migration and a plugin's writes; a recorded text becomes the core's. `Reload` resolves changed

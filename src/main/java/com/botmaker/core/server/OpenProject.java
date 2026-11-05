@@ -5,6 +5,7 @@ import com.botmaker.core.edit.CoreEditor;
 import com.botmaker.core.edit.EditResult;
 import com.botmaker.core.edit.HistoryStep;
 import com.botmaker.core.event.CoreEvent;
+import com.botmaker.core.events.EventBus;
 import com.botmaker.core.events.FileEdit;
 import com.botmaker.core.index.TypeSummaryManager;
 import com.botmaker.core.parser.EditorOutput;
@@ -18,6 +19,14 @@ import com.botmaker.core.project.ProjectState;
 import com.botmaker.core.project.ProjectTemplate;
 import com.botmaker.core.project.StudioProjectSettings;
 import com.botmaker.core.project.vcs.ProjectVcs;
+import com.botmaker.core.run.CodeExecutionService;
+import com.botmaker.core.run.DebuggingService;
+import com.botmaker.core.run.RunCheck;
+import com.botmaker.core.run.RunTelemetry;
+import com.botmaker.core.run.debug.DebugSnapshot;
+import com.botmaker.core.run.debug.DebugView;
+import com.botmaker.core.run.debug.FollowPacer;
+import com.botmaker.core.run.trial.TrialCaller;
 import com.botmaker.core.runtime.JavacRelease;
 import com.botmaker.core.services.ContractDependency;
 import com.botmaker.core.services.EditorCompanions;
@@ -27,14 +36,17 @@ import com.botmaker.java.edit.palette.BlockType;
 import com.botmaker.java.types.ProjectAnalyzer;
 import org.eclipse.jdt.core.dom.CompilationUnit;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -44,6 +56,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.BooleanSupplier;
 import java.util.stream.Stream;
 
 /**
@@ -143,8 +157,14 @@ public final class OpenProject implements AutoCloseable {
     private final Libraries libraries;
     private final ExecutorService owner;
     private final Set<Channel> clients = new CopyOnWriteArraySet<>();
+    /** Where what steers a run is done: never behind an ask the owner is busy with ({@link Request.Control}). */
+    private final ExecutorService control;
+    /** How many stops have arrived, counted as they arrive: see {@link #ask}. */
+    private final AtomicLong stops = new AtomicLong();
     private final ProjectAnalyzer analyzer;
     private final CoreEditor editor;
+    private final CodeExecutionService execution;
+    private final DebuggingService debugger;
 
     private OpenProject(ProjectConfig config, ProjectState state, ProjectLock lock, Libraries libraries,
                         ProjectAnalyzer analyzer) {
@@ -158,7 +178,18 @@ public final class OpenProject implements AutoCloseable {
             thread.setDaemon(true);
             return thread;
         });
+        this.control = Executors.newSingleThreadExecutor(work -> {
+            Thread thread = new Thread(work, "core-control-" + config.projectName());
+            thread.setDaemon(true);
+            return thread;
+        });
         this.editor = new CoreEditor(config, state, new Said(), analyzer, this::changed);
+        // A run's check is a client's until the core judges a tree by itself: javac judges what reaches it here.
+        RunTelemetry.Listener telemetry = RunTelemetry.told(this::tell);
+        this.execution = new CodeExecutionService(config, state, RunCheck.NONE, this::tell, telemetry,
+                this::sourcesWritten);
+        this.debugger = new DebuggingService(state, config, execution, EventBus.UiThread.INLINE, new ToldDebug(),
+                this::tell, telemetry);
     }
 
     /**
@@ -179,6 +210,7 @@ public final class OpenProject implements AutoCloseable {
                 System.err.println("Warning: " + e.getMessage());
             }
             ProjectState state = new ProjectState();
+            state.setSavedByCore(true);
             state.setSourcePath(config.sourceRoot());
             state.setReaderMode(ProjectMode.isReader(config.projectPath()));
             state.setLevel(JavacRelease.level(config.projectPath()));
@@ -214,6 +246,11 @@ public final class OpenProject implements AutoCloseable {
     }
 
     /** Attaches {@code channel}: it hears every change from now on. */
+    /** On open, {@code params/} is fitted to {@code starting-params/}: a fresh copy gets its starting values (2026-11-04). */
+    void fitParams() {
+        execution.fitParams();
+    }
+
     void attach(Channel channel) {
         clients.add(channel);
     }
@@ -226,14 +263,22 @@ public final class OpenProject implements AutoCloseable {
 
     /** {@code request} done on the project's thread, after every ask that came before it; refused once it closed. */
     CompletableFuture<EditResult> ask(Request request) {
+        long stopsBefore = stops.get();
+        if (request instanceof Request.Stop
+                || request instanceof Request.Debugging debugging && debugging.step() == Request.Debugging.Step.STOP) {
+            stops.incrementAndGet();
+        }
         try {
             return CompletableFuture.supplyAsync(() -> {
                 try {
-                    return answer(request);
+                    if (request instanceof Request.Control steer) return steer(steer);
+                    // A stop goes straight past what still waits its turn here, so a run it overtook does not start.
+                    return startsABot(request) && stops.get() != stopsBefore ? stoppedBeforeItStarted(request)
+                            : answer(request);
                 } catch (RuntimeException e) {
                     return new EditResult.Refused("The core could not do that: " + e);
                 }
-            }, owner);
+            }, request instanceof Request.Control ? control : owner);
         } catch (RejectedExecutionException closed) {
             return CompletableFuture.completedFuture(new EditResult.Refused("The project was closed."));
         }
@@ -267,19 +312,46 @@ public final class OpenProject implements AutoCloseable {
         }
         ProjectFile active = state.getActiveFile();
         Set<Path> seen = new HashSet<>();
+        List<String> others = new ArrayList<>();
         for (ProjectFile read : onDisk) {
             seen.add(read.getPath());
             Optional<ProjectFile> known = state.getFile(read.getPath());
             if (known.isEmpty()) {
                 state.addFile(read);
+                others.add(named(read.getPath()));
             } else if (!read.getContent().equals(known.get().getContent())) {
                 known.get().setContent(read.getContent());
                 known.get().setAst(null);
                 if (known.get() == active) openFileRead();
+                else others.add(named(read.getPath()));
             }
         }
         for (ProjectFile file : List.copyOf(state.getAllFiles())) {
-            if (file != active && !seen.contains(file.getPath())) state.removeFile(file.getPath());
+            if (file != active && !seen.contains(file.getPath())) {
+                state.removeFile(file.getPath());
+                others.add(named(file.getPath()));
+            }
+        }
+        if (!others.isEmpty()) tell(new CoreEvent.SourcesChanged(others));
+    }
+
+    /** {@code file} as the protocol names it: its path below the source root, with forward slashes. */
+    private String named(Path file) {
+        return config.sourceRoot().relativize(file).toString().replace(File.separatorChar, '/');
+    }
+
+    /** A fit or a run wrote to disk: read back in turn, and every client told. Nothing once the project closed. */
+    private void sourcesWritten() {
+        try {
+            owner.execute(() -> {
+                try {
+                    readDiskAgain();
+                } catch (RuntimeException e) {
+                    System.err.println("Couldn't read the bot's sources again: " + e);
+                }
+            });
+        } catch (RejectedExecutionException closed) {
+            // Closing: nobody is left to tell, and the next open reads the disk.
         }
     }
 
@@ -305,9 +377,65 @@ public final class OpenProject implements AutoCloseable {
                     commit.label());
             case Request.Rewritten rewritten -> rewritten(rewritten);
             case Request.Recorded recorded -> recorded(recorded);
+            case Request.Compile compile -> started(() -> execution.compileCode(state.snapshot()));
+            case Request.Run run -> started(() -> execution.runCode(state.snapshot()));
+            case Request.RunEntry entry ->
+                    started(() -> execution.runEntry(state.snapshot(), entry.title(), entry.mainClass()));
+            case Request.Try attempt -> started(() -> execution.tryCode(state.snapshot(),
+                    new TrialCaller.Source(attempt.className(), attempt.text()), attempt.label()));
+            case Request.Debug debug -> started(() -> debugger.startDebugging(debug.follow(), breakpoints(debug)));
+            case Request.Control steer -> steer(steer);
             case Request.Open open -> new EditResult.Refused("The project is open already.");
             case Request.Close close -> new EditResult.Refused("A close is the core's to handle.");
         };
+    }
+
+    private static boolean startsABot(Request request) {
+        return request instanceof Request.Run || request instanceof Request.RunEntry || request instanceof Request.Try
+                || request instanceof Request.Debug;
+    }
+
+    /** A client that asked for a run waits for its end; a debug session it asked for never began, so nothing ends. */
+    private EditResult stoppedBeforeItStarted(Request request) {
+        if (!(request instanceof Request.Debug)) {
+            tell(new CoreEvent.RunState(CoreEvent.RunState.Phase.ENDED, "stopped before it started"));
+        }
+        return new EditResult.Accepted(List.of());
+    }
+
+    /** {@code work} started, how it goes told as events. */
+    private static EditResult started(Runnable work) {
+        work.run();
+        return new EditResult.Accepted(List.of());
+    }
+
+    /** What steers a run, on {@link #control}: no source is read for it. */
+    private EditResult steer(Request.Control request) {
+        switch (request) {
+            case Request.Stop stop -> execution.stopRunningProgram();
+            case Request.Answer answer -> {
+                if (!execution.answer(answer.asked(), answer.value())
+                        && !debugger.answer(answer.asked(), answer.value())) {
+                    return new EditResult.Refused("No bot is waiting for that answer.");
+                }
+            }
+            case Request.Debugging debugging -> {
+                switch (debugging.step()) {
+                    case STEP_OVER -> debugger.stepOver();
+                    case CONTINUE -> debugger.continueExecution();
+                    case STOP -> debugger.stopDebugging();
+                }
+            }
+        }
+        return new EditResult.Accepted(List.of());
+    }
+
+    /** A debug request's marks by the paths the sources are held under. */
+    private Map<Path, Set<String>> breakpoints(Request.Debug debug) {
+        Map<Path, Set<String>> marks = new HashMap<>();
+        debug.breakpoints().forEach((file, nodes) ->
+                marks.put(config.sourceRoot().resolve(file).toAbsolutePath().normalize(), nodes));
+        return marks;
     }
 
     /**
@@ -443,9 +571,43 @@ public final class OpenProject implements AutoCloseable {
         }
     }
 
+    /** A debug session shown by telling every client where it stopped; each finds the block in what it draws. */
+    private final class ToldDebug implements DebugView {
+        @Override
+        public void started() {
+            tell(new CoreEvent.DebugSession(CoreEvent.DebugSession.Phase.STARTED));
+        }
+
+        @Override
+        public void resumed() {
+            tell(new CoreEvent.DebugSession(CoreEvent.DebugSession.Phase.RESUMED));
+        }
+
+        @Override
+        public void finished() {
+            tell(new CoreEvent.DebugSession(CoreEvent.DebugSession.Phase.FINISHED));
+        }
+
+        @Override
+        public void paused(FollowPacer.Hit hit, int line, DebugSnapshot snapshot, BooleanSupplier live) {
+            tell(new CoreEvent.DebugPaused(hit == null ? "" : named(hit.file()), line, snapshot));
+        }
+
+        @Override
+        public void followed(FollowPacer.Frame frame, BooleanSupplier live) {
+            tell(new CoreEvent.DebugFollowed(place(frame.latest()), frame.hits().stream().map(this::place).toList(),
+                    frame.looping()));
+        }
+
+        private CoreEvent.DebugFollowed.Place place(FollowPacer.Hit hit) {
+            return new CoreEvent.DebugFollowed.Place(named(hit.file()), hit.line());
+        }
+    }
+
     /**
      * Ends the project's thread once the asks already sent are done, so none runs after the plugins and the lock went,
-     * then lets both go.
+     * ends the bot, a debuggee first since it may be suspended until its connection goes, then lets the plugins and
+     * the lock go.
      */
     @Override
     public void close() throws IOException {
@@ -455,7 +617,10 @@ public final class OpenProject implements AutoCloseable {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
+        control.shutdown();
         try {
+            debugger.stopDebugging();
+            execution.close();
             libraries.unbind();
         } finally {
             lock.close();

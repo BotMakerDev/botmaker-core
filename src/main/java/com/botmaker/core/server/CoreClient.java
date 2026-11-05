@@ -13,6 +13,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
@@ -99,6 +100,41 @@ public final class CoreClient implements AutoCloseable {
     /** The project's libraries changed; given as long as an open, since Maven may download. */
     public EditResult reload() throws IOException {
         return ask(new Request.Reload(ids.incrementAndGet()), OPEN_TIMEOUT);
+    }
+
+    public EditResult compile() throws IOException {
+        return ask(new Request.Compile(ids.incrementAndGet()), ANSWER_TIMEOUT);
+    }
+
+    public EditResult run() throws IOException {
+        return ask(new Request.Run(ids.incrementAndGet()), ANSWER_TIMEOUT);
+    }
+
+    public EditResult runEntry(String title, String mainClass) throws IOException {
+        return ask(new Request.RunEntry(ids.incrementAndGet(), title, mainClass), ANSWER_TIMEOUT);
+    }
+
+    /** A ▶ Try of the caller {@code text}; see {@link Request.Try}. */
+    public EditResult tryCaller(String className, String text, String label) throws IOException {
+        return ask(new Request.Try(ids.incrementAndGet(), className, text, label), ANSWER_TIMEOUT);
+    }
+
+    /** Starts a debug session; see {@link Request.Debug}. */
+    public EditResult debug(boolean follow, Map<String, Set<String>> breakpoints) throws IOException {
+        return ask(new Request.Debug(ids.incrementAndGet(), follow, breakpoints), ANSWER_TIMEOUT);
+    }
+
+    public EditResult stop() throws IOException {
+        return ask(new Request.Stop(ids.incrementAndGet()), ANSWER_TIMEOUT);
+    }
+
+    /** The user's answer to the running bot's question {@code asked}. */
+    public EditResult answer(long asked, String value) throws IOException {
+        return ask(new Request.Answer(ids.incrementAndGet(), asked, value), ANSWER_TIMEOUT);
+    }
+
+    public EditResult debugging(Request.Debugging.Step step) throws IOException {
+        return ask(new Request.Debugging(ids.incrementAndGet(), step), ANSWER_TIMEOUT);
     }
 
     /** Detaches from the project; the channel stays open for another. */

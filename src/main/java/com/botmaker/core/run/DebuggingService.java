@@ -119,8 +119,10 @@ public class DebuggingService {
      * Kicks off a debug ({@code trace=false}) or follow/trace ({@code trace=true}) session on a
      * separate thread. In trace mode user breakpoints are ignored and every statement line is observed
      * and immediately resumed, so execution is followed live without ever pausing.
+     *
+     * @param breakpoints the node ids the user marked in each file; a client drew them, so they are its to say
      */
-    public void startDebugging(boolean trace) {
+    public void startDebugging(boolean trace, Map<Path, Set<String>> breakpoints) {
         if (!finished.get()) {
             status("A debug session is already running. Stop it first.");
             return;
@@ -132,7 +134,6 @@ public class DebuggingService {
         // (see its javadoc, and bugs.md B10). Everything below maps breakpoints from this revision's sources
         // onto the classes this revision compiled to, which is only true if they are the same revision.
         ProjectState.Snapshot snapshot = state.snapshot();
-        Map<Path, Set<String>> breakpoints = state.breakpoints();
         new Thread(() -> {
             try {
                 // 1. Compile
@@ -141,6 +142,8 @@ public class DebuggingService {
                     finished.set(true);
                     return;
                 }
+                // Stopped during the compile, by the user or a closing project: nothing is started for nobody.
+                if (session.get() != id) return;
                 Checkpoints.take(config.projectPath(), VersionOrigin.AUTO, trace ? "Trace" : "Debug");
 
                 // 2. Where the session can stop, file by file.
@@ -195,6 +198,12 @@ public class DebuggingService {
                 ProcessBuilder pb = new ProcessBuilder(command).directory(config.projectPath().toFile());
                 startTelemetry(pb);
                 this.currentProcess = pb.start();
+                // A stop that landed between that check and the start found no process to kill.
+                if (session.get() != id) {
+                    currentProcess.destroyForcibly();
+                    stopTelemetry();
+                    return;
+                }
 
                 // Output reaches the Run tab through the same batcher a run uses: one flush per 100 ms however
                 // fast the bot prints. One runLater per line is what froze the window under Follow.

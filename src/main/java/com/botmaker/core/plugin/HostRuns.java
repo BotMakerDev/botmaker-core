@@ -3,19 +3,19 @@ package com.botmaker.core.plugin;
 import com.botmaker.plugin.api.Runs;
 import com.botmaker.plugin.api.TraceLine;
 import com.botmaker.plugin.api.run.RunProperty;
-import com.botmaker.core.run.CodeExecutionService;
 
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 /**
  * Studio's side of {@link Runs} — the open project's bot, as a plugin is allowed to see it.
  *
  * <p>Nothing here is new capability. Starting and stopping are what the Run and Stop buttons already ask
- * ({@link Requests}), the pid is {@link CodeExecutionService#runningBotPid()}, and the listener channels are told
+ * ({@link Requests}), the pid is what the run's owner says it is, and the listener channels are told
  * what the run tells ({@link #ran}, {@link #telemetry}, {@link #trace}): Studio fills both from its bus
  * ({@code services.PluginsOnBus}, 2026-11-05). What the class adds is the shape: a plugin gets the
  * bot's process without seeing a Studio type, which is what lets the Remote Pilot be a plugin's feature
@@ -61,7 +61,7 @@ public final class HostRuns implements Runs {
     private static volatile HostRuns current;
 
     private final Requests requests;
-    private final CodeExecutionService execution;
+    private final Supplier<OptionalLong> pid;
     private final Properties settings;
 
     /** Plugin listeners, held here rather than on the bus, which cannot unsubscribe. */
@@ -72,9 +72,9 @@ public final class HostRuns implements Runs {
     private volatile boolean running;
     private volatile boolean paused;
 
-    private HostRuns(Requests requests, CodeExecutionService execution, Properties settings) {
+    private HostRuns(Requests requests, Supplier<OptionalLong> pid, Properties settings) {
         this.requests = requests;
-        this.execution = execution;
+        this.pid = pid;
         this.settings = settings;
     }
 
@@ -85,13 +85,12 @@ public final class HostRuns implements Runs {
      * and that it must hop for UI itself, and a pilot pushing a frame has no business queueing behind the editor's
      * rendering.
      */
-    public static synchronized HostRuns install(Requests requests, CodeExecutionService execution,
-                                                Properties settings) {
-        if (requests == null || execution == null) {
+    public static synchronized HostRuns install(Requests requests, Supplier<OptionalLong> pid, Properties settings) {
+        if (requests == null || pid == null) {
             clear();
             return null;
         }
-        current = new HostRuns(requests, execution, settings);
+        current = new HostRuns(requests, pid, settings);
         return current;
     }
 
@@ -130,7 +129,7 @@ public final class HostRuns implements Runs {
 
     @Override
     public OptionalLong pid() {
-        return execution.runningBotPid();
+        return pid.get();
     }
 
     /**

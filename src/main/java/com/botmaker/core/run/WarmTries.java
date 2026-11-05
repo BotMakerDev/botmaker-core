@@ -18,6 +18,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.LongConsumer;
 import java.util.stream.Collectors;
 
 /**
@@ -40,6 +41,9 @@ final class WarmTries implements AutoCloseable {
     private final Runnable flush;
     /** Starts the JVM's telemetry server, telling the JVM where it is through the builder's environment. */
     private final Function<ProcessBuilder, TelemetryServer> telemetry;
+
+    /** Told the JVM's pid as each try starts in it: what a pause stops. */
+    volatile LongConsumer onProcess = pid -> { };
 
     /** Read without the lock, so a stop from the FX thread never waits on a JVM starting. */
     private volatile Host host;
@@ -96,6 +100,7 @@ final class WarmTries implements AutoCloseable {
             Host live = host(command, key, directory);
             Try attempt = new Try(live);
             current = attempt;
+            onProcess.accept(live.process().pid());
             // A JVM that died before the try was set has no pipe left to say so.
             live.process().onExit().thenRun(attempt::died);
             try {
