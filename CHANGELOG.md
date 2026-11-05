@@ -9,6 +9,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Types compared as types (2026-11-05, clean-java phase 10): a signature edit asks `TypeNodes.writes` whether the file
+  already names the type. A type written `Map<String,  Point>` stays as written when the same type is picked, and a
+  class that only shares a simple name, or the raw form of a generic, is written. `LockResolver` locks `main` however
+  its `String` array is spelled.
 - Reading through the tree (2026-11-05, clean-java phase 9): `ProjectConfig` reads `package` and `main` from a parse, so
   a comment or a string saying them no longer makes a folder a bot or moves its package; a `main` counts only with
   `String[]` or no parameters, where the text match took any. `PluginHolders` finds the lines naming a removed plugin's

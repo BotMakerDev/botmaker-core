@@ -4,6 +4,7 @@ import com.botmaker.plugin.api.source.ManagedValue;
 import com.botmaker.core.plugin.PluginHost;
 import com.botmaker.core.project.managed.ManagedIds;
 import com.botmaker.core.project.params.JavaParameterSource;
+import com.botmaker.java.grammar.TypeNodes;
 import org.eclipse.jdt.core.dom.ASTNode;
 import org.eclipse.jdt.core.dom.Annotation;
 import org.eclipse.jdt.core.dom.BodyDeclaration;
@@ -239,8 +240,7 @@ public record LockResolver(ProjectConfig config, Path file, boolean readerMode) 
         if (!Modifier.isStatic(method.getModifiers())) return false;
         if (method.parameters().size() != 1) return false;
         Object first = method.parameters().getFirst();
-        return first instanceof SingleVariableDeclaration parameter
-                && "String[]".equals(parameter.getType().toString());
+        return first instanceof SingleVariableDeclaration parameter && TypeNodes.isStringArray(parameter);
     }
 
     /** Why {@code main}'s signature can't change, phrased for the status bar. */

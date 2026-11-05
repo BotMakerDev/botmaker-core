@@ -25,6 +25,7 @@ import com.botmaker.java.parse.SourceSet;
 import com.botmaker.java.edit.palette.ExpressionType;
 import com.botmaker.java.types.ResolvedType;
 import com.botmaker.java.types.ProjectAnalyzer;
+import com.botmaker.java.grammar.TypeNodes;
 import com.botmaker.core.plugin.PluginHost;
 import org.eclipse.jdt.core.dom.*;
 import org.eclipse.jdt.core.dom.rewrite.ASTRewrite;
@@ -286,15 +287,14 @@ public class MethodHandler {
         // this, editing a constructor's parameters would set RETURN_TYPE2 to `void` and quietly turn
         // `GoHome(int)` into a method named GoHome, which compiles and is never called again.
         if (method.isConstructor()) return;
-        // Left alone when it is already what the file says — by text, for the reason spelled out in
-        // editInPlace: a type the editor merely carries (`Outcome run(…)`) round-trips to the same source and
-        // so is protected here, while a type the user deliberately picked is written even though the catalogue
-        // cannot describe it.
+        // Left alone when it is already the type the file names, for the reason spelled out in editInPlace: a
+        // type the editor merely carries (`Outcome run(…)`) reads back as the same type and so is protected here,
+        // while a type the user deliberately picked is written even though the catalogue cannot describe it.
         Type oldNode = method.getReturnType2();
-        if (oldNode != null && oldNode.toString().equals(returnType.sourceName())) return;
+        if (TypeNodes.writes(oldNode, returnType.comparedName())) return;
 
         SignatureType oldType = oldNode == null
-                ? SignatureType.of(BotType.NOTHING) : MethodSignatures.signatureTypeOf(oldNode.toString(), PluginHost.grammar());
+                ? SignatureType.of(BotType.NOTHING) : MethodSignatures.signatureTypeOf(oldNode, PluginHost.grammar());
 
         Type newNode = typeNodeFor(ctx, returnType);
         if (oldNode == null) {
@@ -369,13 +369,13 @@ public class MethodHandler {
     /** Retypes and renames one surviving parameter where it stands, body references included. */
     private static void editInPlace(EditContext ctx, MethodDeclaration method,
                                     SingleVariableDeclaration param, FunctionDraft.Parameter target) {
-        // A type is left alone when it is the one the file already writes — compared by text, not by whether
+        // A type is left alone when it is the one the file already names — compared as a type, not by whether
         // the catalogue happens to describe it. Those two used to be the same test (`isKept()` meant "don't
         // touch"), which silently protected the wrong thing: the header's type picker offers every type in the
         // project, most of which the catalogue has never heard of, so deliberately retyping an input to one of
         // them did nothing at all. A carried type read out of this very declaration still compares equal, so
         // `Outcome run(…)` is as safe as it was — safe by value now rather than by category.
-        if (!param.getType().toString().equals(target.type().sourceName())) {
+        if (!TypeNodes.writes(param.getType(), target.type().comparedName())) {
             ctx.rewriter().replace(param.getType(), typeNodeFor(ctx, target.type()), null);
         }
         String newName = target.name().trim();
@@ -402,7 +402,7 @@ public class MethodHandler {
             SingleVariableDeclaration origin = (SingleVariableDeclaration) current.get(target.origin());
             SingleVariableDeclaration moved =
                     (SingleVariableDeclaration) JavaLevel.copy(ast, origin);
-            if (!target.type().isKept() && !origin.getType().toString().equals(target.type().sourceName())) {
+            if (!target.type().isKept() && !TypeNodes.writes(origin.getType(), target.type().comparedName())) {
                 moved.setType(typeNodeFor(ctx, target.type()));
             }
             String newName = target.name().trim();
