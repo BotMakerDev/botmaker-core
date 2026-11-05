@@ -22,6 +22,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- A parameter's category is the class that holds it (2026-11-05, params-cleanup phase 4): the reader sets it to the
+  group's simple name, and an edit that changes it is refused. The upgrade and every bind strip `category = …` from
+  `@Param` and `@Param.Shown`. A method row's description falls back to its group's. `JavaParameters.add` takes the
+  new parameter's `Param.Changes`; `categories(…)` is gone.
 - Types compared as types (2026-11-05, clean-java phase 10): a signature edit asks `TypeNodes.writes` whether the file
   already names the type. A type written `Map<String,  Point>` stays as written when the same type is picked, and a
   class that only shares a simple name, or the raw form of a generic, is written. `LockResolver` locks `main` however

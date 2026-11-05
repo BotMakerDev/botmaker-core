@@ -437,7 +437,7 @@ public final class ManagedHolders {
 
     /**
      * A plugin's parameter as a method of its group (2026-11-04) — {@code @SdkValue(SdkValue.Id.DO_SETUP)
-     * @Param.Shown(category = "Run", …) public boolean doSetup() { return true; }} — its imports added to
+     * @Param.Shown(description = "…", …) public boolean doSetup() { return true; }} — its imports added to
      * {@code imports}; null when its type has no node or its first value no spelling.
      */
     private static MethodDeclaration paramMethod(AST ast, ManagedParam<?> value, ValueGrammar grammar,
@@ -474,7 +474,6 @@ public final class ManagedHolders {
     /** {@code @Param.Shown(…)} as the plugin declared it, each member only when it says something; null for none. */
     private static Annotation shown(AST ast, ManagedParam<?> value, Set<String> imports) {
         List<MemberValuePair> members = new ArrayList<>();
-        if (!value.category().isBlank()) members.add(member(ast, "category", string(ast, value.category())));
         if (!value.description().isBlank()) {
             members.add(member(ast, "description", string(ast, value.description())));
         }
@@ -676,8 +675,11 @@ public final class ManagedHolders {
         java.util.Map<String, Object> members = annotation == null ? java.util.Map.of()
                 : BotAnnotation.PARAM_SHOWN.members(annotation);
         java.util.Map<String, String> drift = new java.util.LinkedHashMap<>();
-        if (!value.category().equals(String.valueOf(members.getOrDefault("category", "")))) {
-            drift.put("category", value.category());
+        // A category the plugin once wrote (before 2026-11-05) is taken off: the group class is the category now.
+        // Read off the source, not members(): a binding leaves out a member the contract no longer declares.
+        if (annotation instanceof NormalAnnotation normal && normal.values().stream()
+                .anyMatch(pair -> ((MemberValuePair) pair).getName().getIdentifier().equals("category"))) {
+            drift.put("category", "");
         }
         if (!value.description().equals(String.valueOf(members.getOrDefault("description", "")))) {
             drift.put("description", value.description());

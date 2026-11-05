@@ -159,7 +159,7 @@ public final class JavaParameterSource {
         ParameterRow row = ParameterRow.named(name, ValueTypes.sourceName(form))
                 .value(kept(fragment.getInitializer(), source))
                 .description(string(members, "description"))
-                .category(string(members, "category"))
+                .category(className)
                 .visibility(Visibility.fromId(string(members, "visibility")))
                 .build();
         return new JavaParameter(file, className, row, form, initializer, note.isEmpty(), note, "", "");
@@ -191,8 +191,8 @@ public final class JavaParameterSource {
 
         ParameterRow row = ParameterRow.named(name, ValueTypes.sourceName(form))
                 .value(kept(value, source))
-                .description(string(shown, "description"))
-                .category(either(shown, shared, "category"))
+                .description(either(shown, shared, "description"))
+                .category(group)
                 .changes(changes)
                 .build();
         return new JavaParameter(file, group, row, form, initializer, note.isEmpty(), note, "", "", true);

@@ -5,6 +5,7 @@ import com.botmaker.core.project.params.JavaParameterEdits;
 import com.botmaker.core.project.params.Visibility;
 import com.botmaker.core.project.params.ParameterRow;
 import com.botmaker.core.project.params.JavaParameter;
+import com.botmaker.plugin.api.params.Param;
 import com.botmaker.plugin.api.source.ManagedClasses;
 import com.botmaker.plugin.api.source.ManagedValue;
 import com.botmaker.plugin.api.source.ParameterWrite;
@@ -51,7 +52,7 @@ class JavaParametersTest {
     void everyFieldIsListedUnderItsOwnClass(@TempDir Path root) throws IOException {
         ProjectConfig config = project(root);
         write(config, "Parameters.java", parameters("""
-                    @Param(category = "Limits")
+                    @Param
                     public static int maxAttempts = 10;
                 """));
         write(config, "Tuning.java", """
@@ -71,7 +72,8 @@ class JavaParametersTest {
         // comes first is not something this class decides or a user could notice.
         assertEquals(Set.of("Parameters", "Tuning"),
                 rows.stream().map(JavaParameter::className).collect(Collectors.toSet()));
-        assertEquals(List.of("Limits"), JavaParameters.categories(config, null, TestValues.GRAMMAR));
+        assertTrue(rows.stream().allMatch(row -> row.row().category().equals(row.className())),
+                "each row's category is its class, 2026-11-05");
     }
 
     // ---- a plugin's parameter ---------------------------------------------------------------------------
@@ -81,7 +83,7 @@ class JavaParametersTest {
     void aPluginsParameterChangesItsValueOnly(@TempDir Path root) throws IOException {
         ProjectConfig config = project(root);
         write(config, "Parameters.java", parameters("""
-                    @Param(category = "Run")
+                    @Param(description = "Tries")
                     public static int tries = 10;
                 """));
         JavaParameter read = JavaParameters.scan(config, null, TestValues.GRAMMAR).getFirst();
@@ -106,7 +108,7 @@ class JavaParametersTest {
         assertInstanceOf(JavaParameters.Outcome.Stored.class, valued);
         String source = Files.readString(config.mainPackageDir().resolve("Parameters.java"));
         assertTrue(source.contains("public static int tries = 3;"), source);
-        assertTrue(source.contains("@Param(category = \"Run\")"), source);
+        assertTrue(source.contains("@Param(description = \"Tries\")"), source);
     }
 
     // ---- a schema (2026-11-04) ----------------------------------------------------------------------------
@@ -122,7 +124,7 @@ class JavaParametersTest {
         writeGroup(config, "sdk", "Sdk", "    public int rounds() { return 2; }\n");
 
         assertEquals(List.of("Parameters"), JavaParameters.ownClasses(config, null));
-        assertTrue(JavaParameters.add(config, null, "Sdk", "speed", TestValues.WHOLE_NUMBER, java("1"), "", "",
+        assertTrue(JavaParameters.add(config, null, "Sdk", "speed", TestValues.WHOLE_NUMBER, java("1"), "", null,
                 TestValues.GRAMMAR).isEmpty(), "a plugin's group takes none");
         JavaParameter rounds = JavaParameters.find(config, null, "Sdk", "rounds", TestValues.GRAMMAR).orElseThrow();
         assertTrue(rounds.declaredByPlugin() && rounds.editable(), rounds.note());
@@ -135,7 +137,7 @@ class JavaParametersTest {
         Path starting = startingOf(config, "bot", "RunChoices");
         Files.createDirectories(starting.getParent());
         Files.writeString(starting, group("bot", "RunChoices", """
-                    @Param.Shown(category = "Limits", description = "How many tries")
+                    @Param.Shown(description = "How many tries")
                     public int tries() { return 10; }
                 """));
 
@@ -145,7 +147,7 @@ class JavaParametersTest {
         JavaParameter tries = only(config);
         assertTrue(tries.group() && tries.editable(), tries.note());
         assertEquals("10", tries.row().valueText());
-        assertEquals("Limits", tries.row().category());
+        assertEquals("RunChoices", tries.row().category(), "the group is the category");
         assertEquals("How many tries", tries.row().description());
     }
 
@@ -167,8 +169,8 @@ class JavaParametersTest {
 
         JavaParameter now = only(config);
         assertInstanceOf(JavaParameters.Outcome.Stored.class, JavaParameters.declare(config, null, now,
-                now.row().toBuilder().category("Run").build(), now.form(), TestValues.GRAMMAR));
-        assertTrue(Files.readString(starting).contains("category = \"Run\""), Files.readString(starting));
+                now.row().toBuilder().description("Run tries").build(), now.form(), TestValues.GRAMMAR));
+        assertTrue(Files.readString(starting).contains("description = \"Run tries\""), Files.readString(starting));
         assertTrue(Files.readString(starting).contains("return 10;"));
         assertEquals("3", only(config).row().valueText());
 
@@ -205,7 +207,7 @@ class JavaParametersTest {
         ProjectConfig config = project(root);
 
         assertEquals("5", JavaParameters.add(config, null, "RunChoices", "tries", TestValues.WHOLE_NUMBER,
-                java("5"), "Limits", "", TestValues.GRAMMAR).orElseThrow().valueText());
+                java("5"), "", Param.Changes.OUTSIDE_RUN, TestValues.GRAMMAR).orElseThrow().valueText());
 
         Path mine = groupOf(config, "bot", "RunChoices");
         Path starting = startingOf(config, "bot", "RunChoices");
@@ -214,7 +216,7 @@ class JavaParametersTest {
             assertTrue(source.startsWith("package com.refbot.params.bot;"), source);
             assertTrue(source.contains("@Param\npublic class RunChoices"), source);
             assertTrue(source.contains("public int tries()"), source);
-            assertTrue(source.contains("category = \"Limits\""), source);
+            assertFalse(source.contains("changes"), "outside a run is the default, not written: " + source);
         }
         assertTrue(Files.readString(mine).contains("return 5;"), Files.readString(mine));
         assertTrue(Files.readString(starting).contains("return 0;"), Files.readString(starting));
@@ -280,7 +282,7 @@ class JavaParametersTest {
                     public String tries() { return ""; }
                 """));
 
-        assertTrue(JavaParameters.add(config, null, "RunChoices", "tries", TestValues.WHOLE_NUMBER, java("5"), "", "",
+        assertTrue(JavaParameters.add(config, null, "RunChoices", "tries", TestValues.WHOLE_NUMBER, java("5"), "", null,
                 TestValues.GRAMMAR).isEmpty());
         assertFalse(Files.readString(groupOf(config, "bot", "RunChoices")).contains("tries"));
     }
@@ -290,7 +292,7 @@ class JavaParametersTest {
     void aTypeWithNoBlankValueIsNotAdded(@TempDir Path root) throws IOException {
         ProjectConfig config = project(root);
 
-        assertTrue(JavaParameters.add(config, null, "RunChoices", "worker", Thread.class, java("null"), "", "",
+        assertTrue(JavaParameters.add(config, null, "RunChoices", "worker", Thread.class, java("null"), "", null,
                 TestValues.GRAMMAR).isEmpty());
 
         assertFalse(Files.exists(groupOf(config, "bot", "RunChoices")));
@@ -435,7 +437,8 @@ class JavaParametersTest {
         ProjectConfig config = project(root);
 
         Optional<ParameterRow> stored = JavaParameters.add(config, null, "Parameters", "maxAttempts",
-                TestValues.WHOLE_NUMBER, java("10"), "Limits", "How many times to try", TestValues.GRAMMAR);
+                TestValues.WHOLE_NUMBER, java("10"), "How many times to try", Param.Changes.DURING_RUN,
+                TestValues.GRAMMAR);
 
         assertTrue(stored.isPresent());
         assertEquals("10", stored.get().valueText());
@@ -444,7 +447,8 @@ class JavaParametersTest {
         assertTrue(source.startsWith("package com.refbot.params.bot;"), "its own package, which Studio keeps");
         assertTrue(source.contains("import com.botmaker.plugin.api.params.Param;"), source);
         assertTrue(source.contains("public int maxAttempts()") && source.contains("return 10;"), source);
-        assertTrue(source.contains("category = \"Limits\""), source);
+        assertTrue(source.contains("Param.Changes.DURING_RUN"), "the window adds one during a run: " + source);
+        assertEquals(Param.Changes.DURING_RUN, stored.get().changes());
     }
 
     @Test
@@ -456,7 +460,7 @@ class JavaParametersTest {
                 """));
 
         Optional<ParameterRow> refused = JavaParameters.add(config, null, "Parameters", "maxAttempts",
-                TestValues.TEXT, java("\"x\""), "", "", TestValues.GRAMMAR);
+                TestValues.TEXT, java("\"x\""), "", null, TestValues.GRAMMAR);
 
         assertTrue(refused.isEmpty());
         assertEquals(1, JavaParameters.scan(config, null, TestValues.GRAMMAR).size());
@@ -570,13 +574,12 @@ class JavaParametersTest {
     void theAnnotationMembersAreWrittenAndRemovedByTheSameCall(@TempDir Path root) throws IOException {
         ProjectConfig config = project(root);
         write(config, "Parameters.java", parameters("""
-                    @Param(category = "Limits", description = "How many times to try")
+                    @Param(description = "How many times to try")
                     public static int maxAttempts = 10;
                 """));
 
         JavaParameter entry = only(config);
         ParameterRow wanted = entry.row().toBuilder()
-                .category("")                       // removed: the default is already the empty answer
                 .description("Attempts before it gives up")
                 .visibility(Visibility.PUBLIC)
                 .build();
@@ -585,10 +588,22 @@ class JavaParametersTest {
 
         assertTrue(stored.isPresent());
         String source = Files.readString(config.mainPackageDir().resolve("Parameters.java"));
-        assertFalse(source.contains("category ="), source);
         assertTrue(source.contains("description = \"Attempts before it gives up\""), source);
         assertTrue(source.contains("visibility = Param.PUBLIC"), source);
         assertEquals(Visibility.PUBLIC, stored.get().visibility());
+    }
+
+    /** The class is the category (2026-11-05): an edit that refiles a parameter is refused, and nothing is written. */
+    @Test
+    void aCategoryIsNotRefiled(@TempDir Path root) throws IOException {
+        ProjectConfig config = project(root);
+        writeGroup(config, "bot", "RunChoices", "    public int tries() { return 10; }\n");
+        JavaParameter tries = only(config);
+        String was = Files.readString(groupOf(config, "bot", "RunChoices"));
+
+        assertInstanceOf(JavaParameters.Outcome.Refused.class, JavaParameters.declare(config, null, tries,
+                tries.row().toBuilder().category("Limits").build(), tries.form(), TestValues.GRAMMAR));
+        assertEquals(was, Files.readString(groupOf(config, "bot", "RunChoices")));
     }
 
     /** The upgrade to contract 0.14 takes the removed members off, keeps the rest, and names the fields. */
@@ -612,7 +627,7 @@ class JavaParametersTest {
         assertFalse(source.contains("min ="), source);
         assertFalse(source.contains("max ="), source);
         assertFalse(source.contains("options"), source);
-        assertTrue(source.contains("category = \"Limits\""), source);
+        assertFalse(source.contains("category"), source);
         assertTrue(source.contains("description = \"untouched\""), source);
         assertEquals(1, said.size(), said.toString());
         assertTrue(said.getFirst().contains("maxAttempts, speed"), said.getFirst());

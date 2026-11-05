@@ -113,8 +113,9 @@ public final class ParameterRow {
     }
 
     /**
-     * The category this row is filed under — free text, written by whoever declared the parameter and
-     * compared case-insensitively by the window's rail. Blank means uncategorised, the ordinary case.
+     * The category this row is filed under: the simple name of the class that holds it (2026-11-05), the group
+     * {@code Running} for {@code params/…/Running.java}. Never free text any more — the annotation has no such member —
+     * so the reader sets it from the class and no edit changes it. Blank only for a row no class was read for.
      */
     public String category() {
         return category;
@@ -227,7 +228,7 @@ public final class ParameterRow {
             return this;
         }
 
-        /** The category inside the section, out of the owning group's declared set. */
+        /** The category: the simple name of the class holding the parameter, which the reader sets. */
         public Builder category(String category) {
             this.category = category;
             return this;

@@ -75,7 +75,8 @@ class FieldParametersTest {
         String written = plan.rewrites().get(group);
         assertTrue(written.contains("public int tries()"), plan.toString());
         assertTrue(written.contains("return 3;"), written);
-        assertTrue(written.contains("category = \"Limits\""), written);
+        assertFalse(written.contains("category"), "the group is the category: " + written);
+        assertTrue(written.contains("description = \"Tries\""), written);
         assertEquals(written, plan.starting().get(JavaParameters.startingFile(config, group).orElseThrow()));
         String read = plan.rewrites().get(source(config, "Reader"));
         assertTrue(read.contains("return new Parameters().tries() + new Parameters().rounds();"), read);

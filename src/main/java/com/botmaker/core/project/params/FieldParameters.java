@@ -324,7 +324,7 @@ public final class FieldParameters {
 
     private static String withMethod(String source, ValueGrammar grammar, JavaParameter parameter, JavaValue value) {
         return JavaParameterEdits.addMethod(source, grammar, parameter.className(), parameter.name(), parameter.form(),
-                value, parameter.row().category(), parameter.row().description(), Param.Changes.OUTSIDE_RUN);
+                value, parameter.row().description(), Param.Changes.OUTSIDE_RUN);
     }
 
     private static Optional<String> read(Path file) {

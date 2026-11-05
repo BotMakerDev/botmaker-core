@@ -43,7 +43,7 @@ class JavaParameterEditsTest {
             public final class Parameters {
 
                 /** How many times to try before giving up. */
-                @Param(category = "Limits")
+                @Param(description = "Tries")
                 public static int maxAttempts = 10;
 
                 @Param
@@ -60,9 +60,9 @@ class JavaParameterEditsTest {
     }
 
     private static String add(String source, String className, String field, Type form,
-                              Object value, String category, String description) {
+                              Object value, String description) {
         return JavaParameterEdits.add(source, TestValues.GRAMMAR, className, field, form,
-                initializer(form, value), category, description);
+                initializer(form, value), description);
     }
 
     private static JavaValue initializer(Type form, Object value) {
@@ -82,7 +82,7 @@ class JavaParameterEditsTest {
 
         assertTrue(edited.contains("public static int maxAttempts = 25;"), edited);
         assertTrue(edited.contains("/** How many times to try before giving up. */"), edited);
-        assertTrue(edited.contains("@Param(category = \"Limits\")"), edited);
+        assertTrue(edited.contains("@Param(description = \"Tries\")"), edited);
         assertTrue(edited.contains("java.time.Duration.ofMillis(3000L)"), edited);
     }
 
@@ -196,51 +196,78 @@ class JavaParameterEditsTest {
     @Test
     void aMemberIsAddedToAnAnnotationThatHasOthers() {
         String edited = JavaParameterEdits.setMembers(SOURCE, "Parameters", "maxAttempts",
-                Map.of("description", "How many times to try"));
+                Map.of("visibility", "public"));
 
-        assertTrue(edited.contains("category = \"Limits\""), edited);
-        assertTrue(edited.contains("description = \"How many times to try\""), edited);
+        assertTrue(edited.contains("description = \"Tries\""), edited);
+        assertTrue(edited.contains("@Param(description = \"Tries\", visibility = Param.PUBLIC)"), edited);
     }
 
     @Test
     void aBareParamGrowsMembersWhenOneIsSet() {
         String edited = JavaParameterEdits.setMembers(SOURCE, "Parameters", "restBetween",
-                Map.of("category", "Timing"));
+                Map.of("description", "Timing"));
 
-        assertTrue(edited.contains("@Param(category = \"Timing\")"), edited);
+        assertTrue(edited.contains("@Param(description = \"Timing\")"), edited);
     }
 
     @Test
     void aBlankValueRemovesTheMemberRatherThanWritingAnEmptyOne() {
         Map<String, String> edits = new LinkedHashMap<>();
-        edits.put("category", "");
+        edits.put("description", "");
         String edited = JavaParameterEdits.setMembers(SOURCE, "Parameters", "maxAttempts", edits);
 
-        assertFalse(edited.contains("category"), edited);
+        assertFalse(edited.contains("description"), edited);
         assertTrue(edited.contains("public static int maxAttempts = 10;"), edited);
     }
 
     @Test
     void theRemovedMembersComeOffAndNothingElseDoes() {
-        String old = SOURCE.replace("@Param(category = \"Limits\")",
-                "@Param(min = 1, options = {\"a\"}, category = \"Limits\")");
+        String old = SOURCE.replace("@Param(description = \"Tries\")",
+                "@Param(min = 1, options = {\"a\"}, description = \"Tries\")");
         JavaParameterEdits.Stripped stripped = JavaParameterEdits.stripRemovedMembers(old);
 
         assertFalse(stripped.source().contains("min ="), stripped.source());
         assertFalse(stripped.source().contains("options"), stripped.source());
-        assertTrue(stripped.source().contains("category = \"Limits\""), stripped.source());
+        assertTrue(stripped.source().contains("description = \"Tries\""), stripped.source());
         assertEquals(List.of("maxAttempts"), stripped.fields());
         assertEquals(SOURCE, JavaParameterEdits.stripRemovedMembers(SOURCE).source(), "nothing to take off");
+    }
+
+    /** The group is the category (2026-11-05): a category comes off a group, its methods' Shown, and a field. */
+    @Test
+    void stripRemovedMembersTakesCategory() {
+        String group = """
+                package com.example.bot.params.bot;
+
+                import com.botmaker.plugin.api.params.Param;
+
+                @Param(category = "Run", description = "The run's own")
+                public class Running {
+
+                    @Param.Shown(category = "Run", description = "How many times")
+                    public int tries() { return 3; }
+
+                    public int rounds() { return 2; }
+                }
+                """;
+        JavaParameterEdits.Stripped stripped = JavaParameterEdits.stripRemovedMembers(group);
+
+        assertFalse(stripped.source().contains("category"), stripped.source());
+        assertTrue(stripped.source().contains("@Param(description = \"The run's own\")"), stripped.source());
+        assertTrue(stripped.source().contains("@Param.Shown(description = \"How many times\")"), stripped.source());
+        assertEquals(List.of("Running", "tries"), stripped.fields());
+
+        String field = SOURCE.replace("@Param(description = \"Tries\")", "@Param(category = \"Limits\")");
+        assertEquals(List.of("maxAttempts"), JavaParameterEdits.stripRemovedMembers(field).fields());
     }
 
     // ---- adding and removing --------------------------------------------------------------------------
 
     @Test
     void anAddedParameterIsAPublicStaticAnnotatedField() {
-        String edited = add(SOURCE, "Parameters", "label", TEXT, "hello", "Naming", "What to call it");
+        String edited = add(SOURCE, "Parameters", "label", TEXT, "hello", "What to call it");
 
-        assertTrue(edited.contains("@Param(category = \"Naming\", description = \"What to call it\")"),
-                edited);
+        assertTrue(edited.contains("@Param(description = \"What to call it\")"), edited);
         assertTrue(edited.contains("public static String label = \"hello\";"), edited);
         // Appended: the author's own order is theirs.
         assertTrue(edited.indexOf("restBetween") < edited.indexOf("label"), edited);
@@ -258,17 +285,17 @@ class JavaParameterEditsTest {
                 public final class Settings {
                 }
                 """;
-        String edited = add(bare, "Settings", "label", TEXT, "hello", "", "");
+        String edited = add(bare, "Settings", "label", TEXT, "hello", "");
         assertTrue(edited.contains("import " + com.botmaker.plugin.api.params.Param.class.getCanonicalName() + ";"),
                 edited);
 
-        String taken = add(SOURCE, "Parameters", "label", TEXT, "hello", "", "");
+        String taken = add(SOURCE, "Parameters", "label", TEXT, "hello", "");
         assertFalse(taken.contains("import com.botmaker.plugin.api.params.Param;"), taken);
     }
 
     @Test
     void anAddedParameterIsIndentedWithSpacesLikeTheRestOfTheFile() {
-        String edited = add(SOURCE, "Parameters", "label", TEXT, "hello", "", "");
+        String edited = add(SOURCE, "Parameters", "label", TEXT, "hello", "");
 
         assertFalse(edited.contains("\t"), edited);
         assertTrue(edited.contains("\n    public static String label = \"hello\";"), edited);
@@ -288,7 +315,7 @@ class JavaParameterEditsTest {
 
     @Test
     void anAddedParameterWithNothingToSayGetsABareAnnotation() {
-        String edited = add(SOURCE, "Parameters", "label", TEXT, "hello", "", "");
+        String edited = add(SOURCE, "Parameters", "label", TEXT, "hello", "");
 
         assertTrue(edited.contains("@Param" + System.lineSeparator())
                 || edited.contains("@Param\n") || edited.contains("@Param "), edited);
@@ -297,9 +324,9 @@ class JavaParameterEditsTest {
 
     @Test
     void addingANameThatIsTakenOrAClassThatIsNotThereChangesNothing() {
-        assertSame(SOURCE, add(SOURCE, "Parameters", "maxAttempts", NUMBER, 1, "", ""));
-        assertSame(SOURCE, add(SOURCE, "Missing", "a", NUMBER, 1, "", ""));
-        assertSame(SOURCE, add(SOURCE, "Parameters", "  ", NUMBER, 1, "", ""));
+        assertSame(SOURCE, add(SOURCE, "Parameters", "maxAttempts", NUMBER, 1, ""));
+        assertSame(SOURCE, add(SOURCE, "Missing", "a", NUMBER, 1, ""));
+        assertSame(SOURCE, add(SOURCE, "Parameters", "  ", NUMBER, 1, ""));
     }
 
     @Test
@@ -307,7 +334,7 @@ class JavaParameterEditsTest {
         String edited = JavaParameterEdits.remove(SOURCE, "Parameters", "maxAttempts");
 
         assertFalse(edited.contains("maxAttempts"), edited);
-        assertFalse(edited.contains("category = \"Limits\""), edited);
+        assertFalse(edited.contains("description = \"Tries\""), edited);
         assertTrue(edited.contains("restBetween"), edited);
     }
 
@@ -335,13 +362,13 @@ class JavaParameterEditsTest {
 
     @Test
     void whatIsWrittenIsWhatIsReadBack() {
-        String edited = add(SOURCE, "Parameters", "label", TEXT, "a \"quoted\" value", "Naming", "");
+        String edited = add(SOURCE, "Parameters", "label", TEXT, "a \"quoted\" value", "");
         JavaParameter parameter = JavaParameterSource.read(null, edited, TestValues.GRAMMAR).stream()
                 .filter(p -> p.name().equals("label")).findFirst().orElseThrow();
 
         assertEquals("\"a \\\"quoted\\\" value\"", parameter.row().valueText());
         assertEquals("a \"quoted\" value", TestValues.GRAMMAR.valueOf(TEXT, parameter.row().valueText()).orElseThrow());
-        assertEquals("Naming", parameter.row().category());
+        assertEquals("Parameters", parameter.row().category(), "the class it was added to");
         assertTrue(parameter.editable(), parameter.note());
     }
 
@@ -353,7 +380,7 @@ class JavaParameterEditsTest {
                 import com.botmaker.plugin.api.params.Param.Shown;
 
                 public class Run {
-                    @Shown(category = "x")
+                    @Shown(description = "x")
                     public int tries() { return 1; }
                 }
                 """;

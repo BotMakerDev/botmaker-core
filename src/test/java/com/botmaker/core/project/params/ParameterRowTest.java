@@ -95,9 +95,9 @@ class ParameterRowTest {
         assertNotEquals(spaced, row("rest").build());
     }
 
-    /** A category is free text the window files a row under — trimmed, and never a vocabulary. */
+    /** A category is the class the reader found the row in (2026-11-05), trimmed; none is the window's General. */
     @Test
-    void aCategoryIsFreeTextTheWindowFilesARowUnder() {
+    void aCategoryIsTheClassTheRowWasReadIn() {
         ParameterRow filed = row("rest").category("  Timing ").build();
 
         assertEquals("Timing", filed.category());

@@ -30,9 +30,9 @@ class MisplacedParamsTest {
     private static final PluginCoordinate TEST = new PluginCoordinate("com.github.BotMakerDev", "botmaker-test");
 
     static final ManagedValue<Boolean> SETUP = ManagedValue.param(TestValue.Id.DO_SETUP).in(TestValue.Holder.VALUES)
-            .startsAs(MisplacedParamsTest::setup).shown("Run", "Setup", null).because("New.");
+            .startsAs(MisplacedParamsTest::setup).shown("Setup", null).because("New.");
     static final ManagedValue<Integer> PAUSE = ManagedValue.param(TestValue.Id.PAUSE).in(TestValue.Holder.SDK)
-            .startsAs(MisplacedParamsTest::pause).shown("Run", "Pause", null).because("New.");
+            .startsAs(MisplacedParamsTest::pause).shown("Pause", null).because("New.");
 
     private static final Map<PluginCoordinate, List<ManagedValue<?>>> BY_PLUGIN = Map.of(TEST, List.of(SETUP, PAUSE));
 

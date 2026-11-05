@@ -23,6 +23,7 @@ import java.util.Arrays;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -194,10 +195,10 @@ class ManagedHoldersTest {
     }
 
     private static final ManagedValue<Boolean> DO_SETUP = ManagedValue.param(TestValue.Id.DO_SETUP).in(TestValue.Holder.SDK)
-            .startsAs(ManagedHoldersTest::setUpFirst).shown("Run", "Set up first", Param.Visibility.PUBLIC).because("Mine.");
+            .startsAs(ManagedHoldersTest::setUpFirst).shown("Set up first",Param.Visibility.PUBLIC).because("Mine.");
 
     private static final ManagedValue<java.time.Duration> PAUSE = ManagedValue.param(TestValue.Id.PAUSE).in(TestValue.Holder.SDK)
-            .startsAs(ManagedHoldersTest::noPause).shown("", "", Param.Visibility.EDITOR).because("Mine.");
+            .startsAs(ManagedHoldersTest::noPause).shown("",Param.Visibility.EDITOR).because("Mine.");
 
     /**
      * A plugin's parameters are methods of its group in {@code params/}, beside the holder's folder (2026-11-04):
@@ -219,7 +220,7 @@ class ManagedHoldersTest {
                 source);
         assertTrue(source.contains("@Param\npublic class Sdk"), source);
         assertTrue(source.contains("@TestValue(TestValue.Id.DO_SETUP)"), source);
-        assertTrue(source.contains("category = \"Run\""), source);
+        assertFalse(source.contains("category"), "the group is the category: " + source);
         assertTrue(source.contains("public boolean doSetup()"), source);
         assertTrue(source.contains("return true;"), source);
         assertTrue(source.contains("public Duration pause()"), source);
@@ -294,7 +295,10 @@ class ManagedHoldersTest {
         assertEquals(java.util.Map.of(new HolderFiles.Key("com_github_botmakerdev.botmaker_sdk","Sdk"), moved), found);
     }
 
-    /** A marked method whose category or note the plugin since changed gets the plugin's back; its value stays. */
+    /**
+     * A marked method whose note the plugin since changed gets the plugin's back, and a category it once carried is
+     * taken off (2026-11-05: the group is the category); its value stays.
+     */
     @Test
     void aMarkedParameterMethodsDeclarationFollowsThePlugin() {
         String had = """
@@ -316,7 +320,7 @@ class ManagedHoldersTest {
 
         String after = ManagedHolders.keptValues(had, List.of(DO_SETUP), TestValues.GRAMMAR);
 
-        assertTrue(after.contains("category = \"Run\""), after);
+        assertFalse(after.contains("category"), after);
         assertTrue(after.contains("description = \"Set up first\""), after);
         assertTrue(after.contains("return false;"), "the user's value stays: " + after);
         assertEquals(1, after.split("boolean doSetup", -1).length - 1, after);
@@ -331,7 +335,7 @@ class ManagedHoldersTest {
     @Test
     void anUnwritableParameterCostsOnlyItself() {
         ManagedValue<java.awt.Point> spot = ManagedValue.param(TestValue.Id.MINE).in(TestValue.Holder.SDK)
-                .startsAs(ManagedHoldersTest::somewhere).shown("", "", Param.Visibility.EDITOR).because("Mine.");
+                .startsAs(ManagedHoldersTest::somewhere).shown("",Param.Visibility.EDITOR).because("Mine.");
         List<ManagedValue<?>> declared = List.of(DECLARED.getFirst(), spot);
         String source = assertInstanceOf(ManagedHolders.Plan.Write.class, ManagedHolders.plan(
                 ProjectConfig.forDirectory(dir.resolve("bot")), SDK, DECLARED.getFirst(), declared,
@@ -348,7 +352,7 @@ class ManagedHoldersTest {
     @Test
     void anEmptySetOfClassesParameterIsWritten() {
         ManagedValue<java.util.Set<Class<? extends TestOutcome>>> skip = ManagedValue.param(TestValue.Id.NAMES)
-                .in(TestValue.Holder.SDK).startsAs(ManagedHoldersTest::skipNothing).shown("Run", "Skipped", Param.Visibility.PUBLIC)
+                .in(TestValue.Holder.SDK).startsAs(ManagedHoldersTest::skipNothing).shown("Skipped",Param.Visibility.PUBLIC)
                 .because("Mine.");
         String had = """
                 package com.bot.params.com_github_botmakerdev.botmaker_sdk;

@@ -188,25 +188,6 @@ public final class JavaParameters {
         return qualifier != null && !qualifier.isBlank() && classes(config, state).contains(qualifier);
     }
 
-    /**
-     * Every category the window may file a parameter under: every string the bot's own fields actually use.
-     *
-     * <p>A {@code @Param}'s category is free text — the six the SDK used to declare were a vocabulary, and a
-     * bot's author names their own — so the only way to know one exists is that something is filed under it.
-     */
-    public static List<String> categories(ProjectConfig config, ProjectState state) {
-        return categories(config, state, PluginHost.grammar());
-    }
-
-    /** The same, against a given grammar. */
-    public static List<String> categories(ProjectConfig config, ProjectState state, ValueGrammar grammar) {
-        Set<String> out = new LinkedHashSet<>();
-        for (JavaParameter parameter : scan(config, state, grammar)) {
-            if (!parameter.row().category().isBlank()) out.add(parameter.row().category());
-        }
-        return List.copyOf(out);
-    }
-
     // ---- changing ---------------------------------------------------------------------------------------
     //
     // Each one answers the row as it reads back, or empty when nothing was written. Empty is an ordinary
@@ -306,6 +287,11 @@ public final class JavaParameters {
             return new Outcome.Refused(parameter.qualified() + " is a plugin's parameter: only its value can be"
                     + " changed. " + parameter.owner());
         }
+        // The class holding a parameter is its category (2026-11-05): there is nothing to refile it under.
+        if (!wanted.category().equals(before.category())) {
+            return new Outcome.Refused(name + " is listed under its class, " + className
+                    + ": a parameter's category is the class that holds it.");
+        }
         if (parameter.group()) return applyToGroup(config, state, parameter, wanted, wantedForm, grammar);
 
         if (!wanted.name().equals(name)) {
@@ -324,7 +310,6 @@ public final class JavaParameters {
         }
 
         Map<String, String> members = new LinkedHashMap<>();
-        if (!wanted.category().equals(before.category())) members.put("category", wanted.category());
         if (!wanted.description().equals(before.description())) {
             members.put("description", wanted.description());
         }
@@ -371,15 +356,18 @@ public final class JavaParameters {
      */
     public static Optional<ParameterRow> add(ProjectConfig config, ProjectState state, String className,
                                              String name, Type form, JavaValue value,
-                                             String category, String description) {
-        return add(config, state, className, name, form, value, category, description,
-                PluginHost.grammar());
+                                             String description, Param.Changes changes) {
+        return add(config, state, className, name, form, value, description, changes, PluginHost.grammar());
     }
 
-    /** The same, against a given grammar. {@code value} may be null: the field is declared with none. */
+    /**
+     * The same, against a given grammar. {@code value} may be null: the field is declared with none. {@code changes}
+     * is when a group's parameter changes — {@link Param.Changes#DURING_RUN} for one the window adds (2026-11-05, the
+     * user's call), its own for one put back — and means nothing to a field, which has no such member.
+     */
     public static Optional<ParameterRow> add(ProjectConfig config, ProjectState state, String className,
                                              String name, Type form, JavaValue value,
-                                             String category, String description, ValueGrammar grammar) {
+                                             String description, Param.Changes changes, ValueGrammar grammar) {
         if (config == null || className == null || className.isBlank()) return Optional.empty();
         if (find(config, state, className, name, grammar).isPresent()) return Optional.empty();
         // A plugin's file takes no parameter of the author's.
@@ -396,7 +384,8 @@ public final class JavaParameters {
         if (asGroup && group.isEmpty()) group = createGroup(config, state, className);
         if (group.isPresent()) {
             Function<JavaValue, UnaryOperator<String>> adding = start -> source -> JavaParameterEdits.addMethod(
-                    source, grammar, className, name, form, start, category, description, Param.Changes.OUTSIDE_RUN);
+                    source, grammar, className, name, form, start, description,
+                    changes == null ? Param.Changes.OUTSIDE_RUN : changes);
             // The starting copy first: a parameter it lacks, or already holds under that name, the fit would drop or
             // reset, so the private copy is written only once the starting one took the declaration.
             if (!rewriteStarting(config, group.get(), adding.apply(blank.get()))) return Optional.empty();
@@ -419,7 +408,7 @@ public final class JavaParameters {
             }
         }
         rewriteAll(config, state, source -> JavaParameterEdits.add(
-                source, grammar, className, name, form, value, category, description));
+                source, grammar, className, name, form, value, description));
         return reread(config, state, className, name, grammar);
     }
 
@@ -732,7 +721,7 @@ public final class JavaParameters {
     // ---- a group's parameters (2026-11-04) -----------------------------------------------------------------
     //
     // A group lives whole in params/, never versioned; its starting copy, the same path under starting-params/ at
-    // the bot's root, is committed. A value edit writes params/ only; what the parameter is (category, description,
+    // the bot's root, is committed. A value edit writes params/ only; what the parameter is (description,
     // when it changes) and a new parameter go to both, so the fitter keeps them.
 
     /** {@link #apply} for a method of a group: its value in params/, what it is shown as in both copies. */
@@ -750,7 +739,6 @@ public final class JavaParameters {
             return held == null ? gone(parameter) : applyToGroup(config, state, held, wanted, wantedForm, grammar);
         }
         Map<String, String> members = new LinkedHashMap<>();
-        if (!wanted.category().equals(before.category())) members.put("category", wanted.category());
         if (!wanted.description().equals(before.description())) members.put("description", wanted.description());
         if (wanted.changes() != before.changes()) members.put("changes", wanted.changes().id());
         if (!members.isEmpty()) {
@@ -889,7 +877,7 @@ public final class JavaParameters {
             return Optional.of(group + " has no starting copy, so a new parameter would not last.");
         }
         UnaryOperator<String> added = source -> {
-            String declared = JavaParameterEdits.addMethod(source, grammar, group, name, form, start.get(), "", "",
+            String declared = JavaParameterEdits.addMethod(source, grammar, group, name, form, start.get(), "",
                     Param.Changes.DURING_RUN);
             return declared.equals(source) ? source : JavaParameterEdits.withMarks(declared, group, name,
                     write.marks(), write.groupMarks(), classes).orElse(source);
@@ -1086,9 +1074,10 @@ public final class JavaParameters {
     }
 
     /**
-     * Takes {@code @Param}'s removed members ({@code min}, {@code max}, {@code options}) off every field in the
-     * bot (2026-10-29), so a bot written against contract 0.13 compiles against 0.14. Answers one sentence per
-     * file changed, naming its fields; none when there was nothing to take off. Run by the upgrade pass.
+     * Takes {@code @Param}'s removed members ({@code min}, {@code max}, {@code options}, 2026-10-29; {@code category},
+     * 2026-11-05, also off {@code @Param.Shown}) off every field, group and group method in the bot, so an older bot
+     * compiles against the current contract. Answers one sentence per file changed, naming what changed; none when
+     * there was nothing to take off. Run by the upgrade pass.
      */
     public static List<String> stripRemovedMembers(ProjectConfig config, ProjectState state) {
         if (config == null) return List.of();
@@ -1097,7 +1086,8 @@ public final class JavaParameters {
             if (!source.contains("Param")) return null;   // a cheap skip; the parse decides what an @Param is
             JavaParameterEdits.Stripped stripped = JavaParameterEdits.stripRemovedMembers(source);
             if (stripped.fields().isEmpty()) return null;
-            said.add("@Param no longer takes min, max or options; removed from " + String.join(", ", stripped.fields())
+            said.add("@Param no longer takes min, max, options or category; removed from "
+                    + String.join(", ", stripped.fields())
                     + " in " + visited.getFileName() + ".");
             return stripped.source();
         });

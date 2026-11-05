@@ -204,7 +204,8 @@ class ProjectUpgradeTest {
 
             String source = Files.readString(root.resolve("project/src/main/java/com/mybot/Subject1.java"));
             assertFalse(source.contains("min ="), source);
-            assertTrue(source.contains("category = \"Limits\""), source);
+            assertFalse(source.contains("category ="), "the group is the category since 2026-11-05: " + source);
+            assertTrue(source.contains("public static int attempts = 3;"), source);
             assertTrue(result.filesRewritten() >= 1, result.summary());
             assertTrue(result.summary().contains("attempts"), result.summary());
         }

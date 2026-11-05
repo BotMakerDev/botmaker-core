@@ -88,13 +88,12 @@ class JavaParameterSourceTest {
     @Test
     void everyAnnotationMemberIsRead() {
         JavaParameter parameter = read(wrap("""
-                    @Param(category = "Limits", description = "How many times to try",
-                            visibility = "public")
+                    @Param(description = "How many times to try", visibility = "public")
                     public static int maxAttempts = 10;
                 """)).getFirst();
 
         ParameterRow row = parameter.row();
-        assertEquals("Limits", row.category());
+        assertEquals("Parameters", row.category(), "the class holding it, 2026-11-05");
         assertEquals("How many times to try", row.description());
         assertEquals(Visibility.PUBLIC, row.visibility());
     }
@@ -103,21 +102,22 @@ class JavaParameterSourceTest {
     @Test
     void aRemovedMemberIsIgnored() {
         JavaParameter parameter = read(wrap("""
-                    @Param(options = {"fast", "slow"}, min = 1)
+                    @Param(options = {"fast", "slow"}, min = 1, category = "Limits")
                     public static String speed = "fast";
                 """)).getFirst();
 
         assertEquals("\"fast\"", parameter.row().valueText());
+        assertEquals("Parameters", parameter.row().category(), "a removed category is not read either");
     }
 
     @Test
-    void anUnadornedParameterIsInTheDefaultGroupAndNotPublic() {
+    void anUnadornedParameterIsInItsClassAndNotPublic() {
         ParameterRow row = read(wrap("""
                     @Param
                     public static int a = 1;
                 """)).getFirst().row();
 
-        assertEquals("", row.category());
+        assertEquals("Parameters", row.category());
         assertEquals(Visibility.EDITOR_ONLY, row.visibility());
     }
 
@@ -399,13 +399,13 @@ class JavaParameterSourceTest {
 
     @Test
     void aMemberThatIsNotALiteralReadsAsAbsent() {
-        // Without bindings a constant's value is unknowable, and a wrong category is worse than none.
+        // Without bindings a constant's value is unknowable, and a wrong description is worse than none.
         JavaParameter parameter = read(wrap("""
-                    @Param(category = SOME_CONSTANT)
+                    @Param(description = SOME_CONSTANT)
                     public static int a = 1;
                 """)).getFirst();
 
-        assertEquals("", parameter.row().category());
+        assertEquals("", parameter.row().description());
     }
 
     @Test

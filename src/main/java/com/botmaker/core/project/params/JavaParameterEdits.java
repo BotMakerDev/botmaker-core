@@ -108,7 +108,7 @@ public final class JavaParameterEdits {
      */
     @SuppressWarnings("unchecked")
     public static String addMethod(String source, ValueGrammar grammar, String group, String name, Type form,
-                                   JavaValue value, String category, String description, Param.Changes changes) {
+                                   JavaValue value, String description, Param.Changes changes) {
         if (value == null || !writable(grammar, form) || name == null || name.isBlank()) return source;
         CompilationUnit unit = BotParser.syntax(source);
         AST ast = unit.getAST();
@@ -120,7 +120,6 @@ public final class JavaParameterEdits {
         if (returnType == null) return source;
         MethodDeclaration method = ast.newMethodDeclaration();
         List<MemberValuePair> members = new ArrayList<>();
-        if (category != null && !category.isBlank()) members.add(member(ast, "category", category));
         if (description != null && !description.isBlank()) members.add(member(ast, "description", description));
         if (changes == Param.Changes.DURING_RUN) members.add(changesMember(ast, changes));
         if (!members.isEmpty()) {
@@ -473,7 +472,7 @@ public final class JavaParameterEdits {
     /**
      * Sets, changes or removes {@code @Param} members — a blank value removes the member.
      *
-     * <p>Removing rather than writing {@code category = ""} keeps the annotation saying only what the
+     * <p>Removing rather than writing {@code description = ""} keeps the annotation saying only what the
      * author chose: the default is already the empty answer, and an annotation full of empty strings is a
      * declaration that reads as if six decisions were made when none were.
      */
@@ -503,13 +502,18 @@ public final class JavaParameterEdits {
         });
     }
 
-    /** The {@code @Param} members contract 0.14 removed (2026-10-29): rules about the value, not the field. */
-    public static final Set<String> REMOVED_MEMBERS = Set.of("min", "max", "options");
+    /**
+     * The {@code @Param} members the contract removed: {@code min}, {@code max} and {@code options} in 0.14
+     * (2026-10-29), rules about the value, not the field; {@code category} in 0.15 (2026-11-05), since the group class
+     * is the category. {@code @Param.Shown} lost {@code category} too.
+     */
+    public static final Set<String> REMOVED_MEMBERS = Set.of("min", "max", "options", "category");
 
     /**
-     * {@code source} with {@link #REMOVED_MEMBERS} taken off every {@code @Param} in it, and the names of the
-     * fields that lost one — the upgrade that lets a bot written before 0.14 compile again. Nothing else in the
-     * file is touched; a file with none of them comes back as it was, with no names.
+     * {@code source} with {@link #REMOVED_MEMBERS} taken off every {@code @Param} and {@code @Param.Shown} in it, and
+     * the names of what lost one — a field, a group class or a group's method — the upgrade that lets an older bot
+     * compile again. Nothing else in the file is touched; a file with none of them comes back as it was, with no
+     * names.
      */
     public static Stripped stripRemovedMembers(String source) {
         CompilationUnit unit = BotParser.syntax(source);
@@ -519,20 +523,23 @@ public final class JavaParameterEdits {
             @Override
             public boolean visit(FieldDeclaration field) {
                 // True either way: an initializer's anonymous class may declare a field of its own.
-                if (!(JavaParameterSource.paramAnnotation(field) instanceof NormalAnnotation normal)) return true;
-                ListRewrite pairs = rewrite.getListRewrite(normal, NormalAnnotation.VALUES_PROPERTY);
-                boolean any = false;
-                for (Object each : normal.values()) {
-                    MemberValuePair pair = (MemberValuePair) each;
-                    if (!REMOVED_MEMBERS.contains(pair.getName().getIdentifier())) continue;
-                    pairs.remove(pair, null);
-                    any = true;
-                }
-                if (any) {
+                if (strip(rewrite, JavaParameterSource.paramAnnotation(field))) {
                     for (Object fragment : field.fragments()) {
                         fields.add(((VariableDeclarationFragment) fragment).getName().getIdentifier());
                     }
                 }
+                return true;
+            }
+
+            @Override
+            public boolean visit(TypeDeclaration type) {
+                if (strip(rewrite, BotAnnotation.PARAM.on(type))) fields.add(type.getName().getIdentifier());
+                return true;
+            }
+
+            @Override
+            public boolean visit(MethodDeclaration method) {
+                if (strip(rewrite, BotAnnotation.PARAM_SHOWN.on(method))) fields.add(method.getName().getIdentifier());
                 return true;
             }
         });
@@ -540,7 +547,24 @@ public final class JavaParameterEdits {
                 : new Stripped(AstRewriteHelper.applyRewrite(rewrite, source), List.copyOf(fields));
     }
 
-    /** What {@link #stripRemovedMembers} answers: the new source, and the fields it changed, in file order. */
+    /** Removes {@link #REMOVED_MEMBERS} from {@code annotation} in {@code rewrite}; true when it held one. */
+    private static boolean strip(ASTRewrite rewrite, Annotation annotation) {
+        if (!(annotation instanceof NormalAnnotation normal)) return false;
+        ListRewrite pairs = rewrite.getListRewrite(normal, NormalAnnotation.VALUES_PROPERTY);
+        boolean any = false;
+        for (Object each : normal.values()) {
+            MemberValuePair pair = (MemberValuePair) each;
+            if (!REMOVED_MEMBERS.contains(pair.getName().getIdentifier())) continue;
+            pairs.remove(pair, null);
+            any = true;
+        }
+        return any;
+    }
+
+    /**
+     * What {@link #stripRemovedMembers} answers: the new source, and the names of the fields, group classes and
+     * methods it changed, in file order.
+     */
     public record Stripped(String source, List<String> fields) {}
 
     /**
@@ -558,7 +582,7 @@ public final class JavaParameterEdits {
      * nothing else; the imports are added after, so the region it formats is the field alone.
      */
     public static String add(String source, ValueGrammar grammar, String className, String fieldName,
-                             Type form, JavaValue initializer, String category, String description) {
+                             Type form, JavaValue initializer, String description) {
         if (!writable(grammar, form) || fieldName == null || fieldName.isBlank()) return source;
         CompilationUnit unit = BotParser.syntax(source);
         TypeDeclaration target = typeDeclaration(unit, className);
@@ -581,7 +605,7 @@ public final class JavaParameterEdits {
         field.setType(type);
         @SuppressWarnings("unchecked")
         List<IExtendedModifier> modifiers = field.modifiers();
-        modifiers.add(annotation(ast, category, description));
+        modifiers.add(annotation(ast, description));
         @SuppressWarnings("unchecked")
         List<Modifier> keywords = ast.newModifiers(Modifier.PUBLIC | Modifier.STATIC);
         modifiers.addAll(keywords);
@@ -610,9 +634,8 @@ public final class JavaParameterEdits {
     }
 
     /** {@code @Param}, with the members the author chose and no others. */
-    private static Annotation annotation(AST ast, String category, String description) {
+    private static Annotation annotation(AST ast, String description) {
         List<MemberValuePair> members = new ArrayList<>();
-        if (category != null && !category.isBlank()) members.add(member(ast, "category", category));
         if (description != null && !description.isBlank()) members.add(member(ast, "description", description));
         if (members.isEmpty()) {
             MarkerAnnotation marker = ast.newMarkerAnnotation();
