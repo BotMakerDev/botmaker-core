@@ -9,6 +9,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Phase 10c (2026-11-05), plugins through the core.
+  - A client's plugin writes the bot through the core. Each write is a `PluginWrite` in `Request.PluginWriting`.
+    `Request.Batch` opens and ends a batch, and what a batch writes is one step of the core's history.
+    `HostPluginValues.installForwarding` sends a copy's writes on, and `perform` makes a forwarded write.
+  - The core resolves the pom alone: `OpenProject.Libraries.resolve` returns a `MavenService.Resolution` and does the
+    contract's `reconcile`. The core writes missing holders on first attach and after `Reload`. It tells
+    `CoreEvent.LibrariesResolved` as a client attaches and before a reload's answer.
+  - `Request.Try` carries a `run.trial.TrialAsk`: a statement by `BlockId` with its given values, or a method run on its
+    own. The core plans it and writes the caller. `ProbeCalls` moved here from Studio.
+  - The core's plugins have their own `HostRuns` and `HostHistory`.
+
+### Removed
+
+- `Request.Recorded` and `CoreClient.recorded`, since a plugin's writes are the core's. `CoreEvent.UiRequest`, never
+  sent: the core forwards no window, and its `hasUi()` is false.
+
 - Phase 10b (2026-11-05), runs in the core. `OpenProject` owns `CodeExecutionService` and `DebuggingService`. New
   requests: `Compile`, `Run`, `RunEntry`, `Try`, `Debug`, and the `Request.Control`s `Stop`, `Answer`, `Debugging`, which
   run on a thread of their own so a stop never waits behind a slow ask. New events: `RunTraced`, `RunFrame`, `RunProcess`,

@@ -9,8 +9,13 @@ import com.botmaker.core.events.EventBus;
 import com.botmaker.core.events.FileEdit;
 import com.botmaker.core.index.TypeSummaryManager;
 import com.botmaker.core.parser.EditorOutput;
+import com.botmaker.core.plugin.HostHistory;
+import com.botmaker.core.plugin.HostPluginValues;
+import com.botmaker.core.plugin.HostRuns;
 import com.botmaker.core.plugin.HostServices;
 import com.botmaker.core.plugin.PluginHost;
+import com.botmaker.core.plugin.PluginWrite;
+import com.botmaker.core.plugin.WriteSteps;
 import com.botmaker.core.project.ProjectConfig;
 import com.botmaker.core.project.ProjectFile;
 import com.botmaker.core.project.ProjectMode;
@@ -26,7 +31,8 @@ import com.botmaker.core.run.RunTelemetry;
 import com.botmaker.core.run.debug.DebugSnapshot;
 import com.botmaker.core.run.debug.DebugView;
 import com.botmaker.core.run.debug.FollowPacer;
-import com.botmaker.core.run.trial.TrialCaller;
+import com.botmaker.core.run.trial.TrialAsk;
+import com.botmaker.core.services.BotSources;
 import com.botmaker.core.runtime.JavacRelease;
 import com.botmaker.core.services.ContractDependency;
 import com.botmaker.core.services.EditorCompanions;
@@ -52,6 +58,9 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CopyOnWriteArraySet;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeoutException;
+import java.util.function.Supplier;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
@@ -75,10 +84,10 @@ public final class OpenProject implements AutoCloseable {
     /** What a project's libraries are and what is bound from them: Maven's and the plugin host's, or a test's. */
     public interface Libraries {
         /**
-         * The project's libraries, resolved after the open-time writes its pom may need; {@code state} holds its
-         * sources.
+         * The project's libraries, resolved after the writes its pom may need; {@code state} holds its sources. What
+         * did not resolve is in the resolution's problems, and a pom that cannot be read at all throws.
          */
-        List<String> classpath(ProjectConfig config, ProjectState state) throws IOException;
+        MavenService.Resolution resolve(ProjectConfig config, ProjectState state) throws IOException;
 
         /** The analyzer the editor resolves types with, over the project's {@code state}. */
         ProjectAnalyzer analyzer(List<String> classpath, ProjectState state);
@@ -93,33 +102,46 @@ public final class OpenProject implements AutoCloseable {
         void reindex(ProjectAnalyzer analyzer, List<String> classpath);
 
         /**
-         * The project's pom, resolved by Maven, after the writes an open makes to it: the contract declared for a bot
-         * whose source imports it, and a declared plugin's editor libraries the pom lost put back (never in a bot
-         * opened read-only). The plugins are bound by the plugin host, in this process.
+         * The project's pom, resolved by Maven, after the writes it may need: the contract declared for a bot whose
+         * source imports it, a declared plugin's editor libraries the pom lost put back (never in a bot opened
+         * read-only), and, once everything resolved, the contract's entry put right for the bot's imports (dropped
+         * when a plugin brings it again; Studio's {@code LibraryService} did it until phase 10c). The plugins are
+         * bound by the plugin host, in this process.
          */
         Libraries MAVEN = new Libraries() {
             @Override
-            public List<String> classpath(ProjectConfig config, ProjectState state) throws IOException {
-                List<String> classpath = resolve(config);
+            public MavenService.Resolution resolve(ProjectConfig config, ProjectState state) throws IOException {
+                MavenService.Resolution resolution = resolved(config);
                 try {
-                    if (ContractDependency.ensureFor(config, state, classpath)) classpath = resolve(config);
+                    if (ContractDependency.ensureFor(config, state, resolution.jars())) resolution = resolved(config);
                 } catch (IOException | RuntimeException e) {
                     System.err.println("Warning: Could not declare the plugin contract: " + e.getMessage());
                 }
+                if (state.isReaderMode()) return resolution;
                 try {
-                    if (!state.isReaderMode()
-                            && EditorCompanions.restore(config.projectPath(), classpath, ProgressReporter.NONE)) {
-                        classpath = resolve(config);
+                    if (EditorCompanions.restore(config.projectPath(), resolution.jars(), ProgressReporter.NONE)) {
+                        resolution = resolved(config);
                     }
                 } catch (IOException | RuntimeException e) {
                     System.err.println("Warning: Could not restore a plugin's editor libraries: " + e.getMessage());
                 }
-                return classpath;
+                // Only after a complete resolve: a jar that failed to download is not a plugin gone, and an entry
+                // written then would outlive it and pin the contract once it came back.
+                if (!resolution.problems().isEmpty()) return resolution;
+                try {
+                    if (ContractDependency.reconcile(config.projectPath(), ContractDependency.usedBy(config, state),
+                            resolution.jars())) {
+                        resolution = resolved(config);
+                    }
+                } catch (IOException | RuntimeException e) {
+                    System.err.println("Could not put the plugin contract right in pom.xml: " + e.getMessage());
+                }
+                return resolution;
             }
 
-            private static List<String> resolve(ProjectConfig config) throws IOException {
+            private static MavenService.Resolution resolved(ProjectConfig config) throws IOException {
                 try {
-                    return MavenService.resolveClasspath(config.projectPath());
+                    return MavenService.resolve(config.projectPath(), ProgressReporter.NONE);
                 } catch (RuntimeException e) {
                     throw new IOException("Couldn't resolve the bot's libraries: " + e.getMessage(), e);
                 }
@@ -165,17 +187,29 @@ public final class OpenProject implements AutoCloseable {
     private final CoreEditor editor;
     private final CodeExecutionService execution;
     private final DebuggingService debugger;
+    /** The plugins' values, which write the bot: every plugin write, a client's or this process's, lands on them. */
+    private final HostPluginValues values;
+    /** What this process's plugins are told of a run. */
+    private final HostRuns runs;
+    /** The thread {@link #owner} runs on, so a write made on it is not queued behind itself. */
+    private volatile Thread ownerThread;
+    /** The batch open now and how many opened it, on the owner thread; null when none is ({@link Request.Batch}). */
+    private WriteSteps.Held batch;
+    private int batchDepth;
+    private volatile MavenService.Resolution resolution;
 
     private OpenProject(ProjectConfig config, ProjectState state, ProjectLock lock, Libraries libraries,
-                        ProjectAnalyzer analyzer) {
+                        ProjectAnalyzer analyzer, MavenService.Resolution resolution) {
         this.config = config;
         this.state = state;
         this.lock = lock;
         this.libraries = libraries;
         this.analyzer = analyzer;
+        this.resolution = resolution;
         this.owner = Executors.newSingleThreadExecutor(work -> {
             Thread thread = new Thread(work, "core-project-" + config.projectName());
             thread.setDaemon(true);
+            ownerThread = thread;
             return thread;
         });
         this.control = Executors.newSingleThreadExecutor(work -> {
@@ -190,6 +224,13 @@ public final class OpenProject implements AutoCloseable {
                 this::sourcesWritten);
         this.debugger = new DebuggingService(state, config, execution, EventBus.UiThread.INLINE, new ToldDebug(),
                 this::tell, telemetry);
+        // The plugins of this process reach the project as Studio's did (plan phase 10c): their writes, a client's
+        // too, land on the project's thread; a run, the history and the run properties are this project's.
+        HostServices services = HostServices.forProject(config);
+        this.values = HostPluginValues.writing(config, state, services, new PluginEdits());
+        HostPluginValues.installForwarding(config, state, services, this::written);
+        this.runs = HostRuns.install(new PluginRuns(), execution::runningBotPid, new RunProperties());
+        HostHistory.install(new PluginHistory());
     }
 
     /**
@@ -219,18 +260,19 @@ public final class OpenProject implements AutoCloseable {
             state.setTemplate(settings.template() != null ? settings.template()
                     : ProjectRepair.looksLikeGameBot(config) ? ProjectTemplate.GAME_BOT : ProjectTemplate.EMPTY);
             readSources(config.sourceRoot()).forEach(state::addFile);
-            List<String> classpath;
+            MavenService.Resolution resolution;
             try {
-                classpath = libraries.classpath(config, state);
+                resolution = libraries.resolve(config, state);
             } catch (IOException e) {
                 // A pom that does not resolve still opens, so the user can repair it; Studio says what failed.
                 System.err.println("Warning: " + e.getMessage());
-                classpath = List.of();
+                resolution = new MavenService.Resolution(List.of(), List.of(e.getMessage()));
             }
+            List<String> classpath = resolution.jars();
             state.setResolvedClasspath(classpath);
             libraries.bind(config, classpath);
             bound = true;
-            return new OpenProject(config, state, lock, libraries, libraries.analyzer(classpath, state));
+            return new OpenProject(config, state, lock, libraries, libraries.analyzer(classpath, state), resolution);
         } catch (IOException | RuntimeException e) {
             try {
                 if (bound) libraries.unbind();
@@ -245,19 +287,40 @@ public final class OpenProject implements AutoCloseable {
         return config.projectPath();
     }
 
-    /** Attaches {@code channel}: it hears every change from now on. */
     /** On open, {@code params/} is fitted to {@code starting-params/}: a fresh copy gets its starting values (2026-11-04). */
     void fitParams() {
         execution.fitParams();
     }
 
-    void attach(Channel channel) {
-        clients.add(channel);
+    /**
+     * On open, every bound plugin's holder the project lacks is written, and a plugin's parameter kept as it declares
+     * it (2026-09-26; Studio's until phase 10c). Never over a file, never in a bot opened read-only.
+     */
+    void createMissing() {
+        onOwner(() -> touching(values::missing));
     }
 
-    /** Detaches {@code channel}; true when no client is left. */
+    /** Attaches {@code channel}: it hears every change from now on, starting with what the libraries resolved to. */
+    void attach(Channel channel) {
+        clients.add(channel);
+        MavenService.Resolution resolved = resolution;
+        channel.send(CoreJson.write(new Reply.Told(new CoreEvent.LibrariesResolved(resolved.jars(),
+                resolved.problems()))));
+    }
+
+    /**
+     * Detaches {@code channel}; true when no client is left. A batch still open ends: its client may be the one that
+     * left, and a batch nobody ends would make every later write part of it.
+     */
     boolean detach(Channel channel) {
         clients.remove(channel);
+        try {
+            owner.execute(() -> {
+                while (batch != null) closeBatch();
+            });
+        } catch (RejectedExecutionException closed) {
+            // Closing: what the batch wrote is on disk already.
+        }
         return clients.isEmpty();
     }
 
@@ -376,13 +439,18 @@ public final class OpenProject implements AutoCloseable {
             case Request.Commit commit -> editor.commit(commit.file(), commit.original(), commit.source(),
                     commit.label());
             case Request.Rewritten rewritten -> rewritten(rewritten);
-            case Request.Recorded recorded -> recorded(recorded);
+            case Request.PluginWriting writing -> perform(writing.write())
+                    .<EditResult>map(EditResult.Refused::new).orElseGet(() -> new EditResult.Accepted(List.of()));
+            case Request.Batch batched -> {
+                if (batched.open()) openBatch(batched.label());
+                else if (batch != null) closeBatch();
+                yield new EditResult.Accepted(List.of());
+            }
             case Request.Compile compile -> started(() -> execution.compileCode(state.snapshot()));
             case Request.Run run -> started(() -> execution.runCode(state.snapshot()));
             case Request.RunEntry entry ->
                     started(() -> execution.runEntry(state.snapshot(), entry.title(), entry.mainClass()));
-            case Request.Try attempt -> started(() -> execution.tryCode(state.snapshot(),
-                    new TrialCaller.Source(attempt.className(), attempt.text()), attempt.label()));
+            case Request.Try attempt -> trial(attempt.trial());
             case Request.Debug debug -> started(() -> debugger.startDebugging(debug.follow(), breakpoints(debug)));
             case Request.Control steer -> steer(steer);
             case Request.Open open -> new EditResult.Refused("The project is open already.");
@@ -473,19 +541,184 @@ public final class OpenProject implements AutoCloseable {
      * brought up to date. A pom that does not resolve leaves the libraries there were.
      */
     private EditResult reload() {
-        List<String> classpath;
+        MavenService.Resolution resolved;
         try {
-            classpath = libraries.classpath(config, state);
+            resolved = libraries.resolve(config, state);
         } catch (IOException e) {
             return new EditResult.Refused(e.getMessage());
         }
+        resolution = resolved;
+        List<String> classpath = resolved.jars();
         state.setLevel(JavacRelease.level(config.projectPath()));
         state.setResolvedClasspath(classpath);
         libraries.bind(config, classpath);
         libraries.reindex(analyzer, classpath);
         ProjectFile active = state.getActiveFile();
         if (active != null) state.setCompilationUnit(parse(active.getPath(), active.getContent()));
+        // Told before the holders a plugin just added brings, so a client binds its copy of that plugin first.
+        tell(new CoreEvent.LibrariesResolved(classpath, resolved.problems()));
+        touching(values::missing);
         return new EditResult.Accepted(List.of());
+    }
+
+    /** ▶ Try: planned and its caller written here, then compiled and run beside the bot. */
+    private EditResult trial(TrialAsk ask) {
+        TrialAsk.Prepared prepared;
+        try {
+            prepared = TrialAsk.prepare(ask, state, () -> BotSources.index(config, state));
+        } catch (IllegalArgumentException refused) {
+            return new EditResult.Refused(refused.getMessage());
+        }
+        return started(() -> execution.tryCode(state.snapshot(), prepared.caller(), prepared.label()));
+    }
+
+    // ── a plugin's writes, on the project's one thread ───────────────────────────────────────────────────
+
+    /** A write a plugin of this process asked for, from whatever thread: queued behind the asks before it. */
+    private Optional<String> written(PluginWrite write) {
+        return onOwner(() -> {
+            readDiskAgain();
+            return perform(write);
+        });
+    }
+
+    /** {@code write} made on the bot, as part of the batch open now if one is; every client told what it changed. */
+    private Optional<String> perform(PluginWrite write) {
+        WriteSteps.Held open = batch;
+        return touching(() -> open != null ? open.during(() -> values.perform(write)) : values.perform(write));
+    }
+
+    private void openBatch(String label) {
+        if (batchDepth++ == 0) batch = WriteSteps.hold(label);
+    }
+
+    private void closeBatch() {
+        if (batchDepth == 0 || --batchDepth > 0) return;
+        WriteSteps.Held ended = batch;
+        batch = null;
+        ended.finish(editor::recordRewrite);
+    }
+
+    /**
+     * {@code work}, which writes the bot's files, then every client told the files beside the open one it changed, by
+     * name, and any file it made on disk alone (a new class): the open file's new text is told by its redraw.
+     */
+    private <T> T touching(Supplier<T> work) {
+        Map<Path, String> before = new HashMap<>();
+        for (ProjectFile file : state.getAllFiles()) before.put(file.getPath(), file.getContent());
+        try {
+            return work.get();
+        } finally {
+            ProjectFile active = state.getActiveFile();
+            List<String> changed = new ArrayList<>();
+            for (ProjectFile file : state.getAllFiles()) {
+                // By identity: a rewrite sets a new text, and comparing every file's whole text would cost a read.
+                if (file != active && before.get(file.getPath()) != file.getContent()) changed.add(named(file.getPath()));
+            }
+            if (!changed.isEmpty()) tell(new CoreEvent.SourcesChanged(changed));
+            readDiskAgain();
+        }
+    }
+
+    /** {@code work} on the project's thread, waited for; at once when this is that thread. */
+    private <T> T onOwner(Supplier<T> work) {
+        if (Thread.currentThread() == ownerThread) return work.get();
+        try {
+            return CompletableFuture.supplyAsync(work, owner).get(CoreClient.ANSWER_TIMEOUT.toSeconds(),
+                    TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted while the project wrote.", e);
+        } catch (ExecutionException e) {
+            throw e.getCause() instanceof RuntimeException failed ? failed : new IllegalStateException(e.getCause());
+        } catch (TimeoutException | RejectedExecutionException e) {
+            throw new IllegalStateException("The project did not get to that write: " + e, e);
+        }
+    }
+
+    /** What a write of the plugins' values tells: its undo step, and the open file's new text drawn by every client. */
+    private final class PluginEdits implements HostPluginValues.Edits {
+        @Override
+        public void step(String label, List<FileEdit> edits) {
+            editor.recordRewrite(label, edits);
+        }
+
+        @Override
+        public void redraw(String content) {
+            openFileRead();
+        }
+    }
+
+    /** A plugin's start and stop, as a client's ask would; its status line told to every client. */
+    private final class PluginRuns implements HostRuns.Requests {
+        @Override
+        public void start() {
+            ask(new Request.Run(0));
+        }
+
+        @Override
+        public void stop() {
+            ask(new Request.Stop(0));
+        }
+
+        @Override
+        public void status(String message) {
+            tell(new CoreEvent.Status(message));
+        }
+    }
+
+    /** The checkout's run properties, read and written in its settings file. */
+    private final class RunProperties implements HostRuns.Properties {
+        @Override
+        public String get(String name) {
+            return StudioProjectSettings.read(config.studioRoot()).runProperties().get(name);
+        }
+
+        @Override
+        public void set(String name, String value) {
+            try {
+                StudioProjectSettings.read(config.studioRoot()).withRunProperty(name, value).write(config.studioRoot());
+            } catch (IOException e) {
+                tell(new CoreEvent.Status("Couldn't save " + name + ": " + e.getMessage()));
+            }
+        }
+    }
+
+    /** A plugin's ↶, ↷ and batch, on the project's thread. */
+    private final class PluginHistory implements HostHistory.Requests {
+        @Override
+        public void undo() {
+            onOwner(() -> editor.step(HistoryStep.UNDO));
+        }
+
+        @Override
+        public void redo() {
+            onOwner(() -> editor.step(HistoryStep.REDO));
+        }
+
+        @Override
+        public void step(String label, List<FileEdit> edits) {
+            onOwner(() -> {
+                editor.recordRewrite(label, edits);
+                return null;
+            });
+        }
+
+        @Override
+        public void batch(String label, Runnable writes) {
+            onOwner(() -> {
+                openBatch(label);
+                return null;
+            });
+            try {
+                writes.run();
+            } finally {
+                onOwner(() -> {
+                    closeBatch();
+                    return null;
+                });
+            }
+        }
     }
 
     /** A client's write of the open file outside an edit (an open-time migration), landed as one step. */
@@ -499,28 +732,6 @@ public final class OpenProject implements AutoCloseable {
             return new EditResult.Refused("The file changed meanwhile.");
         }
         editor.rewritten(new EditorOutput.Write(rewritten.source(), rewritten.original(), false, null, List.of()));
-        return new EditResult.Accepted(List.of());
-    }
-
-    /**
-     * What a client's plugin already wrote, buffer and disk: its texts taken here, so the next edit lands on them, and
-     * the writes recorded as one step. A file outside the bot's sources is only recorded.
-     */
-    private EditResult recorded(Request.Recorded recorded) {
-        Path root = config.sourceRoot().toAbsolutePath().normalize();
-        for (FileEdit each : recorded.edits()) {
-            Path path = each.path().toAbsolutePath().normalize();
-            if (!path.startsWith(root) || each.newContent() == null) continue;
-            Optional<ProjectFile> known = state.getFile(path);
-            if (known.isPresent()) known.get().setContent(each.newContent());
-            else state.addFile(new ProjectFile(path, each.newContent()));
-            ProjectFile active = state.getActiveFile();
-            if (active != null && active.getPath().equals(path)) {
-                state.setCurrentCode(each.newContent());
-                state.setCompilationUnit(parse(path, each.newContent()));
-            }
-        }
-        editor.recordRewrite(recorded.label(), recorded.edits());
         return new EditResult.Accepted(List.of());
     }
 
@@ -551,6 +762,20 @@ public final class OpenProject implements AutoCloseable {
     void tell(CoreEvent event) {
         String told = CoreJson.write(new Reply.Told(event));
         clients.forEach(channel -> channel.send(told));
+        heardByPlugins(event);
+    }
+
+    /** What this process's plugins hear of the project: the history's state and a run's start, end, frames and lines. */
+    private void heardByPlugins(CoreEvent event) {
+        switch (event) {
+            case CoreEvent.HistoryChanged history -> HostHistory.told(history);
+            case CoreEvent.RunState run when run.phase() == CoreEvent.RunState.Phase.RUNNING -> runs.ran(true);
+            case CoreEvent.RunState run when run.phase() == CoreEvent.RunState.Phase.ENDED -> runs.ran(false);
+            case CoreEvent.RunFrame frame -> runs.telemetry(frame.payload());
+            case CoreEvent.RunTraced traced -> runs.trace(traced.traceLine());
+            default -> {
+            }
+        }
     }
 
     /** The editor's own words go to every client as a status line; its writes are told as {@code MethodsChanged}. */
@@ -618,6 +843,9 @@ public final class OpenProject implements AutoCloseable {
             Thread.currentThread().interrupt();
         }
         control.shutdown();
+        HostPluginValues.clear();
+        HostRuns.clear();
+        HostHistory.clear();
         try {
             debugger.stopDebugging();
             execution.close();

@@ -3,12 +3,12 @@ package com.botmaker.core.server;
 import com.botmaker.core.edit.Edit;
 import com.botmaker.core.edit.EditRequest;
 import com.botmaker.core.edit.HistoryStep;
-import com.botmaker.core.events.FileEdit;
+import com.botmaker.core.plugin.PluginWrite;
+import com.botmaker.core.run.trial.TrialAsk;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
 
 import javax.lang.model.SourceVersion;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -26,7 +26,8 @@ import java.util.Set;
         @JsonSubTypes.Type(value = Request.Step.class, name = "step"),
         @JsonSubTypes.Type(value = Request.Commit.class, name = "commit"),
         @JsonSubTypes.Type(value = Request.Rewritten.class, name = "rewritten"),
-        @JsonSubTypes.Type(value = Request.Recorded.class, name = "recorded"),
+        @JsonSubTypes.Type(value = Request.PluginWriting.class, name = "pluginWriting"),
+        @JsonSubTypes.Type(value = Request.Batch.class, name = "batch"),
         @JsonSubTypes.Type(value = Request.Reload.class, name = "reload"),
         @JsonSubTypes.Type(value = Request.Compile.class, name = "compile"),
         @JsonSubTypes.Type(value = Request.Run.class, name = "run"),
@@ -67,18 +68,27 @@ public sealed interface Request {
     }
 
     /**
-     * ▶ Try: compiles the bot, then the caller {@code text} of the class {@code className} beside it, and runs that.
-     * Java text from a client, until the plan's phase 10c writes the caller in the core; it goes in no source of the
-     * bot's. {@code label} is what is tried, in the user's words.
+     * ▶ Try: the core plans {@code trial} on its own tree, writes its caller beside the bot (in none of the bot's
+     * sources), compiles both and runs the caller (plan phase 10c). Refused, saying why, when it cannot be tried.
      */
-    record Try(long id, String className, String text, String label) implements Request {
+    record Try(long id, TrialAsk trial) implements Request {
         public Try {
-            // It names the file written below the try's folder.
-            if (className == null || !SourceVersion.isName(className)) {
-                throw new IllegalArgumentException("a try names its class");
-            }
-            if (text == null) throw new IllegalArgumentException("a try carries its caller");
+            if (trial == null) throw new IllegalArgumentException("a try says what it tries");
         }
+    }
+
+    /** A plugin's write of the bot's values, which a client's copy of the plugin asked for (plan phase 10c). */
+    record PluginWriting(long id, PluginWrite write) implements Request {
+        public PluginWriting {
+            if (write == null) throw new IllegalArgumentException("a plugin's write carries its write");
+        }
+    }
+
+    /**
+     * A plugin's batch opens ({@code open}, under {@code label}) or ends: what the client's plugin writes in between is
+     * one step of the history. A client that leaves ends the batches it opened.
+     */
+    record Batch(long id, String label, boolean open) implements Request {
     }
 
     /**
@@ -167,17 +177,9 @@ public sealed interface Request {
     }
 
     /**
-     * What a client's plugin already wrote, buffer and disk, recorded as one step named {@code label}; the core takes
-     * the new texts as its own. Java text from a client until the plan's phase 10c runs a plugin's writes in the core.
+     * The project's libraries changed: the core resolves them again, puts the contract's dependency right, binds their
+     * plugins again and writes a holder a new plugin brings; it tells {@code LibrariesResolved} before it answers.
      */
-    record Recorded(long id, String label, List<FileEdit> edits) implements Request {
-        public Recorded {
-            if (edits == null) throw new IllegalArgumentException("a record carries its writes");
-            edits = List.copyOf(edits);
-        }
-    }
-
-    /** The project's libraries changed: the core resolves them again and binds their plugins again. */
     record Reload(long id) implements Request {
     }
 

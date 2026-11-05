@@ -6,9 +6,11 @@ import com.botmaker.core.edit.Edit;
 import com.botmaker.core.edit.EditRequest;
 import com.botmaker.core.edit.EditResult;
 import com.botmaker.core.event.CoreEvent;
-import com.botmaker.core.events.FileEdit;
+import com.botmaker.core.edit.HistoryStep;
+import com.botmaker.core.plugin.PluginWrite;
 import com.botmaker.core.project.ProjectConfig;
 import com.botmaker.core.project.ProjectState;
+import com.botmaker.core.services.MavenService;
 import com.botmaker.java.edit.BlockId;
 import com.botmaker.java.types.ProjectAnalyzer;
 import org.eclipse.jdt.core.dom.ASTNode;
@@ -120,8 +122,8 @@ class CoreServerTest {
     /** The project's libraries are this test's classpath; nothing is resolved or bound. */
     private static final OpenProject.Libraries TEST_LIBRARIES = new OpenProject.Libraries() {
         @Override
-        public List<String> classpath(ProjectConfig config, ProjectState state) {
-            return TestSources.runtimeClassPath();
+        public MavenService.Resolution resolve(ProjectConfig config, ProjectState state) {
+            return new MavenService.Resolution(TestSources.runtimeClassPath(), List.of());
         }
 
         @Override
@@ -187,7 +189,7 @@ class CoreServerTest {
         }
     }
 
-    /** A write another process made, or one a plugin recorded, is what the next edit lands on: never overwritten. */
+    /** A write another process made is what the next edit lands on: never overwritten. */
     @Test
     void anEditLandsOnWhatWasWrittenOutsideTheCore(@TempDir Path cache, @TempDir Path projects) throws Exception {
         Path project = projects.resolve("mybot");
@@ -198,7 +200,6 @@ class CoreServerTest {
         Block body = ((TypeDeclaration) tree.types().getFirst()).getMethods()[0].getBody();
         String second = BlockId.of((ASTNode) body.statements().get(1));
         String outside = BOT.replace("int a = 1;", "int a = 7;");
-        String recorded = outside.replace("int a = 7;", "int a = 8;");
 
         try (CoreMain.Running core = CoreMain.serve(cache, "1.0", SLOW, TEST_LIBRARIES, () -> { })) {
             CoreLauncher.Address at = new CoreLauncher.Address(core.server().port(), CoreLauncher.token(cache));
@@ -208,14 +209,63 @@ class CoreServerTest {
 
                 Files.writeString(source, outside);
                 assertInstanceOf(EditResult.Accepted.class,
-                        client.recorded("A plugin's value", List.of(new FileEdit(source, outside, recorded))));
-                Files.writeString(source, recorded);
-                assertInstanceOf(EditResult.Accepted.class,
                         client.apply(new EditRequest(FILE, List.of(new Edit.Delete(second)))));
 
                 String saved = Files.readString(source);
-                assertTrue(saved.contains("int a = 8;"), saved);
+                assertTrue(saved.contains("int a = 7;"), saved);
                 assertFalse(saved.contains("int b"), saved);
+            }
+        }
+    }
+
+    /**
+     * A client's plugin writes through the core (plan phase 10c): the write lands on disk, is one step of the core's
+     * history, and every client hears what it changed — the open file redrawn, another file by name. A client sees what
+     * its libraries resolved to as it attaches.
+     */
+    @Test
+    void aPluginWriteFromAClientLandsInTheCore(@TempDir Path cache, @TempDir Path projects) throws Exception {
+        Path project = projects.resolve("mybot");
+        Path source = project.resolve("src/main/java").resolve(FILE);
+        Path other = source.resolveSibling("Other.java");
+        Files.createDirectories(source.getParent());
+        Files.writeString(source, BOT);
+        Files.writeString(other, "package com.mybot;\nclass Other {}\n");
+        String otherWritten = "package com.mybot;\nclass Other { int ore; }\n";
+        String sourceWritten = BOT.replace("int a = 1;", "int a = 9;");
+        List<CoreEvent> heard = new CopyOnWriteArrayList<>();
+
+        try (CoreMain.Running core = CoreMain.serve(cache, "1.0", SLOW, TEST_LIBRARIES, () -> { })) {
+            CoreLauncher.Address at = new CoreLauncher.Address(core.server().port(), CoreLauncher.token(cache));
+            try (CoreClient client = CoreClient.connect(at, "1.0", heard::add, () -> { })) {
+                client.open(project);
+                assertTrue(heard.stream().anyMatch(event -> event instanceof CoreEvent.LibrariesResolved resolved
+                        && resolved.jars().equals(TestSources.runtimeClassPath())), heard::toString);
+                client.show(FILE);
+
+                assertInstanceOf(EditResult.Accepted.class, client.batch("Set the ore", true));
+                assertInstanceOf(EditResult.Accepted.class, client.pluginWrite(new PluginWrite.ApplyPlan("Set the ore",
+                        Map.of(other.toString(), otherWritten), Map.of())));
+                assertInstanceOf(EditResult.Accepted.class, client.pluginWrite(new PluginWrite.ApplyPlan("Set a",
+                        Map.of(source.toString(), sourceWritten), Map.of())));
+                assertInstanceOf(EditResult.Accepted.class, client.batch(null, false));
+
+                assertEquals(otherWritten, Files.readString(other));
+                assertEquals(sourceWritten, Files.readString(source));
+                assertTrue(heard.stream().anyMatch(event -> event instanceof CoreEvent.SourcesChanged changed
+                        && changed.files().contains("com/mybot/Other.java")), heard::toString);
+                assertTrue(heard.stream().anyMatch(event -> event instanceof CoreEvent.MethodsChanged changed
+                        && changed.source().equals(sourceWritten)), heard::toString);
+                assertTrue(heard.stream().anyMatch(event -> event instanceof CoreEvent.HistoryChanged history
+                        && history.undoLabel().equals("Set the ore")), heard::toString);
+
+                // The batch is one step: one undo puts both files back.
+                assertInstanceOf(EditResult.Accepted.class, client.step(HistoryStep.UNDO));
+                assertEquals(BOT, Files.readString(source));
+                assertEquals("package com.mybot;\nclass Other {}\n", Files.readString(other));
+
+                assertInstanceOf(EditResult.Refused.class, client.pluginWrite(
+                        new PluginWrite.SetValue("com.example:none:GONE", null)));
             }
         }
     }
@@ -365,7 +415,7 @@ class CoreServerTest {
         Files.writeString(source, BOT);
         OpenProject.Libraries failing = new OpenProject.Libraries() {
             @Override
-            public List<String> classpath(ProjectConfig config, ProjectState state) throws IOException {
+            public MavenService.Resolution resolve(ProjectConfig config, ProjectState state) throws IOException {
                 throw new IOException("Couldn't resolve the bot's libraries");
             }
 

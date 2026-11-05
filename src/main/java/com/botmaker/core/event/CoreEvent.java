@@ -34,7 +34,7 @@ import java.util.OptionalInt;
         @JsonSubTypes.Type(value = CoreEvent.SourcesChanged.class, name = "sourcesChanged"),
         @JsonSubTypes.Type(value = CoreEvent.InputAsked.class, name = "inputAsked"),
         @JsonSubTypes.Type(value = CoreEvent.Status.class, name = "status"),
-        @JsonSubTypes.Type(value = CoreEvent.UiRequest.class, name = "uiRequest"),
+        @JsonSubTypes.Type(value = CoreEvent.LibrariesResolved.class, name = "librariesResolved"),
         @JsonSubTypes.Type(value = CoreEvent.Refusal.class, name = "refusal")})
 public sealed interface CoreEvent {
 
@@ -238,17 +238,15 @@ public sealed interface CoreEvent {
     }
 
     /**
-     * Something running in the core asks for a window or a dialog, which only an attached client can show. The client
-     * answers by {@code requestId}; the plan's phase 8 gives the port its answers.
+     * What the project's libraries resolved to (plan phase 10c): the jars, and one {@code group:artifact:version —
+     * reason} line per dependency that did not resolve. Told to a client as it attaches and after each reload, before
+     * the answer, so a client binds its own copy of the plugins to what the core bound and resolves no pom itself.
      */
-    record UiRequest(String requestId, Kind kind, String title) implements CoreEvent {
-        public UiRequest {
-            if (requestId == null || requestId.isEmpty()) throw new IllegalArgumentException("a UI request has an id");
-            if (kind == null) throw new IllegalArgumentException("a UI request has a kind");
-            title = title == null ? "" : title;
+    record LibrariesResolved(List<String> jars, List<String> problems) implements CoreEvent {
+        public LibrariesResolved {
+            jars = jars == null ? List.of() : List.copyOf(jars);
+            problems = problems == null ? List.of() : List.copyOf(problems);
         }
-
-        public enum Kind { DIALOG, WINDOW }
     }
 
     /** An edit to this file was refused: told to every client, so one that did not ask still sees why. */

@@ -26,6 +26,14 @@ public final class HostHistory implements History {
         void undo();
 
         void redo();
+
+        /** {@code writes} as one step; a client whose writes land in the core opens that step there. */
+        default void batch(String label, Runnable writes) {
+            WriteSteps.step(label, () -> {
+                writes.run();
+                return null;
+            }, this);
+        }
     }
 
     private static volatile HostHistory current;
@@ -150,10 +158,6 @@ public final class HostHistory implements History {
 
     @Override
     public void batch(String label, Runnable writes) {
-        if (writes == null) return;
-        WriteSteps.step(label, () -> {
-            writes.run();
-            return null;
-        }, requests);
+        if (writes != null) requests.batch(label, writes);
     }
 }

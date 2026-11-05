@@ -96,6 +96,39 @@ public final class WriteSteps {
     }
 
     /**
+     * A step open across asks: a client's batch, whose writes reach the core one message each, all on the project's one
+     * thread. What happens {@link #during} it is the step's; an edit between two of its writes is not.
+     */
+    public static final class Held {
+        private final Step step;
+
+        private Held(String label) {
+            this.step = new Step(label == null || label.isBlank() ? "the last change" : label.strip());
+        }
+
+        /** Runs {@code writes} as part of this step. */
+        public <T> T during(Supplier<T> writes) {
+            OPEN.set(step);
+            try {
+                return BotSources.recording(step, writes);
+            } finally {
+                OPEN.remove();
+            }
+        }
+
+        /** Ends the step and hands it to {@code recorded}, unless it changed nothing. */
+        public void finish(Recorded recorded) {
+            List<FileEdit> edits = step.edits();
+            if (!edits.isEmpty() && recorded != null) recorded.step(step.label, edits);
+        }
+    }
+
+    /** A step named {@code label}, open until {@link Held#finish}. */
+    public static Held hold(String label) {
+        return new Held(label);
+    }
+
+    /**
      * Runs {@code writes} as one step named {@code label} and hands it to {@code recorded} once they end, unless
      * they changed nothing; inside a step already open on this thread, they are part of that one, under its
      * label.

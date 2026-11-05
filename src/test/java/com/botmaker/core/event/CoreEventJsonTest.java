@@ -53,7 +53,8 @@ class CoreEventJsonTest {
             new CoreEvent.SourcesChanged(List.of("params/bot/Bot.java")),
             new CoreEvent.InputAsked(3, "choice", "Which ore?", List.of("Iron", "Gold"), 12),
             new CoreEvent.Status("Compiling..."),
-            new CoreEvent.UiRequest("7", CoreEvent.UiRequest.Kind.WINDOW, "Screens"),
+            new CoreEvent.LibrariesResolved(List.of("/m2/sdk.jar"),
+                    List.of("com.github.BotMakerDev:botmaker-sdk:9.9.9 — not found")),
             new CoreEvent.Refusal(FILE, "Pictures.ORE is not a number."));
 
     @Test

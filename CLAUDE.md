@@ -19,7 +19,7 @@ per user.
   request one file's.
 - `event`: what the core tells every client. `CoreEvent` is sealed: `MethodsChanged` (the methods whose source or
   id changed, and the ids removed), `Diagnostics` (a run's check tells them), `RunState`, `RunOutput`, `RunLogged`, `RunTraced`, `RunFrame`, `RunProcess`, `DebugSession`,
-  `DebugPaused`, `DebugFollowed`, `SourcesChanged`, `InputAsked`, `Status`, `UiRequest`, `Refusal`.
+  `DebugPaused`, `DebugFollowed`, `SourcesChanged`, `InputAsked`, `Status`, `LibrariesResolved`, `Refusal`.
 - `CoreJson`: the one mapper every protocol record is read and written with, strict on reading (a missing component
   or trailing text is refused); phase 10's channel carries exactly this.
 - The rest came from Studio (phase 6a, 2026-11-05), each in the package it had there: `project` (the open project,
@@ -73,13 +73,20 @@ per user.
   (phase 10a); a new request is registered in its `@JsonSubTypes` and round-tripped in `RequestJsonTest`. `OpenProject`
   runs a project's asks on its one thread, in arrival order, and saves each accepted change as it lands; `Projects`
   holds one project per core; `CoreClient` is a client's side. Studio edits through it since phase 10a1 (`CoreEdits`);
-  its `Commit`, `Rewritten` and `Recorded` carry Java text from a client until phases 10c and 10d run those in the core.
-- A project's runs happen in `OpenProject` since phase 10b (2026-11-05): `Compile`, `Run`, `RunEntry`, `Try` (Java text
-  from a client until 10c) and `Debug` are asks on its one thread, which only start the work; a `Request.Control` (`Stop`,
+  its `Commit` and `Rewritten` carry Java text from a client until phase 10d runs those in the core.
+- A project's runs happen in `OpenProject` since phase 10b (2026-11-05): `Compile`, `Run`, `RunEntry`, `Try` and `Debug`
+  are asks on its one thread, which only start the work. A `Try` carries a `run.trial.TrialAsk`, and the core plans it
+  and writes its caller (phase 10c). A `Request.Control` (`Stop`,
   `Answer`, `Debugging`) runs on a thread of its own. What a run tells goes to every client as `CoreEvent`s; `RunProcess`
   gives the pid, once there is a process, and a run's end clears it. A run's check (`RunCheck`) is still a client's: here
   it is `NONE`, javac judges. A run or a fit writes to disk and `sourcesWritten` has the owner read back; what changed
   beside the open file is told by name (`SourcesChanged`), never its text: a parameter's value stays off the channel.
+- Plugins load in both processes since phase 10c (2026-11-05). The core alone resolves the pom and tells
+  `LibrariesResolved`, and Studio binds its copy to it. Each copy's writes are `PluginWrite`s that the core makes on the
+  project's thread (`Request.PluginWriting`, `Request.Batch`). Studio's copy forwards over the channel
+  (`HostPluginValues.installForwarding`), and the core's performs (`perform`). The core shows no window: its `hasUi()` is
+  false, and a plugin's windows are Studio's copy's. A new contract write needs a `PluginWrite` record, registered by
+  `CoreJson` and round-tripped in `RequestJsonTest`.
 - JavaFX stays `provided` because the contract's signatures name it: `PluginHost` binds slot editors that return a
   `Node`, and `HostServices` implements `StudioServices`, whose `Theme` and `Dialogs` name `Scene` and `Window`.
   Import no javafx and construct no Node here.

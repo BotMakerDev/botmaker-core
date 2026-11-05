@@ -6,12 +6,12 @@ import com.botmaker.core.edit.EditRequest;
 import com.botmaker.core.edit.EditResult;
 import com.botmaker.core.edit.HistoryStep;
 import com.botmaker.core.event.CoreEvent;
-import com.botmaker.core.events.FileEdit;
+import com.botmaker.core.plugin.PluginWrite;
+import com.botmaker.core.run.trial.TrialAsk;
 
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -92,12 +92,20 @@ public final class CoreClient implements AutoCloseable {
         return ask(new Request.Rewritten(ids.incrementAndGet(), file, original, source), ANSWER_TIMEOUT);
     }
 
-    /** What a plugin already wrote, recorded as one step; see {@link Request.Recorded}. */
-    public EditResult recorded(String label, List<FileEdit> edits) throws IOException {
-        return ask(new Request.Recorded(ids.incrementAndGet(), label, edits), ANSWER_TIMEOUT);
+    /** A write of the bot's values a client's plugin asked for; see {@link Request.PluginWriting}. */
+    public EditResult pluginWrite(PluginWrite write) throws IOException {
+        return ask(new Request.PluginWriting(ids.incrementAndGet(), write), ANSWER_TIMEOUT);
     }
 
-    /** The project's libraries changed; given as long as an open, since Maven may download. */
+    /** Opens ({@code open}) or ends a plugin's batch; see {@link Request.Batch}. */
+    public EditResult batch(String label, boolean open) throws IOException {
+        return ask(new Request.Batch(ids.incrementAndGet(), label, open), ANSWER_TIMEOUT);
+    }
+
+    /**
+     * The project's libraries changed; given as long as an open, since Maven may download. What they resolved to is
+     * told as {@code LibrariesResolved} before the answer.
+     */
     public EditResult reload() throws IOException {
         return ask(new Request.Reload(ids.incrementAndGet()), OPEN_TIMEOUT);
     }
@@ -114,9 +122,9 @@ public final class CoreClient implements AutoCloseable {
         return ask(new Request.RunEntry(ids.incrementAndGet(), title, mainClass), ANSWER_TIMEOUT);
     }
 
-    /** A ▶ Try of the caller {@code text}; see {@link Request.Try}. */
-    public EditResult tryCaller(String className, String text, String label) throws IOException {
-        return ask(new Request.Try(ids.incrementAndGet(), className, text, label), ANSWER_TIMEOUT);
+    /** A ▶ Try, planned by the core; see {@link Request.Try}. */
+    public EditResult tryOut(TrialAsk trial) throws IOException {
+        return ask(new Request.Try(ids.incrementAndGet(), trial), ANSWER_TIMEOUT);
     }
 
     /** Starts a debug session; see {@link Request.Debug}. */

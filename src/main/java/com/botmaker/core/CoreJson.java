@@ -2,6 +2,7 @@ package com.botmaker.core;
 
 import com.botmaker.core.edit.CanvasEdit;
 import com.botmaker.core.edit.EditPayloads;
+import com.botmaker.core.plugin.PluginWrite;
 import com.botmaker.java.edit.ExpressionChoice;
 import com.botmaker.java.edit.UseFix;
 import com.botmaker.java.edit.palette.BlockType;
@@ -50,6 +51,7 @@ public final class CoreJson {
         ObjectMapper mapper = builder.build();
         kinded.forEach(type -> register(mapper, type));
         register(mapper, CanvasEdit.class);
+        register(mapper, PluginWrite.class);
         return mapper;
     }
 

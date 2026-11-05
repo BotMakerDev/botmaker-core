@@ -86,17 +86,50 @@ public final class HostPluginValues implements PluginValues {
     private final ProjectState state;
     private final StudioServices services;
     private final Edits edits;
+    /** Where each write goes instead of the bot; null when this instance writes the bot itself. */
+    private final Forward forward;
 
     /** What a write here tells the host: the undo step it made, and the open file's new text to redraw. */
     public interface Edits extends WriteSteps.Recorded {
         void redraw(String content);
     }
 
-    private HostPluginValues(ProjectConfig config, ProjectState state, StudioServices services, Edits edits) {
+    /**
+     * Where a write goes when this instance does not write the bot (plan phase 10c): a client's copy of the plugins
+     * sends it to the core, and the core's own copy hands it to the project's one thread. Empty when written, else why
+     * not. What a write needs of the plugin's own objects (checking a value, writing it as Java) happens before it goes.
+     */
+    @FunctionalInterface
+    public interface Forward {
+        Optional<String> write(PluginWrite write);
+    }
+
+    private HostPluginValues(ProjectConfig config, ProjectState state, StudioServices services, Edits edits,
+                             Forward forward) {
         this.config = config;
         this.state = state;
         this.services = services;
         this.edits = edits;
+        this.forward = forward;
+    }
+
+    /** Values that write the bot themselves, not installed: the one the core performs each {@link PluginWrite} on. */
+    public static HostPluginValues writing(ProjectConfig config, ProjectState state, StudioServices services,
+                                           Edits edits) {
+        return new HostPluginValues(config, state, services, edits, null);
+    }
+
+    /**
+     * Makes this project's values the ones a plugin reaches, each write going to {@code forward}; reads stay on
+     * {@code state}, which mirrors what the writes leave on disk.
+     */
+    public static synchronized void installForwarding(ProjectConfig config, ProjectState state,
+                                                      StudioServices services, Forward forward) {
+        if (config == null || state == null || forward == null) {
+            clear();
+            return;
+        }
+        current = new HostPluginValues(config, state, services, null, forward);
     }
 
     /**
@@ -111,7 +144,7 @@ public final class HostPluginValues implements PluginValues {
             clear();
             return;
         }
-        current = new HostPluginValues(config, state, services, edits);
+        current = new HostPluginValues(config, state, services, edits, null);
     }
 
     /** No project: a plugin asking now gets {@link PluginValues#NONE}. */
@@ -126,7 +159,116 @@ public final class HostPluginValues implements PluginValues {
      */
     public static Optional<String> applyRename(Refactor.Planned plan) {
         HostPluginValues live = current;
-        return live == null ? Optional.of(NO_SOURCE_TREE) : live.apply(plan);
+        if (live == null) return Optional.of(NO_SOURCE_TREE);
+        return live.forward != null ? live.forward.write(PluginWrite.ApplyPlan.of(plan)) : live.apply(plan);
+    }
+
+    /**
+     * {@code write}, which another copy of the plugins asked for, made on the bot by this instance, as the contract's
+     * operation it stands for; empty when written, else why not. On the project's one thread.
+     */
+    public Optional<String> perform(PluginWrite write) {
+        if (forward != null) return forward.write(write);
+        return switch (write) {
+            case PluginWrite.SetValue set -> {
+                Optional<ManagedMethod> found = JavaManagedValues.find(config, state, set.id());
+                if (found.isEmpty() || !found.get().editable()) yield Optional.of(notEditable(set.id()));
+                write(found.get(), imported(set.value()));
+                yield Optional.empty();
+            }
+            case PluginWrite.SetMember set -> {
+                Optional<ManagedSets.Member> found = ManagedSets.member(index(), set.id(), set.member(),
+                        PluginHost.grammar()).filter(member -> member.initializer() != null);
+                if (found.isEmpty()) yield Optional.of(missing(set.id(), set.member()));
+                writeInitializer(found.get(), imported(set.value()));
+                yield Optional.empty();
+            }
+            case PluginWrite.SetSetup set -> classes(set.id())
+                    .map(classes -> setSetup(classes, set.constant(), set.value()))
+                    .orElseGet(() -> Optional.of(notClasses(set.id())));
+            case PluginWrite.Create create -> create(create.id());
+            case PluginWrite.AddClass add -> classes(add.id())
+                    .map(classes -> apply(NestedClasses.add(index(), classes.id(), add.member(), classes.type(),
+                            classes.setup(), imported(add.setup()), PluginHost.grammar())))
+                    .orElseGet(() -> Optional.of(notClasses(add.id())));
+            case PluginWrite.AddConstant add -> apply(ManagedSets.add(index(), add.id(), add.member(), null, null));
+            case PluginWrite.Add add -> {
+                Class<?> type;
+                try {
+                    type = Class.forName(add.type(), false, PluginHost.classLoader());
+                } catch (ClassNotFoundException e) {
+                    yield Optional.of("No plugin in this project has " + add.type() + ", so " + add.member()
+                            + " cannot be written.");
+                }
+                yield apply(ManagedSets.add(index(), add.id(), add.member(), type, imported(add.value())));
+            }
+            case PluginWrite.Rename rename -> rename(rename.id(), rename.member(), rename.newName());
+            case PluginWrite.Repoint repoint -> repoint(repoint.id(), repoint.member(), repoint.replacement(),
+                    repoint.note());
+            case PluginWrite.Remove remove -> remove(remove.id(), remove.member());
+            case PluginWrite.MoveBefore move -> moveBefore(move.id(), move.member(), move.before());
+            case PluginWrite.AddGroup add -> addGroup(add.id(), add.group(), add.constants());
+            case PluginWrite.RenameGroup rename -> declared(rename.id())
+                    .map(set -> renameGroup(set, rename.group(), rename.newName()))
+                    .orElseGet(() -> renameGroup(rename.id(), rename.group(), rename.newName()));
+            case PluginWrite.RemoveGroup remove -> declared(remove.id())
+                    .map(set -> removeGroup(set, remove.group()))
+                    .orElseGet(() -> removeGroup(remove.id(), remove.group()));
+            case PluginWrite.CreateMethod create -> Optional.ofNullable(
+                    createMethod(create.id(), create.group(), create.className(), create.method()).refusal());
+            case PluginWrite.CreateBooleanMethod create -> Optional.ofNullable(
+                    createMethod(MethodShape.BOOLEAN, create.className(), create.method()).refusal());
+            case PluginWrite.AppendCall call -> apply(BotMethods.appendCall(index(), call.method(), call.owner(),
+                    call.name(), call.arguments().stream().map(this::imported).toList()));
+            case PluginWrite.AddRunParameter add -> {
+                ParameterWrite parameter;
+                try {
+                    parameter = add.write(PluginHost.classLoader(), id -> classes(id).orElseThrow(() ->
+                            new IllegalArgumentException(notClasses(id))));
+                } catch (ClassNotFoundException e) {
+                    yield Optional.of("No plugin in this project has " + e.getMessage() + ", so " + add.name()
+                            + " cannot be written.");
+                } catch (IllegalArgumentException e) {
+                    yield Optional.of(e.getMessage());
+                }
+                yield addRunParameter(parameter);
+            }
+            case PluginWrite.ForgetRunParameter forget -> forgetRunParameter(forget.group(), forget.name());
+            case PluginWrite.ApplyPlan plan -> apply(plan.plan());
+        };
+    }
+
+    /** The value a bound plugin declares by {@code id}. */
+    private static Optional<ManagedValue<?>> declared(String id) {
+        return PluginHost.managedValues().stream().filter(value -> value.id().equals(id)).findFirst();
+    }
+
+    /** The set of classes a bound plugin declares by {@code id}. */
+    private static Optional<ManagedClasses<?>> classes(String id) {
+        return declared(id).filter(ManagedClasses.class::isInstance).map(value -> (ManagedClasses<?>) value);
+    }
+
+    private static String notClasses(String id) {
+        return "No plugin in this project declares " + ManagedIds.spelled(id, PluginHost.managedValues())
+                + " as a set of classes.";
+    }
+
+    private static String notEditable(String id) {
+        return "The bot has no " + ManagedIds.spelled(id, PluginHost.managedValues()) + " a plugin may change.";
+    }
+
+    /** A value a plugin's window changed: written, or sent where this instance sends its writes, a refusal said. */
+    private void changed(PluginWrite write, Runnable here) {
+        if (forward == null) {
+            here.run();
+            return;
+        }
+        forward.write(write).ifPresent(HostRuns::status);
+    }
+
+    private static MethodWrite methodWrite(Optional<String> refused, String className, String method) {
+        return refused.isPresent() ? new MethodWrite(null, refused.get()) : new MethodWrite(className + "::" + method,
+                null);
     }
 
     /** The live values, or {@link PluginValues#NONE} when no project is open. Never null. */
@@ -155,7 +297,8 @@ public final class HostPluginValues implements PluginValues {
         if (found.isEmpty() || !found.get().editable()) return Optional.empty();
         ManagedMethod value = found.get();
         return Optional.of(HostValueContext.of(value.form(), value.expression(), services,
-                expression -> write(value, imported(expression)), this::constants));
+                expression -> changed(new PluginWrite.SetValue(id, expression),
+                        () -> write(value, imported(expression))), this::constants));
     }
 
     /**
@@ -167,6 +310,7 @@ public final class HostPluginValues implements PluginValues {
     public Optional<String> create(String id) {
         if (id == null || id.isBlank()) return Optional.of("No value was named.");
         if (JavaManagedValues.find(config, state, id).isPresent()) return Optional.empty();
+        if (forward != null) return forward.write(new PluginWrite.Create(id));
         for (LoadedPlugin plugin : PluginHost.plugins()) {
             List<ManagedValue<?>> declared;
             try {
@@ -221,8 +365,13 @@ public final class HostPluginValues implements PluginValues {
      */
     public static List<String> createMissing() {
         HostPluginValues live = current;
-        if (live == null || live.state.isReaderMode()) return List.of();
-        return live.writeMissing();
+        return live == null ? List.of() : live.missing();
+    }
+
+    /** {@link #createMissing} on this project's values; nothing when they do not write the bot themselves. */
+    public List<String> missing() {
+        if (forward != null || state.isReaderMode()) return List.of();
+        return writeMissing();
     }
 
     private List<String> writeMissing() {
@@ -391,16 +540,29 @@ public final class HostPluginValues implements PluginValues {
         return NestedClasses.named(index(), set.id(), constant, PluginHost.grammar(), setup)
                 .filter(nested -> nested.setup() != null)
                 .map(nested -> HostValueContext.of(set.setup().getGenericReturnType(), nested.setup(), services,
-                        expression -> {
-                            Path file = nested.file().toAbsolutePath().normalize();
-                            recorded(() -> {
-                                snapshot();
-                                BotSources.forEach(config, state, (visited, source) -> visited.equals(file)
-                                        ? NestedClasses.setupSet(source, nested.holder(), nested.constant(), setup,
-                                                imported(expression)) : null);
-                            });
-                            redraw(java.util.Set.of(file));
-                        }, this::constants));
+                        expression -> changed(new PluginWrite.SetSetup(set.id(), constant, expression),
+                                () -> setSetup(nested, setup, expression)), this::constants));
+    }
+
+    /** What the setup of {@code constant}'s class returns, written. */
+    private Optional<String> setSetup(ManagedClasses<?> set, String constant, JavaValue expression) {
+        String setup = set.setup().getName();
+        Optional<NestedClasses.Nested> nested = NestedClasses.named(index(), set.id(), constant, PluginHost.grammar(),
+                setup).filter(found -> found.setup() != null);
+        if (nested.isEmpty()) return Optional.of(missing(set.id(), constant));
+        setSetup(nested.get(), setup, expression);
+        return Optional.empty();
+    }
+
+    private void setSetup(NestedClasses.Nested nested, String setup, JavaValue expression) {
+        Path file = nested.file().toAbsolutePath().normalize();
+        recorded(() -> {
+            snapshot();
+            BotSources.forEach(config, state, (visited, source) -> visited.equals(file)
+                    ? NestedClasses.setupSet(source, nested.holder(), nested.constant(), setup,
+                    imported(expression)) : null);
+        });
+        redraw(java.util.Set.of(file));
     }
 
     @Override
@@ -419,6 +581,7 @@ public final class HostPluginValues implements PluginValues {
             return Optional.of("No plugin in this project declares " + type.getSimpleName() + ", so " + member
                     + " cannot be written.");
         }
+        if (forward != null) return forward.write(new PluginWrite.AddClass(set.id(), member, written.get()));
         return apply(NestedClasses.add(index(), set.id(), member, set.type(), set.setup(), imported(written.get()),
                 PluginHost.grammar()));
     }
@@ -476,6 +639,7 @@ public final class HostPluginValues implements PluginValues {
     @Override
     public Optional<String> renameGroup(ManagedValue<?> set, String group, String newName) {
         if (set == null) return Optional.of("No set was named.");
+        if (forward != null) return forward.write(new PluginWrite.RenameGroup(set.id(), group, newName));
         if (set instanceof ManagedClasses<?>) {
             BotIndex index = index();
             return NestedClasses.named(index, set.id(), group, PluginHost.grammar(), null)
@@ -488,6 +652,7 @@ public final class HostPluginValues implements PluginValues {
     @Override
     public Optional<String> removeGroup(ManagedValue<?> set, String group) {
         if (set == null) return Optional.of("No set was named.");
+        if (forward != null) return forward.write(new PluginWrite.RemoveGroup(set.id(), group));
         if (set instanceof ManagedClasses<?>) {
             BotIndex index = index();
             return NestedClasses.named(index, set.id(), group, PluginHost.grammar(), null)
@@ -526,7 +691,10 @@ public final class HostPluginValues implements PluginValues {
     public MethodWrite createMethod(MethodShape shape, String className, String method) {
         return switch (shape) {
             case VOID -> createMethod((String) null, null, className, method);
-            case BOOLEAN -> written(index(), className, method, BotMethods.BOOLEAN, null, null);
+            case BOOLEAN -> forward != null
+                    ? methodWrite(forward.write(new PluginWrite.CreateBooleanMethod(className, method)), className,
+                    method)
+                    : written(index(), className, method, BotMethods.BOOLEAN, null, null);
             case null -> new MethodWrite(null, "No kind of method was named.");
         };
     }
@@ -566,10 +734,11 @@ public final class HostPluginValues implements PluginValues {
                 if (value.isEmpty()) return Optional.of(ConstantValues.refusal(PluginHost.grammar(), parameters[i],
                         argument.value()));
             }
-            written.add(imported(value.get()));
+            written.add(value.get());
         }
-        return apply(BotMethods.appendCall(index(), method, target.getDeclaringClass().getCanonicalName(),
-                target.getName(), written));
+        PluginWrite.AppendCall append = new PluginWrite.AppendCall(method,
+                target.getDeclaringClass().getCanonicalName(), target.getName(), written);
+        return forward != null ? forward.write(append) : perform(append);
     }
 
     // ── an open set: ManagedSets planned, written here ────────────────────────────────────────────────────
@@ -586,6 +755,7 @@ public final class HostPluginValues implements PluginValues {
     }
 
     public Optional<String> addGroup(String id, String group, List<String> constants) {
+        if (forward != null) return forward.write(new PluginWrite.AddGroup(id, group, constants));
         Optional<ManagedOpenSet<?>> set = openSet(PluginHost.managedValues(), id)
                 .filter(ManagedOpenSet.EnumGroups.class::isInstance);
         if (set.isEmpty()) return Optional.of(notGrouped(id));
@@ -622,6 +792,10 @@ public final class HostPluginValues implements PluginValues {
     }
 
     public MethodWrite createMethod(String id, String group, String className, String method) {
+        if (forward != null) {
+            return methodWrite(forward.write(new PluginWrite.CreateMethod(id, group, className, method)), className,
+                    method);
+        }
         BotIndex index = index();
         String returns = null;
         String imported = null;
@@ -689,7 +863,8 @@ public final class HostPluginValues implements PluginValues {
                 // The bot's constants too (2026-10-12): a flow names its activities as Activities.Collect.class,
                 // which nothing but them spells, so without them every flow with an activity was refused.
                 .map(found -> HostValueContext.of(found.form(), found.initializer(), services,
-                        expression -> writeInitializer(found, imported(expression)),
+                        expression -> changed(new PluginWrite.SetMember(id, member, expression),
+                                () -> writeInitializer(found, imported(expression))),
                         () -> constants().stream().filter(c -> !isItself(c, found)).toList()));
     }
 
@@ -707,7 +882,8 @@ public final class HostPluginValues implements PluginValues {
         // An enum's constant is its name: the value was only checked, and nothing of it is written.
         if (set.filter(declared -> declared instanceof ManagedOpenSet.OneEnum<?>
                 || declared instanceof ManagedOpenSet.EnumGroups<?>).isPresent()) {
-            return apply(ManagedSets.add(index(), id, member, null, null));
+            PluginWrite.AddConstant constant = new PluginWrite.AddConstant(id, member);
+            return forward != null ? forward.write(constant) : perform(constant);
         }
         Class<?> type = value instanceof Enum<?> constant ? constant.getDeclaringClass() : value.getClass();
         // Each part another constant holds is written as that constant: a screen's Way.of(HOME, …) names HOME, which
@@ -725,6 +901,7 @@ public final class HostPluginValues implements PluginValues {
             return Optional.of(member + " cannot be written whole: a part of it is of a type nothing writes, or "
                     + "names a constant the bot does not have. Nothing was added.");
         }
+        if (forward != null) return forward.write(new PluginWrite.Add(id, member, type.getName(), initializer.get()));
         return apply(ManagedSets.add(index(), id, member, type, imported(initializer.get())));
     }
 
@@ -780,6 +957,7 @@ public final class HostPluginValues implements PluginValues {
     }
 
     public Optional<String> rename(String id, String member, String newName) {
+        if (forward != null) return forward.write(new PluginWrite.Rename(id, member, newName));
         BotIndex index = index();
         Optional<ManagedSets.Member> found = ManagedSets.member(index, id, member, PluginHost.grammar());
         if (found.isEmpty()) return Optional.of(missing(id, member));
@@ -793,6 +971,7 @@ public final class HostPluginValues implements PluginValues {
 
     /** The mark is written only where the bot compiles {@code @Refactor}; elsewhere the repoint goes unmarked. */
     public Optional<String> repoint(String id, String member, String replacement, String note) {
+        if (forward != null) return forward.write(new PluginWrite.Repoint(id, member, replacement, note));
         BotIndex index = index();
         Optional<ManagedSets.Member> from = ManagedSets.member(index, id, member, PluginHost.grammar());
         Optional<ManagedSets.Member> to = ManagedSets.member(index, id, replacement, PluginHost.grammar());
@@ -803,6 +982,7 @@ public final class HostPluginValues implements PluginValues {
     }
 
     public Optional<String> remove(String id, String member) {
+        if (forward != null) return forward.write(new PluginWrite.Remove(id, member));
         BotIndex index = index();
         Optional<ManagedSets.Member> found = ManagedSets.member(index, id, member, PluginHost.grammar());
         if (found.isEmpty()) return Optional.of(missing(id, member));
@@ -810,6 +990,7 @@ public final class HostPluginValues implements PluginValues {
     }
 
     public Optional<String> moveBefore(String id, String member, String before) {
+        if (forward != null) return forward.write(new PluginWrite.MoveBefore(id, member, before));
         BotIndex index = index();
         List<ManagedSets.Member> members = ManagedSets.members(index, id, PluginHost.grammar());
         Optional<ManagedSets.Member> moving = members.stream().filter(m -> m.memberName().equals(member)).findFirst();
@@ -897,11 +1078,13 @@ public final class HostPluginValues implements PluginValues {
 
     @Override
     public Optional<String> addRunParameter(ParameterWrite write) {
+        if (forward != null) return forward.write(PluginWrite.AddRunParameter.of(write));
         return written(() -> JavaParameters.addDuringRun(config, state, write, this::classNamed, PluginHost.grammar()));
     }
 
     @Override
     public Optional<String> forgetRunParameter(String group, String name) {
+        if (forward != null) return forward.write(new PluginWrite.ForgetRunParameter(group, name));
         return written(() -> JavaParameters.forgetDuringRun(config, state, group, name, PluginHost.grammar()));
     }
 
