@@ -81,7 +81,11 @@ class CoreEditorTest {
             }
         };
         editor = new CoreEditor(ProjectConfig.forProject("MyBot", Paths.get("/tmp/projects")), state, output,
-                new ProjectAnalyzer(null, state), events::add);
+                new ProjectAnalyzer(null, state), event -> {
+                    events.add(event);
+                    // What a client does with a change: it takes the file's new text as the one it shows.
+                    if (event instanceof CoreEvent.MethodsChanged changed) state.setCurrentCode(changed.source());
+                });
     }
 
     private Block body() {
@@ -109,6 +113,25 @@ class CoreEditorTest {
         assertEquals(SOURCE, writes.getFirst().previousCode());
         CoreEvent.MethodsChanged event = assertInstanceOf(CoreEvent.MethodsChanged.class, events.getFirst());
         assertEquals(OPEN, event.file());
+        assertEquals(writes.getFirst().newCode(), event.source());
+    }
+
+    /** An undo puts the open file back as a change of it, which a client redraws from, and records no step of its own. */
+    @Test
+    void anUndoAnnouncesTheTextItPutBack() {
+        apply(EditRequest.Guard.EDITOR_RULES, new Edit.Delete(line(1)));
+        events.clear();
+
+        assertTrue(editor.step(HistoryStep.UNDO));
+
+        CoreEvent.MethodsChanged back = assertInstanceOf(CoreEvent.MethodsChanged.class, events.getFirst());
+        assertEquals(SOURCE, back.source());
+        assertEquals(List.of("run"), back.methods().stream().map(ChangedMethod::name).toList());
+        CoreEvent.HistoryChanged history = assertInstanceOf(CoreEvent.HistoryChanged.class, events.getLast());
+        assertFalse(history.canUndo());
+        assertTrue(history.canRedo());
+        assertFalse(editor.step(HistoryStep.UNDO), "nothing is left to undo");
+        assertEquals(1, writes.size(), "an undo is no write of the editor's");
     }
 
     @Test

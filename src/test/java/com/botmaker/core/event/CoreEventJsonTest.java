@@ -20,7 +20,9 @@ class CoreEventJsonTest {
             new CoreEvent.MethodsChanged(FILE, List.of(new ChangedMethod("types[0]/bodyDeclarations[0]", "main",
                     "public static void main(String[] args) {\n}",
                     List.of(new ChangedMethod.Node("types[0]/bodyDeclarations[0]/body", 39, 3)))),
-                    List.of("types[0]/bodyDeclarations[3]")),
+                    List.of("types[0]/bodyDeclarations[3]"),
+                    "package com.mybot;\n\npublic class Main {\n    public static void main(String[] args) {\n}\n}\n", true),
+            new CoreEvent.HistoryChanged(true, false, "Delete the line", ""),
             new CoreEvent.Diagnostics(FILE, List.of(
                     new CoreEvent.Diagnostics.Problem("types[0]/bodyDeclarations[0]/body/statements[0]",
                             CoreEvent.Diagnostics.Severity.ERROR, 4, "ore cannot be resolved"),

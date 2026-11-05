@@ -42,10 +42,16 @@ per user.
   assistant's `EditRequest` never carries one. Studio still sends two for an assistant's tool, Java the host built
   itself: the MCP `rename`'s refactor and a plugin tool's call in the overlay, as they ran before; phase 9 moves them. `EditPayloads` is how its `ResolvedType`, `JavaValue`, `BotType.Choice` and
   reflected `Type` cross as JSON.
+- Since phase 6e (2026-11-05) a client redraws from `MethodsChanged`, which carries the file's whole new text beside the
+  methods it reshaped (the user's call), and the project's history is the core's: `CoreEditor.step(HistoryStep)` undoes
+  or redoes, `recordRewrite` records what a plugin already wrote, `rewritten` records an open-time migration, and
+  `HistoryChanged` says what the Undo menu shows. An undo announces what it put back as `MethodsChanged` and records
+  nothing. `EditorOutput.written` is the editor's own report; Studio draws nothing from it.
 - JavaFX is `provided` for one reason: `PluginHost` binds a plugin's slot editors, whose methods return a `Node`.
   Construct no Node here; phase 8's UI port removes it.
 - The `tests` jar (`TestPlugins`, `TestValues`, `TestValue`, `TestOutcome`, `MigrationTypes`, `TestScreen`) is what Studio's tests
-  load plugins and values with: keep those public.
+  load plugins and values with: keep those public. `parser.EditorFixture` is the core's own: a `CodeEditor` over a source
+  string with no block drawn; `TestSources` gives the classpath and source root a test parses against.
 
 ## Rules
 

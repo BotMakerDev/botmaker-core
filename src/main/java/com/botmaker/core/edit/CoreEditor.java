@@ -1,6 +1,7 @@
 package com.botmaker.core.edit;
 
 import com.botmaker.core.event.CoreEvent;
+import com.botmaker.core.events.FileEdit;
 import com.botmaker.core.parser.CodeEditor;
 import com.botmaker.core.parser.EditorOutput;
 import com.botmaker.core.project.ProjectConfig;
@@ -18,7 +19,8 @@ import java.util.function.Consumer;
 /**
  * The one way an edit reaches the open bot, by {@code BlockId} in the tree and never through anything a client drew. A
  * request runs as an {@link EditSession}: every edit lands as one undo step, or none does and the answer says why. What
- * landed goes out through {@link EditorOutput}, as {@code CodeEditor}'s own writes do, and as {@link CoreEvent.MethodsChanged}.
+ * landed goes out through {@link EditorOutput}, as {@code CodeEditor}'s own writes do, and as {@link CoreEvent.MethodsChanged},
+ * which is what a client redraws from; each write is one step of the project's history ({@link #step}).
  *
  * <p>Confined to the thread that owns {@link ProjectState}. The canvas's edits run here as they are made; an assistant's
  * session runs on its own thread and only its {@link #commit} comes here.
@@ -31,6 +33,7 @@ public final class CoreEditor {
     private final ProjectAnalyzer analyzer;
     private final Consumer<CoreEvent> events;
     private final CanvasEditor canvas;
+    private final ProjectHistory history;
     /** What the running canvas edit did, confined with the rest to the owning thread. */
     private List<ChangedMethod> changed;
     private String said;
@@ -43,6 +46,32 @@ public final class CoreEditor {
         this.analyzer = analyzer;
         this.events = events;
         this.canvas = new CanvasEditor(state, new CodeEditor(config, state, new Announcing(), analyzer));
+        this.history = new ProjectHistory(state, events, output::status, this::restored);
+    }
+
+    /**
+     * Undoes or redoes the project's last step, whoever made it and in whichever file; false when there is none that
+     * way. What it puts back in the open file is announced as {@link CoreEvent.MethodsChanged}, and records nothing.
+     */
+    public boolean step(HistoryStep step) {
+        return history.step(step);
+    }
+
+    /**
+     * Files something other than an edit already wrote, buffer and disk (a plugin's value writes), as one step named
+     * {@code label}, so a step takes them back like an edit.
+     */
+    public void recordRewrite(String label, List<FileEdit> edits) {
+        history.recordRewrite(label, edits);
+    }
+
+    /**
+     * A write of the open file the core made outside an edit (an open-time migration): announced and recorded as one
+     * step, as an edit's own write is.
+     */
+    public void rewritten(EditorOutput.Write write) {
+        output.written(write);
+        announce(write);
     }
 
     /** {@code request}'s edits as one step, or none of them. */
@@ -107,10 +136,7 @@ public final class CoreEditor {
         @Override
         public void written(Write write) {
             output.written(write);
-            MethodDiff diff = MethodDiff.between(state.level(), write.previousCode() == null ? "" : write.previousCode(),
-                    write.newCode());
-            changed = diff.changed();
-            openFile().ifPresent(file -> events.accept(new CoreEvent.MethodsChanged(file, diff.changed(), diff.removed())));
+            changed = announce(write).changed();
         }
 
         @Override
@@ -185,11 +211,32 @@ public final class CoreEditor {
     private EditResult land(EditSession session, String label, String liveSource) {
         Optional<EditorOutput.Write> write = session.finished(liveSource, label);
         if (write.isEmpty()) return new EditResult.Accepted(List.of());
-        MethodDiff diff = MethodDiff.between(state.level(), session.original(), session.source());
         output.written(write.get());
+        MethodDiff diff = announce(write.get());
         session.added().forEach(output::blockAdded);
-        openFile().ifPresent(file -> events.accept(new CoreEvent.MethodsChanged(file, diff.changed(), diff.removed())));
         return new EditResult.Accepted(diff.changed());
+    }
+
+    /** {@code write} told to every client, before anything that follows from it, and recorded as one step. */
+    private MethodDiff announce(EditorOutput.Write write) {
+        MethodDiff diff = announce(write.previousCode(), write.newCode(), write.markNewIdentifiersAsUnedited());
+        history.recordWrite(write.label(), write.previousCode(), write.newCode(), write.alsoChanged());
+        return diff;
+    }
+
+    /** What a step put back in the open file, told as any change of it. */
+    private void restored(String text) {
+        announce(state.getCurrentCode(), text, false);
+    }
+
+    private MethodDiff announce(String previous, String now, boolean newNamesUnchosen) {
+        MethodDiff diff = MethodDiff.between(state.level(), previous == null ? "" : previous, now);
+        openFile().ifPresent(file -> events.accept(
+                new CoreEvent.MethodsChanged(file, diff.changed(), diff.removed(), now, newNamesUnchosen)));
+        // After the clients heard, since an in-process one reads the outgoing text as the previous; a client that
+        // adopted already made this a no-op, and one that does not (out of process, headless) leaves the core current.
+        state.setCurrentCode(now);
+        return diff;
     }
 
     /**

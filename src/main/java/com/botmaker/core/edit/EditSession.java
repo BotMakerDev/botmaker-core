@@ -1,5 +1,6 @@
 package com.botmaker.core.edit;
 
+import com.botmaker.core.events.FileEdit;
 import com.botmaker.core.parser.CodeEditor;
 import com.botmaker.core.parser.EditorOutput;
 import com.botmaker.core.plugin.PaletteCuration;
@@ -490,11 +491,12 @@ public final class EditSession {
      */
     public Optional<EditorOutput.Write> finished(String liveSource, String label) {
         if (writes.isEmpty() || source.equals(original) || !original.equals(liveSource)) return Optional.empty();
-        if (label != null) return Optional.of(new EditorOutput.Write(source, original, false, label, List.of()));
+        // Every file the kept edits wrote, the client's one step included, or its undo would leave them.
+        List<FileEdit> alsoChanged = writes.stream().flatMap(write -> write.alsoChanged().stream()).toList();
+        if (label != null) return Optional.of(new EditorOutput.Write(source, original, false, label, alsoChanged));
         if (writes.size() == 1) return Optional.of(writes.getFirst());
         boolean unedited = writes.stream().anyMatch(EditorOutput.Write::markNewIdentifiersAsUnedited);
-        return Optional.of(new EditorOutput.Write(source, original, unedited, writes.getLast().label(),
-                writes.stream().flatMap(write -> write.alsoChanged().stream()).toList()));
+        return Optional.of(new EditorOutput.Write(source, original, unedited, writes.getLast().label(), alsoChanged));
     }
 
     /** The status lines {@code CodeEditor} wrote for the user when it refused, not the reasons worded for a model. */

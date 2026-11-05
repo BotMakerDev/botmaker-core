@@ -13,6 +13,7 @@ import java.util.List;
 @JsonTypeInfo(use = JsonTypeInfo.Id.NAME, property = "event")
 @JsonSubTypes({
         @JsonSubTypes.Type(value = CoreEvent.MethodsChanged.class, name = "methodsChanged"),
+        @JsonSubTypes.Type(value = CoreEvent.HistoryChanged.class, name = "historyChanged"),
         @JsonSubTypes.Type(value = CoreEvent.Diagnostics.class, name = "diagnostics"),
         @JsonSubTypes.Type(value = CoreEvent.RunState.class, name = "runState"),
         @JsonSubTypes.Type(value = CoreEvent.RunOutput.class, name = "runOutput"),
@@ -24,12 +25,30 @@ public sealed interface CoreEvent {
      * An accepted edit, an undo or a change on disk reshaped methods of one file. A method's id is its place in the
      * file, so adding or removing one renumbers those after it: {@code methods} holds every method whose source or
      * id changed, renumbered ones too, and {@code removed} the ids the file no longer has.
+     *
+     * <p>{@code source} is the whole file after the change, which is what a client draws from: a file's imports, fields
+     * and class headers are in no method, and a client parses one text rather than splicing methods into its copy
+     * (2026-11-05, the user's call). A client keeps whatever it drew of a method not listed. {@code newNamesUnchosen}
+     * says the names the change brought are the editor's guesses, shown as not yet chosen by the user.
      */
-    record MethodsChanged(String file, List<ChangedMethod> methods, List<String> removed) implements CoreEvent {
+    record MethodsChanged(String file, List<ChangedMethod> methods, List<String> removed, String source,
+                          boolean newNamesUnchosen) implements CoreEvent {
         public MethodsChanged {
             requireFile(file);
             methods = methods == null ? List.of() : List.copyOf(methods);
             removed = removed == null ? List.of() : List.copyOf(removed);
+            if (source == null) throw new IllegalArgumentException("a change carries the file's source");
+        }
+    }
+
+    /**
+     * The project's history moved: an edit was recorded, or a step was undone or redone. The labels are the steps in
+     * the words an Undo menu shows, {@code ""} when there is none.
+     */
+    record HistoryChanged(boolean canUndo, boolean canRedo, String undoLabel, String redoLabel) implements CoreEvent {
+        public HistoryChanged {
+            undoLabel = undoLabel == null ? "" : undoLabel;
+            redoLabel = redoLabel == null ? "" : redoLabel;
         }
     }
 
