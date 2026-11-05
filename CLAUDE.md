@@ -33,11 +33,15 @@ per user.
 - `edit.CoreEditor` (phase 6c, 2026-11-05) is the one way a typed edit reaches the open bot: it finds its target by
   `BlockId` in the tree. A request runs as an `EditSession`, over `EditStage`s it edits with `CodeEditor`: whole or not
   at all, one write. `EditRequest.Guard` says how far the compiler judges it: `EVERY_EDIT` for an assistant,
-  `EDITOR_RULES` for what the user did by hand. A client's own session lands through `commit`. `userInsert` takes a
-  menu's `BlockType` in-process; its wire form comes with the canvas's other operations (phase 6d), which still call
-  `CodeEditor` with a drawn node. `Edit.Rename` renames a local only. `MethodsChanged` carries methods, not a file's
-  imports or fields. `validation.SourceChecks` says what a tree lacks, `nav.SourceNavigation` where a thing is; neither
-  knows a block.
+  `EDITOR_RULES` for what the user did by hand. A client's own session lands through `commit`. `Edit.Rename` renames a
+  local only. `MethodsChanged` carries methods, not a file's imports or fields. `validation.SourceChecks` says what a
+  tree lacks, `nav.SourceNavigation` where a thing is; neither knows a block.
+- `edit.CanvasEdit` (phase 6d, 2026-11-05) is what the user did on the canvas, one record per gesture, each naming its
+  nodes by `BlockId`. `CoreEditor.userEdit` runs one through `CanvasEditor` on one live `CodeEditor`, whose locks, guard,
+  words and history labels it keeps, and goes alone under `EDITOR_RULES`; under `EVERY_EDIT` it is refused, so an
+  assistant's `EditRequest` never carries one. Studio still sends two for an assistant's tool, Java the host built
+  itself: the MCP `rename`'s refactor and a plugin tool's call in the overlay, as they ran before; phase 9 moves them. `EditPayloads` is how its `ResolvedType`, `JavaValue`, `BotType.Choice` and
+  reflected `Type` cross as JSON.
 - JavaFX is `provided` for one reason: `PluginHost` binds a plugin's slot editors, whose methods return a `Node`.
   Construct no Node here; phase 8's UI port removes it.
 - The `tests` jar (`TestPlugins`, `TestValues`, `TestValue`, `TestOutcome`, `MigrationTypes`, `TestScreen`) is what Studio's tests
@@ -47,8 +51,10 @@ per user.
 
 - Imports nothing above it: no `javafx`, no `com.botmaker.studio`, no SDK (`CoreLayersTest`).
 - Edits cross as typed commands; Java text crosses only core → client, as source to draw. A slot's value is what
-  its editor gives, read by the slot's type, never Java the core splices.
+  its editor gives, read by the slot's type, never Java the core splices. The one exception is the user's own hands: a
+  `CanvasEdit` may carry Java the user typed, pasted or restored, and only under `EDITOR_RULES`.
 - A protocol record that changes is a protocol change: its JSON round trip is in `EditJsonTest` or
-  `CoreEventJsonTest`, and a new subtype is registered in its `@JsonSubTypes`.
+  `CoreEventJsonTest`, and a new subtype is registered in its `@JsonSubTypes`. A `CanvasEdit` is registered by `CoreJson`
+  from its permitted classes, and its round trip is in `CanvasEditJsonTest`.
 - Write Java with JDT trees, never strings; no plugin vocabulary.
 - `botmaker-studio-api` is a plain dependency here: the core is a host, like Studio.

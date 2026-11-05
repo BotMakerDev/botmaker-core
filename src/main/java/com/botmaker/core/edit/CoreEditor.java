@@ -1,6 +1,7 @@
 package com.botmaker.core.edit;
 
 import com.botmaker.core.event.CoreEvent;
+import com.botmaker.core.parser.CodeEditor;
 import com.botmaker.core.parser.EditorOutput;
 import com.botmaker.core.project.ProjectConfig;
 import com.botmaker.core.project.ProjectFile;
@@ -29,6 +30,10 @@ public final class CoreEditor {
     private final EditorOutput output;
     private final ProjectAnalyzer analyzer;
     private final Consumer<CoreEvent> events;
+    private final CanvasEditor canvas;
+    /** What the running canvas edit did, confined with the rest to the owning thread. */
+    private List<ChangedMethod> changed;
+    private String said;
 
     public CoreEditor(ProjectConfig config, ProjectState state, EditorOutput output, ProjectAnalyzer analyzer,
                       Consumer<CoreEvent> events) {
@@ -37,12 +42,20 @@ public final class CoreEditor {
         this.output = output;
         this.analyzer = analyzer;
         this.events = events;
+        this.canvas = new CanvasEditor(state, new CodeEditor(config, state, new Announcing(), analyzer));
     }
 
     /** {@code request}'s edits as one step, or none of them. */
     public EditResult apply(EditRequest request) {
         Optional<Path> file = resolve(request.file());
         if (file.isEmpty()) return refused(request.file(), request.file() + " is not the file open here.");
+        if (request.edits().stream().anyMatch(CanvasEdit.class::isInstance)) {
+            if (request.guard() == EditRequest.Guard.EVERY_EDIT) {
+                return refused(request.file(), "That edit is one only the user makes, by hand.");
+            }
+            if (request.edits().size() > 1) return refused(request.file(), "An edit made by hand goes alone.");
+            return byHand((CanvasEdit) request.edits().getFirst());
+        }
         boolean writesValues = request.edits().stream().anyMatch(Edit.SetSlot.class::isInstance);
         EditSession session = session(file.get(), request.guard(), writesValues);
         for (int i = 0; i < request.edits().size(); i++) {
@@ -58,15 +71,59 @@ public final class CoreEditor {
     /** One edit the user made by hand on the open file, judged by the editor's own rules. */
     public EditResult userEdit(Edit edit) {
         Optional<String> open = openFile();
-        return open.isEmpty() ? new EditResult.Refused("No file is open.")
+        if (open.isEmpty()) return new EditResult.Refused("No file is open.");
+        return edit instanceof CanvasEdit gesture ? byHand(gesture)
                 : apply(new EditRequest(open.get(), List.of(edit), EditRequest.Guard.EDITOR_RULES));
     }
 
     /**
-     * A block the user picked from a menu, inserted in the open file. A menu's block can carry more than a palette id
-     * says (the method it calls, the variable it assigns), so in-process it crosses as itself.
+     * A gesture on the canvas, on the live tree: the editor's locks and guards judge it and its words go to the user. It
+     * lands as the editor wrote it, however many files that took, and a gesture that changes nothing is no refusal.
      */
-    public EditResult userInsert(String bodyId, BlockType type, int index) {
+    private EditResult byHand(CanvasEdit edit) {
+        String file = openFile().orElse("");
+        if (edit instanceof CanvasEdit.InsertBlock insert) return insert(insert.bodyId(), insert.block(), insert.index());
+        changed = null;
+        said = null;
+        boolean done;
+        try {
+            done = canvas.run(edit);
+        } catch (CanvasEditor.NotInTree | IllegalArgumentException no) {
+            return refused(file, no.getMessage());
+        }
+        if (changed != null) return new EditResult.Accepted(changed);
+        if (said != null) return refused(file, said);
+        return done ? new EditResult.Accepted(List.of()) : refused(file, "Nothing was changed.");
+    }
+
+    /** The editor's output, plus what it means for the protocol: each write says which methods it reshaped. */
+    private final class Announcing implements EditorOutput {
+        @Override
+        public void status(String message) {
+            said = message;
+            output.status(message);
+        }
+
+        @Override
+        public void written(Write write) {
+            output.written(write);
+            MethodDiff diff = MethodDiff.between(state.level(), write.previousCode() == null ? "" : write.previousCode(),
+                    write.newCode());
+            changed = diff.changed();
+            openFile().ifPresent(file -> events.accept(new CoreEvent.MethodsChanged(file, diff.changed(), diff.removed())));
+        }
+
+        @Override
+        public void blockAdded(BlockType type) {
+            output.blockAdded(type);
+        }
+    }
+
+    /**
+     * A block the user picked from a menu, inserted in the open file. A menu's block can carry more than a palette id
+     * says (the method it calls, the variable it assigns).
+     */
+    private EditResult insert(String bodyId, BlockType type, int index) {
         Optional<String> open = openFile();
         ProjectFile active = state.getActiveFile();
         if (open.isEmpty() || active == null) return new EditResult.Refused("No file is open.");

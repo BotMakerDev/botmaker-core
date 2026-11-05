@@ -14,6 +14,8 @@ import org.eclipse.jdt.core.dom.Block;
 import org.eclipse.jdt.core.dom.CompilationUnit;
 import org.eclipse.jdt.core.dom.MethodDeclaration;
 import org.eclipse.jdt.core.dom.TypeDeclaration;
+import org.eclipse.jdt.core.dom.VariableDeclarationFragment;
+import org.eclipse.jdt.core.dom.VariableDeclarationStatement;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -121,10 +123,48 @@ class CoreEditorTest {
     void aMenusBlockIsInsertedAndAnnounced() {
         BlockType type = BlockCatalog.all().stream().filter(BlockType::isStatement).findFirst().orElseThrow();
 
-        assertInstanceOf(EditResult.Accepted.class, editor.userInsert(BlockId.of(body()), type, 0));
+        assertInstanceOf(EditResult.Accepted.class, editor.userEdit(new CanvasEdit.InsertBlock(BlockId.of(body()), 0, type)));
 
         assertEquals(1, writes.size());
         assertEquals(List.of(type), added);
+    }
+
+    @Test
+    void aGestureLandsThroughTheEditorAndSaysWhichMethodChanged() {
+        String literal = BlockId.of(((VariableDeclarationFragment) ((VariableDeclarationStatement)
+                body().statements().getFirst()).fragments().getFirst()).getInitializer());
+
+        EditResult result = editor.userEdit(new CanvasEdit.SetLiteral(literal, "7"));
+
+        EditResult.Accepted accepted = assertInstanceOf(EditResult.Accepted.class, result);
+        assertEquals(List.of("run"), accepted.methods().stream().map(ChangedMethod::name).toList());
+        assertTrue(writes.getFirst().newCode().contains("int a = 7;"), writes.getFirst().newCode());
+        assertInstanceOf(CoreEvent.MethodsChanged.class, events.getFirst());
+    }
+
+    /** A gesture's Java is the user's: an assistant's request cannot carry one, whatever it asks. */
+    @Test
+    void anAssistantsRequestCarryingAGestureIsRefused() {
+        EditResult result = apply(EditRequest.Guard.EVERY_EDIT,
+                new CanvasEdit.InsertStatement(BlockId.of(body()), 0, "System.exit(0);", List.of()));
+
+        assertInstanceOf(EditResult.Refused.class, result);
+        assertTrue(writes.isEmpty());
+    }
+
+    @Test
+    void aGestureGoesAlone() {
+        EditResult result = apply(EditRequest.Guard.EDITOR_RULES, new Edit.Delete(line(1)),
+                new CanvasEdit.RestoreFile(SOURCE));
+
+        assertInstanceOf(EditResult.Refused.class, result);
+        assertTrue(writes.isEmpty());
+    }
+
+    @Test
+    void aGestureOnANodeTheTreeLacksIsRefused() {
+        assertInstanceOf(EditResult.Refused.class, editor.userEdit(new CanvasEdit.SetLiteral("types[0]/nowhere", "7")));
+        assertTrue(writes.isEmpty());
     }
 
     @Test

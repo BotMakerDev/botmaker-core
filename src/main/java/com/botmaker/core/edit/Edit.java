@@ -8,9 +8,10 @@ import com.fasterxml.jackson.annotation.JsonTypeInfo;
  * its {@code BlockId} path, as the client read it from the core's last {@code MethodsChanged}; the core reads each id
  * against the tree the edit runs on and refuses one that tree no longer has.
  *
- * <p>No edit carries Java. A slot takes a {@link SlotValue}, which the slot's type reads; a block comes from the
+ * <p>These carry no Java. A slot takes a {@link SlotValue}, which the slot's type reads; a block comes from the
  * palette by its id. An {@link EditRequest} carries edits in order, applied as one step undo takes back; undo and
- * redo themselves are a {@link HistoryStep}, the project's, not an edit of one file.
+ * redo themselves are a {@link HistoryStep}, the project's, not an edit of one file. What only the user does, by hand
+ * and sometimes with Java they typed, is a {@link CanvasEdit}, which an assistant's request cannot carry.
  */
 @JsonTypeInfo(use = JsonTypeInfo.Id.NAME, property = "edit")
 @JsonSubTypes({
@@ -19,7 +20,7 @@ import com.fasterxml.jackson.annotation.JsonTypeInfo;
         @JsonSubTypes.Type(value = Edit.Move.class, name = "move"),
         @JsonSubTypes.Type(value = Edit.Delete.class, name = "delete"),
         @JsonSubTypes.Type(value = Edit.Rename.class, name = "rename")})
-public sealed interface Edit {
+public sealed interface Edit permits Edit.Insert, Edit.SetSlot, Edit.Move, Edit.Delete, Edit.Rename, CanvasEdit {
 
     /** A palette entry inserted into a body, before the statement now at {@code index} (0 for first). */
     record Insert(String bodyId, int index, String paletteId) implements Edit {

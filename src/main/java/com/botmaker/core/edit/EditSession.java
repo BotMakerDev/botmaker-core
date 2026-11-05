@@ -182,6 +182,7 @@ public final class EditSession {
             case Edit.Move move -> moveBlock(move.blockId(), move.bodyId(), move.index());
             case Edit.Delete delete -> delete(delete.blockId());
             case Edit.Rename rename -> rename(rename.symbolId(), rename.name());
+            case CanvasEdit ignored -> Outcome.Refused.because("That edit is one only the user makes, by hand.");
         };
     }
 

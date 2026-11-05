@@ -31,10 +31,11 @@ class EditJsonTest {
         }
     }
 
-    /** A new kind of edit is a protocol change: it joins the list above, or this fails. */
+    /** A new kind of edit is a protocol change: it joins the list above, or this fails. A gesture has its own list. */
     @Test
     void theListAboveHoldsEveryKindOfEdit() {
-        Set<Class<?>> kinds = Arrays.stream(Edit.class.getPermittedSubclasses()).collect(Collectors.toSet());
+        Set<Class<?>> kinds = Arrays.stream(Edit.class.getPermittedSubclasses())
+                .filter(kind -> kind != CanvasEdit.class).collect(Collectors.toSet());
         assertEquals(kinds, EVERY_EDIT.stream().map(Object::getClass).collect(Collectors.toSet()));
     }
 
