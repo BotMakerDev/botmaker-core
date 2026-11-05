@@ -21,6 +21,16 @@ per user.
   id changed, and the ids removed), `Diagnostics`, `RunState`, `RunOutput`, `UiRequest`, `Refusal`.
 - `CoreJson`: the one mapper every protocol record is read and written with, strict on reading (a missing component
   or trailing text is refused); phase 10's channel carries exactly this.
+- The rest came from Studio (phase 6a, 2026-11-05), each in the package it had there: `project` (the open project,
+  its config, creation, repair, open-time migrations, settings), `plugin` (`PluginHost` and its gate), `services`
+  (`MavenService`), `config`, `events` (`EventBus`), and the parts of `project.managed`, `project.params`,
+  `project.vcs`, `sharing`, `runtime` and `parser.refactor` those need. Studio's `/botmaker/host.properties` is read
+  by `config.AppVersion` and `HostContract` from the classpath: in-process it is Studio's; the core's own process
+  (phase 10) needs its own.
+- JavaFX is `provided` for one reason: `PluginHost` binds a plugin's slot editors, whose methods return a `Node`.
+  Construct no Node here; phase 8's UI port removes it.
+- The `tests` jar (`TestPlugins`, `TestValues`, `TestValue`, `TestOutcome`, `MigrationTypes`) is what Studio's tests
+  load plugins and values with: keep those public.
 
 ## Rules
 
