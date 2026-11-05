@@ -132,8 +132,10 @@
             <version>1.0.0</version>
         </dependency>
 
-        <!-- Compile-only, as in the cli: PluginHost binds a plugin's slot editors, whose methods return
-             javafx.scene.Node, to SlotEditor; the core constructs no Node. Phase 8's UI port takes this away. -->
+        <!-- Compile-only, as in the cli, and it stays (2026-11-05, phase 8a): the contract's signatures name JavaFX types.
+             PluginHost binds a plugin's slot editors, whose methods return javafx.scene.Node, and HostServices
+             implements StudioServices, whose Theme and Dialogs name Scene and Window. The core imports no javafx
+             itself (CoreLayersTest) and constructs no Node; a window comes through plugin.UiPort. -->
         <dependency>
             <groupId>org.openjfx</groupId>
             <artifactId>javafx-controls</artifactId>

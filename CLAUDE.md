@@ -53,8 +53,14 @@ per user.
   frames to `RunTelemetry.Listener`; `DebuggingService` shows through `debug.DebugView`. `RunAgentJar` cuts the agent's
   jar from this module's classes by package path (`run/agent/`): a renamed package changes its strings too. `capture` is
   the window and desktop grabs; the overlay's monitor grab stays Studio's.
-- JavaFX is `provided` for one reason: `PluginHost` binds a plugin's slot editors, whose methods return a `Node`.
-  Construct no Node here; phase 8's UI port removes it.
+- The plugin host classes came in phase 8a (2026-11-05): `plugin` gains `HostServices`, `HostRuns`, `HostHistory`,
+  `HostPluginValues`, the value, type, action and overlay contexts, `WriteSteps`, `EntryPoints`, `ToolCalls`;
+  `services.upgrade` (plugin upgrade, `Removal` for leaving the pom) and `services.JitPackSearch` came too. They ask
+  through ports (`Requests`, `Edits`, `Properties`) a client fills; a window comes through `UiPort`, attached by a
+  client with a screen (`HostServices.attach`), and `UiPort.NONE` without one. Studio keeps the slot editors' contexts.
+- JavaFX stays `provided` because the contract's signatures name it: `PluginHost` binds slot editors that return a
+  `Node`, and `HostServices` implements `StudioServices`, whose `Theme` and `Dialogs` name `Scene` and `Window`.
+  Import no javafx and construct no Node here.
 - The `tests` jar (`TestPlugins`, `TestValues`, `TestValue`, `TestOutcome`, `MigrationTypes`, `TestScreen`) is what Studio's tests
   load plugins and values with: keep those public. `parser.EditorFixture` is the core's own: a `CodeEditor` over a source
   string with no block drawn; `TestSources` gives the classpath and source root a test parses against.
