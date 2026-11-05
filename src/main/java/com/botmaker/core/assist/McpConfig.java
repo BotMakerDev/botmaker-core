@@ -10,6 +10,7 @@ import java.nio.file.attribute.PosixFilePermission;
 import java.security.SecureRandom;
 import java.util.EnumSet;
 import java.util.HexFormat;
+import java.util.Optional;
 
 /**
  * Whether the MCP endpoint is on, the port it listens on and its token — {@code mcp.json} beside
@@ -30,15 +31,20 @@ public record McpConfig(boolean enabled, int port, String token) {
     }
 
     public static McpConfig read(Path file) {
+        return readSaved(file).orElseGet(() -> new McpConfig(false, DEFAULT_PORT, newToken()));
+    }
+
+    /** The configuration saved in {@code file} with a token, or empty when there is none to read. */
+    public static Optional<McpConfig> readSaved(Path file) {
         try {
             if (Files.isRegularFile(file)) {
                 McpConfig saved = JSON.readValue(file.toFile(), McpConfig.class);
-                if (saved.token() != null && !saved.token().isBlank()) return saved;
+                if (saved.token() != null && !saved.token().isBlank()) return Optional.of(saved);
             }
         } catch (IOException e) {
             System.err.println("Could not read " + file + ": " + e.getMessage());
         }
-        return new McpConfig(false, DEFAULT_PORT, newToken());
+        return Optional.empty();
     }
 
     public McpConfig withEnabled(boolean on) {

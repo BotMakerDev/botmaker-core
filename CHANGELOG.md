@@ -9,6 +9,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- `server` (2026-11-05): the core as its own process, not yet used by Studio. `CoreMain` serves on a free port of
+  `127.0.0.1` behind the MCP's token and hello, says where in `core.json` in the cache directory, and ends after ten
+  idle minutes or on a quit while nothing uses it. `CoreServer` serves the MCP, `/core` (what it is), `/core/quit` and
+  the clients' channels at `/studio`, a stream of JSON lines one way and a post per message the other (`Channel`,
+  `ChannelClient`), opened only for a client of the core's version. `CoreLauncher` finds the running core or starts
+  one, one start at a time under a lock beside `core.json`, asks an older unused core to quit and refuses a client
+  while an older core is in use, naming both versions. `ProjectLock` holds an open project for one process; a dead
+  owner's lock is taken. `McpEndpoint.guard` puts a server behind the token.
 - `assist` (2026-11-05): the MCP endpoint and its tools moved from Studio — `McpEndpoint`, `McpTools`, `ToolGroup`, the
   file, project, run and Studio tools, `RunLog`, `PastRuns`, `HomeEndpoint` with `HomeTools`, `AssistTurn`,
   `AssistTools`, `BlockView`, `StudioDriver`, `LiveBot`, `McpConfig`, `AiTool` and `BotGuard`. The MCP SDK and Jetty

@@ -65,6 +65,11 @@ per user.
   project open. A client with a screen attaches a `ToolGroup` (its tools, what waits on screen, whether Claude drives it,
   what the home serves of it); Studio's `StudioToolGroup` holds `ui` and `quit_studio`. `assist.Stubs` (tests jar) gives
   Studio's tests a tool's interfaces answering nothing.
+- `server` (phase 10, 2026-11-05) is the core's own process: `CoreMain`, `CoreServer` (the MCP, `/core`, `/core/quit`,
+  the `/studio` channels), `CoreLauncher` (find or start one core per user, `core.json` and `core.lock` in the cache
+  directory), `ProjectLock` (`.botmaker/core.lock` per open project). A channel is a stream of JSON lines from the core
+  and one post per message to it, not a WebSocket: Jetty's websocket jars are not a dependency. Studio does not use it
+  until phase 10a.
 - JavaFX stays `provided` because the contract's signatures name it: `PluginHost` binds slot editors that return a
   `Node`, and `HostServices` implements `StudioServices`, whose `Theme` and `Dialogs` name `Scene` and `Window`.
   Import no javafx and construct no Node here.

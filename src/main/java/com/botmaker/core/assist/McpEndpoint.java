@@ -127,8 +127,7 @@ public final class McpEndpoint implements AutoCloseable {
         ServletContextHandler context = new ServletContextHandler();
         context.setContextPath("/");
         context.addServlet(new ServletHolder(transport), PATH);
-        context.addServlet(new ServletHolder(new Hello(token)), HELLO);
-        context.addFilter(new FilterHolder(bearer(token)), "/*", EnumSet.of(DispatcherType.REQUEST));
+        guard(context, token);
         jetty.setHandler(context);
         try {
             jetty.start();
@@ -230,8 +229,17 @@ public final class McpEndpoint implements AutoCloseable {
         }
     }
 
+    /**
+     * Puts {@code context} behind {@code token}: {@link #HELLO} answers the proof, and every other path refuses a
+     * request without the bearer token. The core's server ({@code server.CoreServer}) guards itself the same way.
+     */
+    public static void guard(ServletContextHandler context, String token) {
+        context.addServlet(new ServletHolder(new Hello(token)), HELLO);
+        context.addFilter(new FilterHolder(bearer(token)), "/*", EnumSet.of(DispatcherType.REQUEST));
+    }
+
     /** HMAC-SHA256 of {@code nonce} under {@code token}, in hex: what {@link #HELLO} answers. */
-    static String proof(String token, String nonce) {
+    public static String proof(String token, String nonce) {
         try {
             Mac mac = Mac.getInstance("HmacSHA256");
             mac.init(new SecretKeySpec(token.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
