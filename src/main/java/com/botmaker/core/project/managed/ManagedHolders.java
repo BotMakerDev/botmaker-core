@@ -133,12 +133,17 @@ public final class ManagedHolders {
                 relative, unit(ast, pkg, imports, written));
     }
 
-    /** One file's unit — its package, the imports it needs and its one type — as source. */
+    /**
+     * One file's unit — its package (none when {@code pkg} is empty), the imports it needs and its one type — as
+     * source. Every new file of the bot is built through this.
+     */
     public static String unit(AST ast, String pkg, Set<String> imports, AbstractTypeDeclaration written) {
         CompilationUnit unit = ast.newCompilationUnit();
-        PackageDeclaration declaration = ast.newPackageDeclaration();
-        declaration.setName(ast.newName(pkg));
-        unit.setPackage(declaration);
+        if (pkg != null && !pkg.isEmpty()) {
+            PackageDeclaration declaration = ast.newPackageDeclaration();
+            declaration.setName(ast.newName(pkg));
+            unit.setPackage(declaration);
+        }
         @SuppressWarnings("unchecked")
         List<ImportDeclaration> importList = unit.imports();
         for (String name : imports) {

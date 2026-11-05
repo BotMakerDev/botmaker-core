@@ -277,8 +277,8 @@ public class CodeEditor {
      * between a rewrite and the canvas.
      *
      * <p><b>Why it exists.</b> A rewrite that <em>throws</em> is already handled: {@code AstRewriteHelper
-     * .applyRewrite} catches and returns the original code. A rewrite that succeeds and produces broken Java
-     * had nothing checking it: the code was published, {@code refreshUI} re-parsed it, JDT recovered a mangled
+     * .applyRewrite} throws {@code RewriteFailed}, which {@code applied} (or {@code CoreEditor}) tells and publishes
+     * nothing for. A rewrite that succeeds and produces broken Java had nothing checking it: the code was published, {@code refreshUI} re-parsed it, JDT recovered a mangled
      * tree, and the method rendered <em>empty</em>. Adding one block could therefore erase the visible contents
      * of a method, with Ctrl-Z as the only way back. Refusing here costs the user the edit; publishing costs
      * them the method.
@@ -365,13 +365,17 @@ public class CodeEditor {
 
     /**
      * {@code op} over the current code, or {@code null} after saying why when it needs a newer Java than the bot's
-     * (2026-11-04): the refusal names the version, where JDT would throw and javac would fail later.
+     * (2026-11-04): the refusal names the version, where JDT would throw and javac would fail later. Also {@code null},
+     * told, when its rewrite cannot be applied ({@code RewriteFailed}, 2026-11-05).
      */
     private String applied(BiFunction<CompilationUnit, String, String> op, CompilationUnit cu) {
         try {
             return op.apply(cu, getCurrentCode());
         } catch (JavaLevel.TooOld tooOld) {
             output.status(tooOld.getMessage());
+            return null;
+        } catch (AstRewriteHelper.RewriteFailed failed) {
+            output.status(failed.getMessage());
             return null;
         }
     }

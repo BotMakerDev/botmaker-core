@@ -7,6 +7,7 @@ import com.botmaker.core.parser.EditorOutput;
 import com.botmaker.core.project.ProjectConfig;
 import com.botmaker.core.project.ProjectFile;
 import com.botmaker.core.project.ProjectState;
+import com.botmaker.java.edit.helpers.AstRewriteHelper;
 import com.botmaker.java.edit.palette.BlockType;
 import com.botmaker.java.index.LibraryIndex;
 import com.botmaker.java.types.ProjectAnalyzer;
@@ -88,7 +89,13 @@ public final class CoreEditor {
         boolean writesValues = request.edits().stream().anyMatch(Edit.SetSlot.class::isInstance);
         EditSession session = session(file.get(), request.guard(), writesValues);
         for (int i = 0; i < request.edits().size(); i++) {
-            if (session.apply(request.edits().get(i)) instanceof Outcome.Refused no) {
+            Outcome outcome;
+            try {
+                outcome = session.apply(request.edits().get(i));
+            } catch (AstRewriteHelper.RewriteFailed failed) {
+                outcome = new Outcome.Refused(List.of(failed.getMessage()));
+            }
+            if (outcome instanceof Outcome.Refused no) {
                 String which = request.edits().size() == 1 ? ""
                         : "Edit " + (i + 1) + " of " + request.edits().size() + " was refused, so none was kept: ";
                 return refused(request.file(), which, session, no);
@@ -111,13 +118,14 @@ public final class CoreEditor {
      */
     private EditResult byHand(CanvasEdit edit) {
         String file = openFile().orElse("");
-        if (edit instanceof CanvasEdit.InsertBlock insert) return insert(insert.bodyId(), insert.block(), insert.index());
         changed = null;
         said = null;
         boolean done;
         try {
+            if (edit instanceof CanvasEdit.InsertBlock insert) return insert(insert.bodyId(), insert.block(), insert.index());
             done = canvas.run(edit);
-        } catch (CanvasEditor.NotInTree | IllegalArgumentException no) {
+        } catch (CanvasEditor.NotInTree | IllegalArgumentException | AstRewriteHelper.RewriteFailed no) {
+            // A rewrite that could not be applied (2026-11-05) is refused with its sentence, whichever path wrote it.
             return refused(file, no.getMessage());
         }
         if (changed != null) return new EditResult.Accepted(changed);

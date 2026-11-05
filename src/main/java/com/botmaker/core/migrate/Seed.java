@@ -8,19 +8,16 @@ import com.botmaker.java.edit.guard.CompileGuard.Problem;
 import com.botmaker.java.edit.helpers.AstRewriteHelper;
 import com.botmaker.java.grammar.SourceFormatter;
 import com.botmaker.core.parser.refactor.CallMigrator;
+import com.botmaker.core.project.managed.ManagedHolders;
 import com.botmaker.java.index.BotIndex;
 import com.botmaker.java.parse.BotParser;
 import org.eclipse.jdt.core.dom.AST;
 import org.eclipse.jdt.core.dom.ASTNode;
 import org.eclipse.jdt.core.dom.CompilationUnit;
 import org.eclipse.jdt.core.dom.ImportDeclaration;
-import org.eclipse.jdt.core.dom.Javadoc;
 import org.eclipse.jdt.core.dom.MethodDeclaration;
 import org.eclipse.jdt.core.dom.Modifier;
-import org.eclipse.jdt.core.dom.PackageDeclaration;
 import org.eclipse.jdt.core.dom.SingleVariableDeclaration;
-import org.eclipse.jdt.core.dom.TagElement;
-import org.eclipse.jdt.core.dom.TextElement;
 import org.eclipse.jdt.core.dom.TypeDeclaration;
 import org.eclipse.jdt.core.dom.rewrite.ASTRewrite;
 import org.eclipse.jdt.core.dom.rewrite.ListRewrite;
@@ -71,7 +68,8 @@ public final class Seed {
     static Seeded of(BotIndex now, List<OldElement> elements, Path file, String mainPackage) {
         Map<OldElement, String> unseeded = new LinkedHashMap<>();
         Set<String> gone = gone(now, elements);
-        String source = now.sources().getOrDefault(file, skeleton(mainPackage));
+        String source = now.sources().get(file);
+        if (source == null) source = skeleton(mainPackage);
         CompilationUnit unit = BotParser.syntax(source);
         TypeDeclaration holder = unit == null ? null : holder(unit, file);
         if (holder == null) {
@@ -314,34 +312,20 @@ public final class Seed {
     @SuppressWarnings("unchecked")
     public static String skeleton(String mainPackage) {
         AST ast = JavaLevel.LATEST.newAst();
-        CompilationUnit unit = ast.newCompilationUnit();
-        PackageDeclaration declaration = ast.newPackageDeclaration();
-        declaration.setName(ast.newName(mainPackage));
-        unit.setPackage(declaration);
         TypeDeclaration type = ast.newTypeDeclaration();
         type.setName(ast.newSimpleName(Migration.CLASS));
         type.modifiers().addAll(ast.newModifiers(Modifier.PUBLIC | Modifier.FINAL));
-        Javadoc javadoc = ast.newJavadoc();
-        for (String line : List.of("How this bot moves off the API its plugins changed (Review ▸ Migrate…).",
+        type.setJavadoc(ManagedHolders.javadoc(ast, List.of(
+                "How this bot moves off the API its plugins changed (Review ▸ Migrate…).",
                 "<p>Each @Migrate method names one old method, constructor, field or type by its own signature, and its",
                 "body is what each use becomes. BotMaker reads it and never runs it; the bot never calls it. Delete a",
-                "method, or this class, once nothing uses its old element.")) {
-            TagElement tag = ast.newTagElement();
-            TextElement text = ast.newTextElement();
-            text.setText(line);
-            tag.fragments().add(text);
-            javadoc.tags().add(tag);
-        }
-        type.setJavadoc(javadoc);
+                "method, or this class, once nothing uses its old element.")));
         MethodDeclaration constructor = ast.newMethodDeclaration();
         constructor.setConstructor(true);
         constructor.setName(ast.newSimpleName(Migration.CLASS));
         constructor.modifiers().addAll(ast.newModifiers(Modifier.PRIVATE));
         constructor.setBody(ast.newBlock());
         type.bodyDeclarations().add(constructor);
-        unit.types().add(type);
-        StringBuilder out = new StringBuilder();
-        SourceFormatter.format(JavaLevel.of(unit), unit.toString()).lines().forEach(line -> out.append(line.stripTrailing()).append('\n'));
-        return out.toString();
+        return ManagedHolders.unit(ast, mainPackage, Set.of(), type);
     }
 }

@@ -4,8 +4,9 @@ import com.botmaker.core.project.managed.ManagedHolders;
 import com.botmaker.java.index.nav.Refactor;
 import com.botmaker.core.project.PluginFiles;
 import com.botmaker.core.project.ProjectConfig;
+import com.botmaker.java.edit.helpers.AstRewriteHelper;
 import com.botmaker.java.index.BotIndex;
-import org.eclipse.jdt.core.dom.ASTNode;
+import org.eclipse.jdt.core.dom.AST;
 import org.eclipse.jdt.core.dom.ASTVisitor;
 import org.eclipse.jdt.core.dom.CompilationUnit;
 import org.eclipse.jdt.core.dom.IBinding;
@@ -15,6 +16,8 @@ import org.eclipse.jdt.core.dom.Name;
 import org.eclipse.jdt.core.dom.PackageDeclaration;
 import org.eclipse.jdt.core.dom.QualifiedName;
 import org.eclipse.jdt.core.dom.SimpleName;
+import org.eclipse.jdt.core.dom.rewrite.ASTRewrite;
+import org.eclipse.jdt.core.dom.rewrite.ListRewrite;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -53,9 +56,6 @@ public final class HolderMove {
         }
     }
 
-    /** One text change: {@code length} characters at {@code start} become {@code text}. */
-    private record Edit(int start, int length, String text) {}
-
     /**
      * The holders of {@code holders} outside their plugin's folder, and every file that names them, as one plan;
      * empty when every holder is in its folder already.
@@ -69,7 +69,12 @@ public final class HolderMove {
                         + relative(config, each.from()) + " was not moved."));
             }
         }
-        Map<Path, String> rewrites = rewrites(index, moved);
+        Map<Path, String> rewrites;
+        try {
+            rewrites = rewrites(index, moved);
+        } catch (AstRewriteHelper.RewriteFailed failed) {
+            return Optional.of(new Refactor.Refused(failed.getMessage()));
+        }
         Map<Path, Path> moves = new LinkedHashMap<>();
         moved.forEach(each -> moves.put(each.from(), each.to()));
         Set<String> folders = new LinkedHashSet<>();
@@ -156,14 +161,12 @@ public final class HolderMove {
      */
     static String rewritten(String text, CompilationUnit unit, Moved self, Map<String, Moved> byOldName,
                             Set<String> stayingPackages) {
-        List<Edit> edits = new ArrayList<>();
+        AST ast = unit.getAST();
+        ASTRewrite rewrite = ASTRewrite.create(ast);
         PackageDeclaration declaration = unit.getPackage();
         String oldPkg = declaration == null ? "" : declaration.getName().getFullyQualifiedName();
         String newPkg = self == null ? oldPkg : self.newPackage();
-        if (self != null && declaration != null) {
-            Name name = declaration.getName();
-            edits.add(new Edit(name.getStartPosition(), name.getLength(), newPkg));
-        }
+        if (self != null && declaration != null) rewrite.replace(declaration.getName(), ast.newName(newPkg), null);
 
         Set<String> imported = new LinkedHashSet<>();
         Set<String> added = new LinkedHashSet<>();
@@ -177,13 +180,11 @@ public final class HolderMove {
                 if (to.isEmpty()) continue;
                 // The old package's own import goes once nothing is left in it; each new package gets one.
                 List<String> news = new ArrayList<>(to);
-                if (!stayingPackages.contains(name)) {
-                    edits.add(new Edit(imp.getName().getStartPosition(), imp.getName().getLength(), news.removeFirst()));
-                }
+                if (!stayingPackages.contains(name)) rewrite.replace(imp.getName(), ast.newName(news.removeFirst()), null);
                 news.forEach(pkg -> added.add(pkg + ".*"));
                 continue;
             }
-            renamed(imp.getName(), byOldName).ifPresent(edits::add);
+            renamed(rewrite, imp.getName(), byOldName);
         }
 
         // Qualified names in the code, and a moved class used by its simple name from what was its package.
@@ -200,9 +201,7 @@ public final class HolderMove {
 
             @Override
             public boolean visit(QualifiedName node) {
-                Optional<Edit> edit = renamed(node, byOldName);
-                edit.ifPresent(edits::add);
-                return edit.isEmpty();
+                return !renamed(rewrite, node, byOldName);
             }
 
             @Override
@@ -221,27 +220,30 @@ public final class HolderMove {
             }
         });
 
-        if (!added.isEmpty()) {
-            StringBuilder lines = new StringBuilder();
-            added.forEach(name -> lines.append("\nimport ").append(name).append(";"));
-            ASTNode after = unit.imports().isEmpty() ? declaration : (ASTNode) unit.imports().getLast();
-            int at = after == null ? 0 : after.getStartPosition() + after.getLength();
-            edits.add(new Edit(at, 0, after == null ? lines.substring(1) + "\n" : lines.toString()));
+        ListRewrite imports = rewrite.getListRewrite(unit, CompilationUnit.IMPORTS_PROPERTY);
+        for (String name : added) {
+            ImportDeclaration each = ast.newImportDeclaration();
+            boolean onDemand = name.endsWith(".*");
+            each.setName(ast.newName(onDemand ? name.substring(0, name.length() - 2) : name));
+            each.setOnDemand(onDemand);
+            imports.insertLast(each, null);
         }
-
-        edits.sort(Comparator.comparingInt(Edit::start).reversed());
-        StringBuilder out = new StringBuilder(text);
-        for (Edit edit : edits) out.replace(edit.start(), edit.start() + edit.length(), edit.text());
-        return out.toString();
+        return AstRewriteHelper.applyRewrite(rewrite, text);
     }
 
-    /** The edit giving {@code name} its moved class's new name, when it is, or starts with, a moved class's old one. */
-    private static Optional<Edit> renamed(Name name, Map<String, Moved> byOldName) {
+    /**
+     * Gives {@code name} its moved class's new name, when it is, or starts with, a moved class's old one; whether it
+     * did.
+     */
+    private static boolean renamed(ASTRewrite rewrite, Name name, Map<String, Moved> byOldName) {
         for (Name part = name; part != null; part = part instanceof QualifiedName q ? q.getQualifier() : null) {
             Moved moved = byOldName.get(part.getFullyQualifiedName());
-            if (moved != null) return Optional.of(new Edit(part.getStartPosition(), part.getLength(), moved.newName()));
+            if (moved != null) {
+                rewrite.replace(part, name.getAST().newName(moved.newName()), null);
+                return true;
+            }
         }
-        return Optional.empty();
+        return false;
     }
 
     private static String packageOf(String qualified) {

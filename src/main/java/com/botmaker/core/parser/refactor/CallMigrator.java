@@ -7,6 +7,7 @@ import com.botmaker.java.parse.JavaLevel;
 import com.botmaker.java.edit.palette.BotType;
 import com.botmaker.java.edit.palette.SignatureType;
 import com.botmaker.java.edit.EditContext;
+import com.botmaker.java.edit.helpers.AstRewriteHelper;
 import com.botmaker.java.edit.factories.InitializerFactory;
 import com.botmaker.java.grammar.SourceParser;
 import com.botmaker.java.edit.refactor.MethodReferences.CallSite;
@@ -129,11 +130,16 @@ public final class CallMigrator {
             }
             noted.forEach((method, entries) -> ReviewMarks.mark(ctx, method, List.copyOf(entries)));
 
-            String source = ctx.applyTo(first.source());
+            String source;
+            try {
+                source = ctx.applyTo(first.source());
+            } catch (AstRewriteHelper.RewriteFailed failed) {
+                return null;
+            }
             if (source == null) return null;
             if (source.equals(first.source())) continue;
             // The one check that stands between a bad rewrite and a file the user cannot open: applyRewrite
-            // returns the original text when an edit won't apply, and a rewrite that *does* apply can still
+            // throws when an edit won't apply (caught above), and a rewrite that *does* apply can still
             // produce nonsense. Either way this file is not written, and neither is any other.
             if (SourceParser.hasSyntaxErrors(SourceParser.parse(JavaLevel.of(ctx.ast()), source))) return null;
             rewritten.add(new Rewritten(first.file(), first.source(), source));

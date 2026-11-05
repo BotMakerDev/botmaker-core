@@ -9,6 +9,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- New files and moved imports are trees (2026-11-05, clean-java phase 6): `ClassKind.source`, `BotMethods`' new
+  class and `Seed.skeleton` build their unit through `ManagedHolders.unit`, which writes no package for the default
+  one; `HolderMove` renames and adds imports through an `ASTRewrite`, not text offsets. An edit whose rewrite cannot
+  be applied (`AstRewriteHelper.RewriteFailed`) is told as a status line and publishes nothing, where it used to
+  publish the unchanged source.
 - A parameter's value crosses as a node (2026-11-05, clean-java phase 5): `ParameterRow.value()` is the
   `JavaValue` the file was read into, `valueText()` what a cell shows, and two rows are equal when their values
   match as trees. Nothing parses a row's value again to write it. A migration step's parameter name is a name node.

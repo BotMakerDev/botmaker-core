@@ -30,6 +30,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * The bot's own {@code public static} methods with no parameter, found by what they return — what a plugin
@@ -153,9 +154,13 @@ public final class BotMethods {
     }
 
     /** A class with nothing in it yet, for {@link #create} to add to. */
+    @SuppressWarnings("unchecked")
     static String skeleton(String mainPackage, String className) {
-        String declared = mainPackage == null || mainPackage.isEmpty() ? "" : "package " + mainPackage + ";\n\n";
-        return declared + "public final class " + className + " {\n}\n";
+        AST ast = JavaLevel.LATEST.newAst();
+        TypeDeclaration type = ast.newTypeDeclaration();
+        type.setName(ast.newSimpleName(className));
+        type.modifiers().addAll(ast.newModifiers(Modifier.PUBLIC | Modifier.FINAL));
+        return ManagedHolders.unit(ast, mainPackage, Set.of(), type);
     }
 
     /** {@code source} with the method added at the end of {@code className}; null when the name is taken. */
