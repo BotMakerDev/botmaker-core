@@ -29,8 +29,15 @@ per user.
   (phase 10) needs its own.
 - The edit engine came too (phase 6b, 2026-11-05): `parser` (`CodeEditor`, its handlers, factories and guard),
   `state`, `project.managed`, `project.params`, `migrate`, `index`, part of `validation` and `nav`. `CodeEditor` reports
-  through `parser.EditorOutput`, which Studio's `BusEditorOutput` turns into its events. Its callers still find their
-  node through a drawn block; `CoreEditor` on `BlockId`s is phase 6c.
+  through `parser.EditorOutput`, which Studio's `BusEditorOutput` turns into its events.
+- `edit.CoreEditor` (phase 6c, 2026-11-05) is the one way a typed edit reaches the open bot: it finds its target by
+  `BlockId` in the tree. A request runs as an `EditSession`, over `EditStage`s it edits with `CodeEditor`: whole or not
+  at all, one write. `EditRequest.Guard` says how far the compiler judges it: `EVERY_EDIT` for an assistant,
+  `EDITOR_RULES` for what the user did by hand. A client's own session lands through `commit`. `userInsert` takes a
+  menu's `BlockType` in-process; its wire form comes with the canvas's other operations (phase 6d), which still call
+  `CodeEditor` with a drawn node. `Edit.Rename` renames a local only. `MethodsChanged` carries methods, not a file's
+  imports or fields. `validation.SourceChecks` says what a tree lacks, `nav.SourceNavigation` where a thing is; neither
+  knows a block.
 - JavaFX is `provided` for one reason: `PluginHost` binds a plugin's slot editors, whose methods return a `Node`.
   Construct no Node here; phase 8's UI port removes it.
 - The `tests` jar (`TestPlugins`, `TestValues`, `TestValue`, `TestOutcome`, `MigrationTypes`, `TestScreen`) is what Studio's tests

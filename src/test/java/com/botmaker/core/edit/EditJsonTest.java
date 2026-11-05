@@ -50,6 +50,8 @@ class EditJsonTest {
     void aRequestAndBothResultsRoundTrip() {
         EditRequest request = new EditRequest("com/mybot/Main.java", EVERY_EDIT);
         assertEquals(request, CoreJson.read(CoreJson.write(request), EditRequest.class));
+        EditRequest byHand = new EditRequest("com/mybot/Main.java", EVERY_EDIT, EditRequest.Guard.EDITOR_RULES);
+        assertEquals(byHand, CoreJson.read(CoreJson.write(byHand), EditRequest.class));
 
         ChangedMethod run = new ChangedMethod("types[0]/bodyDeclarations[1]", "run", "public void run() {\n}",
                 List.of(new ChangedMethod.Node("types[0]/bodyDeclarations[1]/body", 18, 3)));
