@@ -58,6 +58,7 @@ per user.
   `services.upgrade` (plugin upgrade, `Removal` for leaving the pom) and `services.JitPackSearch` came too. They ask
   through ports (`Requests`, `Edits`, `Properties`) a client fills; a window comes through `UiPort`, attached by a
   client with a screen (`HostServices.attach`), and `UiPort.NONE` without one. Studio keeps the slot editors' contexts.
+- `sharing` came whole in phase 9 (2026-11-05), with `services.LocalBuilds`, `project.ClassKind` and `run.RunEntries`.
 - JavaFX stays `provided` because the contract's signatures name it: `PluginHost` binds slot editors that return a
   `Node`, and `HostServices` implements `StudioServices`, whose `Theme` and `Dialogs` name `Scene` and `Window`.
   Import no javafx and construct no Node here.

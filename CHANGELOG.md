@@ -15,6 +15,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   changes by `told`), `HostPluginValues`, `HostValueContext`, `HostTypes`, `HostParameters`, `HostParamScope`,
   `HostActionContext`, `HostOverlayContext`, `ConstantValues`, `EntryPoints`, `ToolCalls` and `WriteSteps` in `plugin`;
   plugin upgrade in `services.upgrade`; `services.JitPackSearch`.
+- Sharing, moved from Studio (2026-11-05): the rest of `sharing` (publishing, the `.bmk` export and download, bot links
+  and installs, the gallery, the plugin catalog, new projects' choices) and `services.LocalBuilds`. Also
+  `project.ClassKind` (was Studio's `ClassFiles.Kind`) and `run.RunEntries`, a plugin's declared runs.
 
 - Compile, run, try and debug, moved from Studio (2026-11-05): `com.botmaker.core.run` (`CodeExecutionService`,
   `DebuggingService`, `BotJvm`, `TreeCompile`, `WarmTries`, `ConsoleBatcher`, `RunTelemetry`, `RunCheck`, the run agent
