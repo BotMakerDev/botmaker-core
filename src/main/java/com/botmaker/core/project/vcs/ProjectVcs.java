@@ -508,7 +508,8 @@ public final class ProjectVcs {
             var fetch = git.fetch().setRemote(remote.id())
                     .setRefSpecs(new RefSpec("refs/tags/" + tag + ":refs/tags/" + tag))
                     .setTagOpt(org.eclipse.jgit.transport.TagOpt.NO_TAGS);
-            if (token != null && !token.isBlank()) fetch.setCredentialsProvider(credentials(token));
+            String sent = tokenFor(remoteUrl(remote), token);
+            if (sent != null) fetch.setCredentialsProvider(credentials(sent));
             var result = fetch.call();
             var update = result.getTrackingRefUpdate("refs/tags/" + tag);
             if (update != null && update.getResult() == org.eclipse.jgit.lib.RefUpdate.Result.REJECTED) {
@@ -1200,7 +1201,8 @@ public final class ProjectVcs {
         if (url == null) return List.of();
         try {
             var ls = Git.lsRemoteRepository().setRemote(url).setTags(true).setHeads(false).setTimeout(15);
-            if (token != null && !token.isBlank()) ls.setCredentialsProvider(credentials(token));
+            String sent = tokenFor(url, token);
+            if (sent != null) ls.setCredentialsProvider(credentials(sent));
             List<String> out = new ArrayList<>();
             for (Ref ref : ls.call()) {
                 String name = Repository.shortenRefName(ref.getName());
@@ -1235,7 +1237,8 @@ public final class ProjectVcs {
     public static void cloneAt(String url, String tag, String commit, Path dest, String token) throws IOException {
         var clone = Git.cloneRepository().setURI(url).setDirectory(dest.toFile())
                 .setRemote(Remote.ORIGINAL.id()).setNoCheckout(true);
-        if (token != null && !token.isBlank()) clone.setCredentialsProvider(credentials(token));
+        String sent = tokenFor(url, token);
+        if (sent != null) clone.setCredentialsProvider(credentials(sent));
         try (Git git = clone.call()) {
             ObjectId at = git.getRepository().resolve("refs/tags/" + tag + "^{commit}");
             if (at == null) throw new IOException("The release " + tag + " is not in " + url + ".");
@@ -1275,7 +1278,8 @@ public final class ProjectVcs {
             var fetch = git.fetch().setRemote(Remote.ORIGINAL.id())
                     .setRefSpecs(new RefSpec("+refs/tags/" + tag + ":refs/tags/" + tag))
                     .setTagOpt(org.eclipse.jgit.transport.TagOpt.NO_TAGS);
-            if (token != null && !token.isBlank()) fetch.setCredentialsProvider(credentials(token));
+            String sent = tokenFor(remoteUrl(Remote.ORIGINAL), token);
+            if (sent != null) fetch.setCredentialsProvider(credentials(sent));
             fetch.call();
             ObjectId tagged = repo.resolve("refs/tags/" + tag + "^{commit}");
             if (tagged == null) throw new IOException("The release " + tag + " is not in " + url + ".");
@@ -1307,7 +1311,8 @@ public final class ProjectVcs {
             var fetch = git.fetch().setRemote(remote.id())
                     .setRefSpecs(new RefSpec("+refs/heads/" + remoteBranch + ":" + tracking))
                     .setTagOpt(org.eclipse.jgit.transport.TagOpt.NO_TAGS);
-            if (token != null && !token.isBlank()) fetch.setCredentialsProvider(credentials(token));
+            String sent = tokenFor(remoteUrl(remote), token);
+            if (sent != null) fetch.setCredentialsProvider(credentials(sent));
             try {
                 fetch.call();
             } catch (org.eclipse.jgit.api.errors.TransportException missing) {
