@@ -467,6 +467,13 @@ class ManagedHoldersTest {
         assertNull(ManagedHolders.segment(new PluginCoordinate("com.acme", "class")), "a keyword names no package");
     }
 
+    @Test
+    void aNameInAHoldersDocCommentCannotEndIt() {
+        String doc = ManagedHolders.javadoc(AST.newAST(AST.getJLSLatest(), false), List.of("a */ b")).toString();
+
+        assertTrue(doc.contains("a * / b"), doc);
+    }
+
     private static CompilationUnit parse(String source) {
         ASTParser parser = ASTParser.newParser(AST.getJLSLatest());
         java.util.Map<String, String> options = org.eclipse.jdt.core.JavaCore.getOptions();

@@ -8,6 +8,7 @@ import com.botmaker.plugin.api.params.Param;
 import com.botmaker.plugin.host.PluginCoordinate;
 import com.botmaker.java.edit.ImportManager;
 import com.botmaker.java.edit.helpers.AstRewriteHelper;
+import com.botmaker.java.edit.helpers.CommentText;
 import com.botmaker.java.grammar.BotAnnotation;
 import com.botmaker.plugin.api.source.ManagedMethod;
 import com.botmaker.plugin.api.source.ManagedOpenSet;
@@ -302,7 +303,7 @@ public final class ManagedHolders {
 
     private static TextElement text(AST ast, String text) {
         TextElement element = ast.newTextElement();
-        element.setText(text);
+        element.setText(CommentText.inside(text));
         return element;
     }
 

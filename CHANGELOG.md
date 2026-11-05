@@ -9,6 +9,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Comments stay comments (2026-11-05, clean-java phase 8): a comment block, a holder's doc comment and the ▶ Try
+  class's header all write through `CommentText`, so what is typed cannot end the comment. `*/` in a block comment, a lone
+  carriage return and a unicode escape used to be refused as an edit that broke the code, or broke the compile. A
+  comment with code after it on its line stays a block comment: editing `/* note */ int b = 2;` used to write
+  `// renamed int b = 2;`, and the statement was gone.
 - The `@Migrate` engine substitutes trees (2026-11-05, clean-java phase 7): a rule's body is parsed once per plan and
   filled through an `ASTRewrite`, each part keeping the bot's spelling and comments; parentheses come from
   `Precedence` on the tree, so `twice(inc(x))` becomes `(x + 1) * 2`, not `x + 1 * 2`. A managed value's rule substitutes

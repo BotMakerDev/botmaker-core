@@ -46,6 +46,18 @@ public class TrialCallerTest {
         return TrialCallerTest.class.getMethod("trial", Runnable.class, Class[].class);
     }
 
+    /** The label is a slice of the bot's statement, and it lands in the generated class's header comment. */
+    @Test
+    void aLabelCannotEndTheHeaderComment() throws Exception {
+        TrialPlan.Plan plan = new TrialPlan.Plan("com.bot", List.of(), "return 1;", true, List.of(), List.of(),
+                "*/ nonsense \\u000a C:\\users");
+
+        String out = compileAndRun(TrialCaller.write(plan, Map.of(), entry(), List.of()),
+                "package com.bot; public final class Values {}");
+
+        assertEquals("▶ Try: returned = 1", out.strip());
+    }
+
     @Test
     void aStatementRunsWithItsLocalsAndReportsItsReturn() throws Exception {
         TrialPlan.Plan plan = new TrialPlan.Plan("com.bot", List.of("import java.util.List;"),

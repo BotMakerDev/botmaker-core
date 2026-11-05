@@ -1,6 +1,7 @@
 package com.botmaker.core.parser;
 
 import com.botmaker.java.edit.ExpressionChoice;
+import com.botmaker.java.edit.helpers.CommentText;
 import com.botmaker.java.parse.JavaLevel;
 import com.botmaker.java.edit.BodyChildren;
 import com.botmaker.java.edit.BlockId;
@@ -2019,12 +2020,23 @@ public class CodeEditor {
     private static String updateComment(String originalCode, Comment commentNode, String newText) {
         try {
             IDocument document = new Document(originalCode);
-            String replacement = newText.contains("\n") ? "/* " + newText + " */" : "// " + newText;
-            document.replace(commentNode.getStartPosition(), commentNode.getLength(), replacement);
+            int end = commentNode.getStartPosition() + commentNode.getLength();
+            document.replace(commentNode.getStartPosition(), commentNode.getLength(),
+                    CommentText.written(newText, codeFollows(originalCode, end)));
             return document.get();
         } catch (Exception e) {
             return originalCode;
         }
+    }
+
+    /** Whether anything but white space follows {@code offset} on its line. */
+    private static boolean codeFollows(String code, int offset) {
+        for (int i = offset; i < code.length(); i++) {
+            char c = code.charAt(i);
+            if (c == '\n' || c == '\r') return false;
+            if (!Character.isWhitespace(c)) return true;
+        }
+        return false;
     }
 
     private static String deleteComment(String originalCode, Comment commentNode) {

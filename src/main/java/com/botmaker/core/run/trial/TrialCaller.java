@@ -3,6 +3,7 @@ package com.botmaker.core.run.trial;
 import com.botmaker.plugin.api.assist.TrialEntry;
 import com.botmaker.plugin.host.LoadedPlugin;
 import com.botmaker.core.plugin.PluginHost;
+import com.botmaker.java.edit.helpers.CommentText;
 import com.botmaker.java.grammar.JavaValue;
 import com.botmaker.core.project.managed.ManagedIds;
 import com.botmaker.java.index.BotIndex;
@@ -106,7 +107,7 @@ public final class TrialCaller {
         if (!pkg.isEmpty()) out.append("package ").append(pkg).append(";\n\n");
         for (String each : imports) out.append(each).append('\n');
         if (!imports.isEmpty()) out.append('\n');
-        out.append("/** Written by BotMaker Studio for ▶ Try: ").append(comment(plan.label()))
+        out.append("/** Written by BotMaker Studio for ▶ Try: ").append(CommentText.inside(plan.label()))
                 .append(". Not part of the bot. */\n");
         out.append("public final class ").append(SIMPLE_NAME).append(" {\n\n");
         out.append("    private static final Object NO_RESULT = new Object();\n\n");
@@ -184,10 +185,5 @@ public final class TrialCaller {
             }));
             return new ArrayList<>(found);
         });
-    }
-
-    /** {@code text} safe inside a Javadoc comment. */
-    private static String comment(String text) {
-        return text.replace("*/", "* /");
     }
 }
