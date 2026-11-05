@@ -27,9 +27,13 @@ per user.
   `project.vcs`, `sharing`, `runtime` and `parser.refactor` those need. Studio's `/botmaker/host.properties` is read
   by `config.AppVersion` and `HostContract` from the classpath: in-process it is Studio's; the core's own process
   (phase 10) needs its own.
+- The edit engine came too (phase 6b, 2026-11-05): `parser` (`CodeEditor`, its handlers, factories and guard),
+  `state`, `project.managed`, `project.params`, `migrate`, `index`, part of `validation` and `nav`. `CodeEditor` reports
+  through `parser.EditorOutput`, which Studio's `BusEditorOutput` turns into its events. Its callers still find their
+  node through a drawn block; `CoreEditor` on `BlockId`s is phase 6c.
 - JavaFX is `provided` for one reason: `PluginHost` binds a plugin's slot editors, whose methods return a `Node`.
   Construct no Node here; phase 8's UI port removes it.
-- The `tests` jar (`TestPlugins`, `TestValues`, `TestValue`, `TestOutcome`, `MigrationTypes`) is what Studio's tests
+- The `tests` jar (`TestPlugins`, `TestValues`, `TestValue`, `TestOutcome`, `MigrationTypes`, `TestScreen`) is what Studio's tests
   load plugins and values with: keep those public.
 
 ## Rules

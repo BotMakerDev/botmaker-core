@@ -23,12 +23,29 @@ class CoreLayersTest {
     private static final Pattern ABOVE_THE_CORE = Pattern.compile(
             "(?<![\\w.])(javafx|javax\\.swing|com\\.botmaker\\.studio|com\\.botmaker\\.sdk"
                     + "|com\\.botmaker\\.plugin\\.toolkit)\\.");
+    private static final Pattern NEWEST_JAVA =
+            Pattern.compile("getJLSLatest|latestSupportedJavaVersion|ASTNode\\.copySubtree\\(");
+    /** A comment may tell a class's history; only code is held to these rules. */
+    private static final Pattern COMMENT = Pattern.compile("/\\*.*?\\*/|(?m)^\\s*//.*$", Pattern.DOTALL);
 
     @Test
     void nothingAboveTheCoreIsImported() throws IOException {
         List<Path> sources = sources();
         assertFalse(sources.isEmpty(), "run from the module's root");
-        assertEquals(List.of(), sources.stream().filter(file -> ABOVE_THE_CORE.matcher(read(file)).find()).toList());
+        assertEquals(List.of(), sources.stream().filter(file -> ABOVE_THE_CORE.matcher(code(file)).find()).toList());
+    }
+
+    /** A tree takes the bot's level, or {@code JavaLevel.LATEST}; a subtree is copied with {@code JavaLevel.copy}. */
+    @Test
+    void nothingAsksJdtForItsNewestJava() throws IOException {
+        assertEquals(List.of(), sources().stream().filter(file -> NEWEST_JAVA.matcher(code(file)).find()).toList());
+    }
+
+    /** {@code Executables.onPath} answers without a child process left undrained. */
+    @Test
+    void nothingSpawnsWhich() throws IOException {
+        assertEquals(List.of(), sources().stream().filter(file -> code(file).contains("ProcessBuilder(\"which\""))
+                .toList());
     }
 
     private static List<Path> sources() throws IOException {
@@ -37,9 +54,9 @@ class CoreLayersTest {
         }
     }
 
-    private static String read(Path file) {
+    private static String code(Path file) {
         try {
-            return Files.readString(file);
+            return COMMENT.matcher(Files.readString(file)).replaceAll("");
         } catch (IOException e) {
             throw new IllegalStateException(file.toString(), e);
         }

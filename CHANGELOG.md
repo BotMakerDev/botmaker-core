@@ -23,4 +23,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   and what those need: parts of `project.managed`, `project.params` and `project.vcs`, `sharing`'s catalog client and
   unpacked bots, `runtime.JavacRelease`, `parser.refactor.ReviewMarker`. Studio calls them in-process. JavaFX is a
   `provided` dependency only for compiling against the contract's slot editors. A `tests` jar carries `TestPlugins`,
-  `TestValues`, `TestValue`, `TestOutcome` and `MigrationTypes` for Studio's tests.
+  `TestValues`, `TestValue`, `TestOutcome`, `MigrationTypes` and `TestScreen` for Studio's tests.
+- The edit engine, moved from Studio (2026-11-05), each in the package it had there: `parser` (`CodeEditor`, which
+  reports through the new `EditorOutput`; `NodeCreator`, `SlotVacancy`, `factories`, `handlers`, `guard`, `refactor`),
+  `state` (undo), `project.managed`, `project.params`, `project.vcs.BlockDiff`, `migrate`, `index`,
+  `nav.LibrarySource`, `validation`'s `DiagnosticLevel` and `ErrorTranslator`, `plugin`'s `PaletteCuration` and
+  `ValueWire`, `services.EditorCompanions`. ClassGraph and LSP4J come with them.
+
+### Security
+
+- A remote's fetch, tag listing, clone, attach and join give the user's GitHub token to GitHub only, as push already
+  did (2026-11-05); a remote on any other host used to receive it.

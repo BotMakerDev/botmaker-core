@@ -118,6 +118,20 @@
             <version>7.8.0.202609011348-r</version>
         </dependency>
 
+        <!-- ClassGraph: a library's classes and their docs, read from its jars (index, nav). -->
+        <dependency>
+            <groupId>io.github.classgraph</groupId>
+            <artifactId>classgraph</artifactId>
+            <version>6.0.0</version>
+        </dependency>
+
+        <!-- LSP4J: a compile problem is a Diagnostic (validation). -->
+        <dependency>
+            <groupId>org.eclipse.lsp4j</groupId>
+            <artifactId>org.eclipse.lsp4j</artifactId>
+            <version>1.0.0</version>
+        </dependency>
+
         <!-- Compile-only, as in the cli: PluginHost binds a plugin's slot editors, whose methods return
              javafx.scene.Node, to SlotEditor; the core constructs no Node. Phase 8's UI port takes this away. -->
         <dependency>
@@ -168,8 +182,21 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>3.2.5</version>
+                <!-- As in Studio: everything a test may write stays in target/, so no test can touch the developer's
+                     cache (the jar index and its sweep, the GitHub credentials), config or preferences. -->
+                <configuration>
+                    <argLine>-Djava.util.prefs.userRoot=${project.build.directory}/test-prefs-${surefire.forkNumber}</argLine>
+                    <systemPropertyVariables>
+                        <botmaker.config.dir>${project.build.directory}/test-config-${surefire.forkNumber}</botmaker.config.dir>
+                    </systemPropertyVariables>
+                    <environmentVariables>
+                        <XDG_CACHE_HOME>${project.build.directory}/test-cache-${surefire.forkNumber}</XDG_CACHE_HOME>
+                        <LOCALAPPDATA>${project.build.directory}/test-cache-${surefire.forkNumber}</LOCALAPPDATA>
+                    </environmentVariables>
+                </configuration>
             </plugin>
-            <!-- The tests jar: TestPlugins, the in-memory plugins Studio's own tests load too (2026-11-05). -->
+            <!-- The tests jar: TestPlugins, the in-memory plugins Studio's own tests load too, and the other helpers
+                 they share (2026-11-05). -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-jar-plugin</artifactId>
