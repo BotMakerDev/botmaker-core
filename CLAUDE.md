@@ -61,6 +61,10 @@ per user.
 - `sharing` came whole in phase 9 (2026-11-05), with `services.LocalBuilds`, `project.ClassKind` and `run.RunEntries`.
 - `parser.StatementKind` and `parser.StatementBodies` (phase 9a, 2026-11-05) say what a statement is and which bodies it
   holds; Studio's `BlockConverter` draws by them and `read_tree` reads by them, so a new statement kind goes there first.
+- `assist` (phase 9b, 2026-11-05) is the MCP: `McpEndpoint` serves `McpTools` for an open bot and `HomeEndpoint` with no
+  project open. A client with a screen attaches a `ToolGroup` (its tools, what waits on screen, whether Claude drives it,
+  what the home serves of it); Studio's `StudioToolGroup` holds `ui` and `quit_studio`. `assist.Stubs` (tests jar) gives
+  Studio's tests a tool's interfaces answering nothing.
 - JavaFX stays `provided` because the contract's signatures name it: `PluginHost` binds slot editors that return a
   `Node`, and `HostServices` implements `StudioServices`, whose `Theme` and `Dialogs` name `Scene` and `Window`.
   Import no javafx and construct no Node here.

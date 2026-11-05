@@ -9,6 +9,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- `assist` (2026-11-05): the MCP endpoint and its tools moved from Studio — `McpEndpoint`, `McpTools`, `ToolGroup`, the
+  file, project, run and Studio tools, `RunLog`, `PastRuns`, `HomeEndpoint` with `HomeTools`, `AssistTurn`,
+  `AssistTools`, `BlockView`, `StudioDriver`, `LiveBot`, `McpConfig`, `AiTool` and `BotGuard`. The MCP SDK and Jetty
+  are this module's dependencies now. `ToolGroup.driven` and `homeTools` say whether Claude drives a client's screen
+  and what the home serves of it, so `HomeEndpoint` names no client.
 - `parser.StatementKind` and `parser.StatementBodies` (2026-11-05): what a statement is as the editor draws it, and which
   bodies it holds; Studio's canvas and the assistant's `read_tree` both read the code through them. `parser.CallOwner`
   moved from Studio with them. `edit.DeclarableTypes`: the types a variable may be declared as, which a client offers.
