@@ -225,7 +225,7 @@ public final class McpEndpoint implements AutoCloseable {
                 return;
             }
             response.setContentType("text/plain");
-            response.getWriter().write(proof(token, nonce));
+            response.getWriter().write(proof(token, request.getLocalPort(), nonce));
         }
     }
 
@@ -238,12 +238,16 @@ public final class McpEndpoint implements AutoCloseable {
         context.addFilter(new FilterHolder(bearer(token)), "/*", EnumSet.of(DispatcherType.REQUEST));
     }
 
-    /** HMAC-SHA256 of {@code nonce} under {@code token}, in hex: what {@link #HELLO} answers. */
-    public static String proof(String token, String nonce) {
+    /**
+     * HMAC-SHA256 of {@code <port>:<nonce>} under {@code token}, in hex: what {@link #HELLO} answers on {@code port}. The
+     * port is the one the client dialled, so a proof another endpoint holding the token gave cannot be relayed from a
+     * port that endpoint does not serve.
+     */
+    public static String proof(String token, int port, String nonce) {
         try {
             Mac mac = Mac.getInstance("HmacSHA256");
             mac.init(new SecretKeySpec(token.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
-            return HexFormat.of().formatHex(mac.doFinal(nonce.getBytes(StandardCharsets.UTF_8)));
+            return HexFormat.of().formatHex(mac.doFinal((port + ":" + nonce).getBytes(StandardCharsets.UTF_8)));
         } catch (GeneralSecurityException e) {
             throw new IllegalStateException("HmacSHA256 is missing from this Java", e);
         }

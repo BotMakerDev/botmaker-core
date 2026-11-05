@@ -32,10 +32,11 @@ public final class CoreMain {
     }
 
     /** A core serving for {@code dir}; {@link #close} ends it as an idle exit would. */
-    public record Running(CoreServer server, CoreFile file, Path dir) implements AutoCloseable {
+    public record Running(CoreServer server, CoreFile file, Path dir, Projects projects) implements AutoCloseable {
         @Override
         public void close() {
             server.close();
+            projects.close();
             file.removeFrom(dir);
         }
     }
@@ -45,11 +46,18 @@ public final class CoreMain {
      * whose {@code ended} does not exit the JVM.
      */
     public static Running serve(Path dir, String version, CoreServer.Idle idle, Runnable ended) throws Exception {
+        return serve(dir, version, idle, OpenProject.Libraries.MAVEN, ended);
+    }
+
+    /** {@link #serve(Path, String, CoreServer.Idle, Runnable)}, opening projects over {@code libraries}. */
+    public static Running serve(Path dir, String version, CoreServer.Idle idle, OpenProject.Libraries libraries,
+                                Runnable ended) throws Exception {
         String token = CoreLauncher.token(dir);
         Running[] self = new Running[1];
         CountDownLatch started = new CountDownLatch(1);
+        Projects projects = new Projects(libraries);
         CoreServer server = CoreServer.start(0, token, version, new CoreServer.Hooks(idle, () -> false,
-                channel -> { }, () -> {
+                projects::attach, () -> {
                     awaitQuietly(started);
                     self[0].close();
                     ended.run();
@@ -61,7 +69,7 @@ public final class CoreMain {
             server.close();
             throw e;
         }
-        self[0] = new Running(server, file, dir);
+        self[0] = new Running(server, file, dir, projects);
         started.countDown();
         return self[0];
     }

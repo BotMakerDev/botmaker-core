@@ -9,6 +9,7 @@ import java.nio.channels.FileLock;
 import java.nio.channels.OverlappingFileLockException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.OptionalLong;
@@ -54,8 +55,12 @@ public final class ProjectLock implements AutoCloseable {
     public static ProjectLock take(Path project) throws IOException {
         Path path = project.resolve(ProjectConfig.STUDIO_DIR).resolve(NAME);
         Files.createDirectories(path.getParent());
+        // A link would make the truncate below empty whatever file it points at.
+        if (Files.isSymbolicLink(path.getParent())) {
+            throw new IOException(path.getParent() + " is a link; the project's lock is not written through one.");
+        }
         FileChannel file = FileChannel.open(path, StandardOpenOption.CREATE, StandardOpenOption.READ,
-                StandardOpenOption.WRITE);
+                StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS);
         try {
             FileLock lock;
             try {

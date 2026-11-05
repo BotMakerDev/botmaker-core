@@ -17,6 +17,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   one, one start at a time under a lock beside `core.json`, asks an older unused core to quit and refuses a client
   while an older core is in use, naming both versions. `ProjectLock` holds an open project for one process; a dead
   owner's lock is taken. `McpEndpoint.guard` puts a server behind the token.
+- A project open in the core's process (2026-11-05), not yet used by Studio. A channel carries `Request`s (open, show a
+  file, apply, a user's edit, an undo or redo, an assistant's commit, close), each answered, and `Reply.Told` gives every
+  attached client each change. `OpenProject` holds the project, its lock and its plugins, runs every ask on one thread
+  in arrival order and saves each accepted change of the open file as it lands; `Projects` keeps one project per core
+  and closes it when its last client leaves. `CoreClient` is the client's side. `CoreEditor.commit` takes a session's
+  texts too.
+
+### Changed
+
+- The hello proof signs `<port>:<nonce>`, the port the client asked on, so a proof cannot be relayed from another
+  port. `ProjectLock` refuses a linked `.botmaker` and never writes through a link. A channel the core ended is sent no
+  `DELETE`.
 - `assist` (2026-11-05): the MCP endpoint and its tools moved from Studio — `McpEndpoint`, `McpTools`, `ToolGroup`, the
   file, project, run and Studio tools, `RunLog`, `PastRuns`, `HomeEndpoint` with `HomeTools`, `AssistTurn`,
   `AssistTools`, `BlockView`, `StudioDriver`, `LiveBot`, `McpConfig`, `AiTool` and `BotGuard`. The MCP SDK and Jetty

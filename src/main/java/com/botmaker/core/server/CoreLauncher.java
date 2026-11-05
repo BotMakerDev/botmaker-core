@@ -197,7 +197,7 @@ public final class CoreLauncher {
                     at.uri(McpEndpoint.HELLO + "?nonce=" + nonce)).GET().timeout(Duration.ofSeconds(2)).build(),
                     HttpResponse.BodyHandlers.ofString());
             return response.statusCode() == 200
-                    && response.body().strip().equals(McpEndpoint.proof(at.token(), nonce));
+                    && response.body().strip().equals(McpEndpoint.proof(at.token(), at.port(), nonce));
         } catch (IOException e) {
             return false;
         } catch (InterruptedException e) {

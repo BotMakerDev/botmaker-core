@@ -68,8 +68,11 @@ per user.
 - `server` (phase 10, 2026-11-05) is the core's own process: `CoreMain`, `CoreServer` (the MCP, `/core`, `/core/quit`,
   the `/studio` channels), `CoreLauncher` (find or start one core per user, `core.json` and `core.lock` in the cache
   directory), `ProjectLock` (`.botmaker/core.lock` per open project). A channel is a stream of JSON lines from the core
-  and one post per message to it, not a WebSocket: Jetty's websocket jars are not a dependency. Studio does not use it
-  until phase 10a.
+  and one post per message to it, not a WebSocket: Jetty's websocket jars are not a dependency. It carries
+  `server.Request`s, each answered by a `Reply.Answer` holding an `EditResult`, and `Reply.Told` with each `CoreEvent`
+  (phase 10a); a new request is registered in its `@JsonSubTypes` and round-tripped in `RequestJsonTest`. `OpenProject`
+  runs a project's asks on its one thread, in arrival order, and saves each accepted change as it lands; `Projects`
+  holds one project per core; `CoreClient` is a client's side. Studio uses it from phase 10a1.
 - JavaFX stays `provided` because the contract's signatures name it: `PluginHost` binds slot editors that return a
   `Node`, and `HostServices` implements `StudioServices`, whose `Theme` and `Dialogs` name `Scene` and `Window`.
   Import no javafx and construct no Node here.

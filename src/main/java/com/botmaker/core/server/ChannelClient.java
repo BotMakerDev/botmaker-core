@@ -115,8 +115,10 @@ public final class ChannelClient implements AutoCloseable {
         } catch (RuntimeException cut) {
             // The stream broke: the core ended or the channel was closed.
         } finally {
+            // Closed by this side: letGo told the core already. Ended by the core's: it knows, and its port may be
+            // another process's by now, so the token is not sent to it again.
             closed.set(true);
-            letGo();
+            if (this.ended.compareAndSet(false, true)) stream.close();
             ended.run();
         }
     }
