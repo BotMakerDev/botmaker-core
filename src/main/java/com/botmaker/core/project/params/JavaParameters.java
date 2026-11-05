@@ -6,6 +6,7 @@ import com.botmaker.core.project.params.ParameterRow;
 import com.botmaker.core.project.params.JavaParameterSource;
 import com.botmaker.core.project.params.JavaParameter;
 import com.botmaker.core.project.params.BotRecords;
+import com.botmaker.java.parse.BotParser;
 import com.botmaker.java.parse.JavaLevel;
 import com.botmaker.plugin.api.params.Param;
 import com.botmaker.core.runtime.JavacRelease;
@@ -30,6 +31,7 @@ import com.botmaker.java.index.BotIndex;
 import com.botmaker.core.services.BotSources;
 import org.eclipse.jdt.core.dom.AST;
 import org.eclipse.jdt.core.dom.ASTNode;
+import org.eclipse.jdt.core.dom.ASTVisitor;
 import org.eclipse.jdt.core.dom.Assignment;
 import org.eclipse.jdt.core.dom.BodyDeclaration;
 import org.eclipse.jdt.core.dom.BooleanLiteral;
@@ -613,6 +615,78 @@ public final class JavaParameters {
         members.add(constructor);
         String source = ManagedHolders.unit(ast, config.parametersPackage(), Set.of(Param.class.getCanonicalName()), holder);
         return ProjectWrites.create(config, file, source, "Create " + className) ? Optional.of(file) : Optional.empty();
+    }
+
+    /**
+     * <i>+ New group…</i> (2026-11-05): the bot's own group {@code name}, an empty {@code @Param} class in
+     * {@code params/bot/} and its starting copy. A group is the parameters' category, so this is how one is made.
+     * Answers the sentence to show when nothing was written: a name Java refuses, or one the bot already has.
+     */
+    public static Optional<String> newGroup(ProjectConfig config, ProjectState state, String name) {
+        if (config == null) return Optional.of("No project is open.");
+        if (name == null || !isClassName(name)) return Optional.of("“" + name + "” is not a class name Java accepts.");
+        if (classes(config, state).contains(name) || ownGroups(config).contains(name)
+                || Files.exists(ownGroupFile(config, name))) {
+            return Optional.of("The bot already has a group " + name + ".");
+        }
+        return createGroup(config, state, name).isPresent() ? Optional.empty()
+                : Optional.of(name + " could not be written.");
+    }
+
+    /**
+     * The bot's own groups, by their files in {@code params/bot/}, sorted by name: an empty one too, which no scan of
+     * parameters finds, so a group just made has its heading before anything is in it.
+     */
+    public static List<String> ownGroups(ProjectConfig config) {
+        if (config == null) return List.of();
+        Path dir = config.parametersPackageDir().resolve(JavaParameterSource.BOT);
+        if (!Files.isDirectory(dir)) return List.of();
+        try (var files = Files.list(dir)) {
+            return files.map(file -> file.getFileName().toString())
+                    .filter(file -> file.endsWith(".java"))
+                    .map(file -> file.substring(0, file.length() - ".java".length()))
+                    .filter(JavaParameters::isClassName)
+                    .sorted()
+                    .toList();
+        } catch (IOException unreadable) {
+            return List.of();
+        }
+    }
+
+    /**
+     * Where {@code parameter} is declared, as a use marked {@code declaration}: its name in its file, which is what
+     * the window's <i>Open in code</i> lands on. Empty when the file no longer holds it.
+     */
+    public static Optional<Usages.Usage> declaration(ProjectState state, JavaParameter parameter) {
+        if (parameter == null) return Optional.empty();
+        Optional<String> source = currentSource(state, parameter.file());
+        if (source.isEmpty()) return Optional.empty();
+        CompilationUnit unit = BotParser.syntax(source.get());
+        SimpleName[] hit = new SimpleName[1];
+        unit.accept(new ASTVisitor() {
+            @Override
+            public boolean visit(TypeDeclaration type) {
+                if (hit[0] != null || !type.getName().getIdentifier().equals(parameter.className())) return hit[0] == null;
+                for (MethodDeclaration method : type.getMethods()) {
+                    if (hit[0] == null && method.getName().getIdentifier().equals(parameter.name())) {
+                        hit[0] = method.getName();
+                    }
+                }
+                for (FieldDeclaration field : type.getFields()) {
+                    for (Object fragment : field.fragments()) {
+                        SimpleName name = ((VariableDeclarationFragment) fragment).getName();
+                        if (hit[0] == null && name.getIdentifier().equals(parameter.name())) hit[0] = name;
+                    }
+                }
+                return false;
+            }
+        });
+        if (hit[0] == null) return Optional.empty();
+        int line = unit.getLineNumber(hit[0].getStartPosition());
+        String[] lines = source.get().split("\n", -1);
+        String text = line >= 1 && line <= lines.length ? lines[line - 1].trim() : "";
+        return Optional.of(new Usages.Usage(parameter.file(), hit[0].getStartPosition(), line, parameter.className(),
+                text, true));
     }
 
     private static boolean isClassName(String name) {

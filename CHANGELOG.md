@@ -20,6 +20,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   when the starting copy lacks the method, the target has a method of that name, or the bot would stop compiling
   (`MisplacedParams`).
 
+### Added
+
+- `JavaParameters.newGroup` writes the bot's own empty group, `params/bot/<Name>.java`, and its starting copy, and
+  refuses a name Java does not accept or one the bot already has (2026-11-05, params-cleanup phase 5).
+  `JavaParameters.ownGroups` lists the bot's groups by their files, an empty one too. `JavaParameters.declaration`
+  answers where a parameter is declared, as a use, for the window's *Open in code*.
+
 ### Changed
 
 - A parameter's category is the class that holds it (2026-11-05, params-cleanup phase 4): the reader sets it to the

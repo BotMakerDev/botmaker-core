@@ -606,6 +606,44 @@ class JavaParametersTest {
         assertEquals(was, Files.readString(groupOf(config, "bot", "RunChoices")));
     }
 
+    /** + New group… (2026-11-05): an empty @Param class in params/bot/ and its starting copy, the same text. */
+    @Test
+    void aNewGroupWritesBothCopies(@TempDir Path root) throws IOException {
+        ProjectConfig config = project(root);
+
+        assertEquals(Optional.empty(), JavaParameters.newGroup(config, null, "Progress"));
+        String params = Files.readString(groupOf(config, "bot", "Progress"));
+        assertTrue(params.contains("@Param") && params.contains("class Progress"), params);
+        assertEquals(params, Files.readString(startingOf(config, "bot", "Progress")));
+        assertEquals(List.of("Progress"), JavaParameters.ownGroups(config));
+    }
+
+    /** A name taken, or one Java refuses, writes nothing and says why. */
+    @Test
+    void aNewGroupRefusesATakenOrBadName(@TempDir Path root) throws IOException {
+        ProjectConfig config = project(root);
+        writeGroup(config, "bot", "Progress", "    public int gold() { return 1; }\n");
+        String was = Files.readString(groupOf(config, "bot", "Progress"));
+
+        assertTrue(JavaParameters.newGroup(config, null, "Progress").isPresent());
+        assertTrue(JavaParameters.newGroup(config, null, "2fast").isPresent());
+        assertEquals(was, Files.readString(groupOf(config, "bot", "Progress")));
+    }
+
+    /** Open in code lands on the method's name in its group file. */
+    @Test
+    void aParametersDeclarationIsItsName(@TempDir Path root) throws IOException {
+        ProjectConfig config = project(root);
+        writeGroup(config, "bot", "RunChoices", "    public int tries() { return 10; }\n");
+        JavaParameter tries = only(config);
+
+        var at = JavaParameters.declaration(null, tries).orElseThrow();
+        String source = Files.readString(groupOf(config, "bot", "RunChoices"));
+        assertEquals(groupOf(config, "bot", "RunChoices"), at.file());
+        assertTrue(source.startsWith("tries", at.start()), source.substring(at.start()));
+        assertTrue(at.declaration());
+    }
+
     /** The upgrade to contract 0.14 takes the removed members off, keeps the rest, and names the fields. */
     @Test
     void theRemovedMembersAreStrippedByTheUpgrade(@TempDir Path root) throws IOException {
