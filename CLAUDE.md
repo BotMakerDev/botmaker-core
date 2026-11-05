@@ -59,6 +59,8 @@ per user.
   through ports (`Requests`, `Edits`, `Properties`) a client fills; a window comes through `UiPort`, attached by a
   client with a screen (`HostServices.attach`), and `UiPort.NONE` without one. Studio keeps the slot editors' contexts.
 - `sharing` came whole in phase 9 (2026-11-05), with `services.LocalBuilds`, `project.ClassKind` and `run.RunEntries`.
+- `parser.StatementKind` and `parser.StatementBodies` (phase 9a, 2026-11-05) say what a statement is and which bodies it
+  holds; Studio's `BlockConverter` draws by them and `read_tree` reads by them, so a new statement kind goes there first.
 - JavaFX stays `provided` because the contract's signatures name it: `PluginHost` binds slot editors that return a
   `Node`, and `HostServices` implements `StudioServices`, whose `Theme` and `Dialogs` name `Scene` and `Window`.
   Import no javafx and construct no Node here.

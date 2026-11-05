@@ -9,6 +9,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- `parser.StatementKind` and `parser.StatementBodies` (2026-11-05): what a statement is as the editor draws it, and which
+  bodies it holds; Studio's canvas and the assistant's `read_tree` both read the code through them. `parser.CallOwner`
+  moved from Studio with them. `edit.DeclarableTypes`: the types a variable may be declared as, which a client offers.
 - `plugin.UiPort` (2026-11-05): the look and choosers a plugin's dialogs reach, which a client with a screen fills;
   `UiPort.NONE` answers `Theme.PLAIN` and `Dialogs.NONE`, a host with no UI.
 - The plugin host classes, moved from Studio (2026-11-05): `HostServices`, `HostRuns`, `HostHistory` (told the history's
