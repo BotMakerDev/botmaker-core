@@ -78,6 +78,68 @@ class PluginHoldersTest {
     }
 
     @Test
+    void aCommentOrAStringThatSaysAHoldersNameIsNoReference() throws Exception {
+        ProjectConfig config = project();
+        Path notes = config.mainPackageDir().resolve("Notes.java");
+        String written = """
+                package %s;
+
+                public class Notes {
+                    static int a = 1; // Sdk used to do this
+                    /* first line
+                       Sdk on a later one */
+                    public static String say() {
+                        return "Sdk";
+                    }
+                }
+                """.formatted(config.mainPackage());
+        Files.writeString(notes, written);
+
+        PluginHolders holders = PluginHolders.of(config, new ProjectState(), SDK);
+        assertEquals(List.of("Base.java:8"), holders.references());
+
+        PluginHolders.Deleted deleted = holders.delete(config, new ProjectState(), "SDK");
+        assertEquals(written, Files.readString(notes));
+        assertEquals(1, deleted.rewritten(), "only Base.java");
+    }
+
+    @Test
+    void aFileThatDoesNotParseIsSaidToBeLeftAsWritten() throws Exception {
+        ProjectConfig config = project();
+        Path broken = config.mainPackageDir().resolve("Broken.java");
+        String written = "package " + config.mainPackage() + ";\npublic class Broken { void f() { int a = ; } }\n";
+        Files.writeString(broken, written);
+
+        PluginHolders holders = PluginHolders.of(config, new ProjectState(), SDK);
+        assertEquals(List.of("Base.java:8"), holders.references(), "it names none: nothing is made up for it");
+        PluginHolders.Deleted deleted = holders.delete(config, new ProjectState(), "SDK");
+
+        assertEquals(written, Files.readString(broken));
+        assertTrue(deleted.left().stream().anyMatch(l -> l.startsWith("Broken.java does not parse")),
+                deleted.left().toString());
+    }
+
+    @Test
+    void aFileThatDoesNotParseStillListsTheLinesThatNameAHolder() throws Exception {
+        ProjectConfig config = project();
+        Files.writeString(config.mainPackageDir().resolve("Broken.java"), """
+                package %s;
+                import %s.plugins.com_github_botmakerdev.botmaker_sdk.Sdk;
+                public class Broken { void f() {
+                    int x = ; Sdk.flow();
+                    if (x { Sdk.flow(); }
+                    // Sdk
+                    Sdk f = ;
+                } }
+                """.formatted(config.mainPackage(), config.mainPackage()));
+
+        PluginHolders holders = PluginHolders.of(config, new ProjectState(), SDK);
+
+        assertEquals(List.of("Base.java:8", "Broken.java:4", "Broken.java:5", "Broken.java:7"),
+                holders.references().stream().sorted().toList());
+    }
+
+    @Test
     void aFileThatNoLoadedPluginDeclaresIsNotOffered() throws Exception {
         ProjectConfig config = project();
 

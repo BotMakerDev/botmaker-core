@@ -1,6 +1,11 @@
 package com.botmaker.core.project;
 
 
+import com.botmaker.java.edit.helpers.FileTypeDetector;
+import com.botmaker.java.parse.BotParser;
+import org.eclipse.jdt.core.dom.CompilationUnit;
+import org.eclipse.jdt.core.dom.PackageDeclaration;
+
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
@@ -66,8 +71,18 @@ public record ProjectConfig(
         return of(projectName, packageName, dir);
     }
 
-    private static final Pattern PACKAGE = Pattern.compile("(?m)^\\s*package\\s+([\\w.]+)\\s*;");
-    private static final Pattern MAIN = Pattern.compile("public\\s+static\\s+void\\s+main\\s*\\(");
+    /** What {@code main} looks like in text: only ever a reason not to parse a file, never a reason to believe it. */
+    private static final Pattern MAYBE_MAIN = Pattern.compile("\\bmain\\s*\\(");
+
+    /**
+     * {@code text} as a tree when it holds {@code main}, else empty. This runs over every bot the list shows, and
+     * most files never write {@code main(}, so a file that does not is not parsed.
+     */
+    private static Optional<CompilationUnit> withMain(String text) {
+        if (!MAYBE_MAIN.matcher(text).find()) return Optional.empty();
+        CompilationUnit unit = BotParser.syntax(text);
+        return FileTypeDetector.holdsJvmMain(unit, text) ? Optional.of(unit) : Optional.empty();
+    }
 
     /**
      * The package of the class holding {@code public static void main}. When several classes do, the one whose
@@ -81,10 +96,9 @@ public record ProjectConfig(
         if (Files.isDirectory(sources)) {
             try (var walk = Files.walk(sources)) {
                 for (Path java : walk.filter(p -> p.toString().endsWith(".java")).toList()) {
-                    String text = Files.readString(java);
-                    if (!MAIN.matcher(text).find()) continue;
-                    var pkg = PACKAGE.matcher(text);
-                    if (pkg.find()) packages.add(pkg.group(1));
+                    PackageDeclaration declared = withMain(Files.readString(java))
+                            .map(CompilationUnit::getPackage).orElse(null);
+                    if (declared != null) packages.add(declared.getName().getFullyQualifiedName());
                 }
             } catch (IOException | UncheckedIOException unreadable) {
                 return Optional.empty();
@@ -102,7 +116,7 @@ public record ProjectConfig(
         if (!Files.isDirectory(sources)) return false;
         try (var walk = Files.walk(sources)) {
             for (Path java : walk.filter(p -> p.toString().endsWith(".java")).toList()) {
-                if (MAIN.matcher(Files.readString(java)).find()) return true;
+                if (withMain(Files.readString(java)).isPresent()) return true;
             }
             return false;
         } catch (IOException | UncheckedIOException unreadable) {

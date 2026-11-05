@@ -2,6 +2,8 @@ package com.botmaker.core.project;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -9,6 +11,8 @@ import java.nio.file.Path;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * A bot cloned from the gallery keeps its author's package in a folder its user named (2026-10-23): the package is
@@ -52,6 +56,100 @@ class ProjectConfigPackageTest {
                 """);
 
         assertEquals(Optional.of("com.farm"), ProjectConfig.mainPackage(dir));
+    }
+
+    @Test
+    void aMainInACommentOrAStringIsNoMain(@TempDir Path root) throws IOException {
+        Path sources = root.resolve("src/main/java/com/farm");
+        Files.createDirectories(sources);
+        Files.writeString(sources.resolve("Notes.java"), """
+                package com.farm;
+
+                // public static void main(String[] args) {}
+                class Notes {
+                    String how = "public static void main(String[] args)";
+                }
+                """);
+
+        assertFalse(ProjectConfig.hasMain(root));
+        assertEquals(Optional.empty(), ProjectConfig.mainPackage(root));
+    }
+
+    @Test
+    void aPackageInACommentIsNotThePackage(@TempDir Path root) throws IOException {
+        Path sources = root.resolve("src/main/java/com/farm");
+        Files.createDirectories(sources);
+        Files.writeString(sources.resolve("FarmBot.java"), """
+                /*
+                 package com.old;
+                 */
+                package com.farm;
+
+                public class FarmBot {
+                    public static void main(String[] args) {}
+                }
+                """);
+
+        assertEquals(Optional.of("com.farm"), ProjectConfig.mainPackage(root));
+    }
+
+    @Test
+    void aMainWithABrokenBodyIsStillAMain(@TempDir Path root) throws IOException {
+        Path sources = root.resolve("src/main/java/com/farm");
+        Files.createDirectories(sources);
+        Files.writeString(sources.resolve("FarmBot.java"), """
+                package com.farm;
+
+                public class FarmBot {
+                    public static void main(String[] args) {
+                        int a = ;
+                    }
+                }
+                """);
+
+        assertTrue(ProjectConfig.hasMain(root));
+        assertEquals(Optional.of("com.farm"), ProjectConfig.mainPackage(root));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "public clas F { public static void main(String[] args) {} }",
+            "public class { public static void main(String[] args) {} }",
+            "class F { void f( { static public void main(String[] args) {} }"})
+    void aMainInAClassThatDoesNotParseIsStillAMain(String body, @TempDir Path root) throws IOException {
+        Path sources = root.resolve("src/main/java/com/farm");
+        Files.createDirectories(sources);
+        Files.writeString(sources.resolve("F.java"), "package com.farm;\n" + body + "\n");
+
+        assertTrue(ProjectConfig.hasMain(root));
+        assertEquals(Optional.of("com.farm"), ProjectConfig.mainPackage(root));
+    }
+
+    @Test
+    void whatTheJvmCannotStartIsNoMain(@TempDir Path root) throws IOException {
+        Path sources = root.resolve("src/main/java/com/farm");
+        Files.createDirectories(sources);
+        Files.writeString(sources.resolve("F.java"), """
+                package com.farm;
+                public class F {
+                    public static int main(String[] args) { return 0; }
+                    public static void main(int count) {}
+                    void f() {
+                        class Local { public static void main(String[] args) {} }
+                    }
+                }
+                """);
+
+        assertFalse(ProjectConfig.hasMain(root));
+    }
+
+    @Test
+    void aMainWithNoParametersIsAMain(@TempDir Path root) throws IOException {
+        Path sources = root.resolve("src/main/java/com/farm");
+        Files.createDirectories(sources);
+        Files.writeString(sources.resolve("F.java"), "package com.farm;\npublic class F { public static void main() {} }\n");
+
+        assertTrue(ProjectConfig.hasMain(root));
     }
 
     @Test

@@ -9,6 +9,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Reading through the tree (2026-11-05, clean-java phase 9): `ProjectConfig` reads `package` and `main` from a parse, so
+  a comment or a string saying them no longer makes a folder a bot or moves its package; a `main` counts only with
+  `String[]` or no parameters, where the text match took any. `PluginHolders` finds the lines naming a removed plugin's
+  files on the tree, so a trailing comment or a string is no reference. A file that does not parse is read by its tokens
+  for both questions, and every such file is reported on deletion.
 - Comments stay comments (2026-11-05, clean-java phase 8): a comment block, a holder's doc comment and the ▶ Try
   class's header all write through `CommentText`, so what is typed cannot end the comment. `*/` in a block comment, a lone
   carriage return and a unicode escape used to be refused as an edit that broke the code, or broke the compile. A

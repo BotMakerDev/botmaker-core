@@ -9,13 +9,17 @@ import com.botmaker.core.project.ProjectConfig;
 import com.botmaker.core.project.ProjectFile;
 import com.botmaker.core.project.ProjectState;
 import com.botmaker.java.parse.BotParser;
+import com.botmaker.java.parse.JavaLevel;
+import com.botmaker.java.parse.SourceTokens;
 import com.botmaker.core.services.BotSources;
+import org.eclipse.jdt.core.compiler.ITerminalSymbols;
 import org.eclipse.jdt.core.dom.ASTNode;
 import org.eclipse.jdt.core.dom.ASTVisitor;
 import org.eclipse.jdt.core.dom.BodyDeclaration;
 import org.eclipse.jdt.core.dom.CompilationUnit;
 import org.eclipse.jdt.core.dom.ImportDeclaration;
 import org.eclipse.jdt.core.dom.MethodDeclaration;
+import org.eclipse.jdt.core.dom.PackageDeclaration;
 import org.eclipse.jdt.core.dom.SimpleName;
 
 import java.io.IOException;
@@ -28,7 +32,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.regex.Pattern;
+import java.util.TreeSet;
 import java.util.stream.Stream;
 
 /**
@@ -75,21 +79,57 @@ public record PluginHolders(Map<Path, String> files, List<String> references) {
             files.put(file, pkg.isEmpty() ? holder.className() : pkg + "." + holder.className());
         }));
         if (files.isEmpty()) return NONE;
-        Pattern named = named(simpleNames(files));
+        List<String> classes = simpleNames(files);
         List<String> references = new ArrayList<>();
         BotSources.scan(config, state, (file, source) -> {
             if (files.containsKey(file)) return;
-            List<String> lines = source.lines().toList();
-            for (int i = 0; i < lines.size(); i++) {
-                String line = lines.get(i).strip();
-                if (line.startsWith("import ") || line.startsWith("//") || line.startsWith("*")
-                        || line.startsWith("/*")) {
-                    continue;
-                }
-                if (named.matcher(line).find()) references.add(file.getFileName() + ":" + (i + 1));
+            for (int line : linesNaming(BotParser.syntax(source), source, classes)) {
+                references.add(file.getFileName() + ":" + line);
             }
         });
         return new PluginHolders(files, references);
+    }
+
+    /**
+     * The lines of {@code unit}'s code that name one of {@code classes}: its package and imports are not code. A
+     * file that does not parse has lost code from its tree, so {@code source}'s tokens answer for that one: this
+     * list is what the user decides on.
+     */
+    private static Set<Integer> linesNaming(CompilationUnit unit, String source, List<String> classes) {
+        Set<Integer> lines = new TreeSet<>();
+        if (SourceParser.hasSyntaxErrors(unit)) {
+            boolean header = false;
+            for (SourceTokens.Token token : SourceTokens.of(JavaLevel.LATEST, source)) {
+                if (token.symbol() == ITerminalSymbols.TokenNameimport
+                        || token.symbol() == ITerminalSymbols.TokenNamepackage) {
+                    header = true;
+                } else if (token.symbol() == ITerminalSymbols.TokenNameSEMICOLON) {
+                    header = false;
+                } else if (!header && token.symbol() == ITerminalSymbols.TokenNameIdentifier
+                        && classes.contains(token.text())) {
+                    lines.add(unit.getLineNumber(token.start()));
+                }
+            }
+            return lines;
+        }
+        unit.accept(new ASTVisitor() {
+            @Override
+            public boolean visit(PackageDeclaration declaration) {
+                return false;
+            }
+
+            @Override
+            public boolean visit(ImportDeclaration declaration) {
+                return false;
+            }
+
+            @Override
+            public boolean visit(SimpleName simple) {
+                if (classes.contains(simple.getIdentifier())) lines.add(unit.getLineNumber(simple.getStartPosition()));
+                return false;
+            }
+        });
+        return lines;
     }
 
     public boolean isEmpty() {
@@ -112,11 +152,10 @@ public record PluginHolders(Map<Path, String> files, List<String> references) {
         if (isEmpty()) return new Deleted(0, List.of());
         List<String> classes = simpleNames(files);
         Set<String> packages = emptiedPackages();
-        Pattern named = named(classes);
         List<String> left = new ArrayList<>();
         int[] rewritten = {0};
         BotSources.forEach(config, state, (file, source) -> {
-            if (files.containsKey(file) || !mentions(source, named, packages)) return null;
+            if (files.containsKey(file)) return null;
             String result = unhook(file, source, classes, packages, plugin, left);
             if (result == null || result.equals(source)) return null;
             rewritten[0]++;
@@ -164,25 +203,23 @@ public record PluginHolders(Map<Path, String> files, List<String> references) {
         return emptied;
     }
 
-    private static boolean mentions(String source, Pattern named, Set<String> packages) {
-        return named.matcher(source).find() || packages.stream().anyMatch(source::contains);
-    }
-
     /**
      * {@code source} without imports of the deleted classes, each function naming one marked, and a sentence in
-     * {@code left} for what could only be reported. {@code null} when the file does not parse.
+     * {@code left} for what could only be reported. {@code null} when the file does not parse: what it names cannot
+     * be told from a damaged tree, so every such file gets its sentence.
      */
     private String unhook(Path file, String source, List<String> classes, Set<String> packages, String plugin,
                           List<String> left) {
         String name = file.getFileName().toString();
         CompilationUnit unit = BotParser.syntax(source);
         if (unit == null || SourceParser.hasSyntaxErrors(unit)) {
-            left.add(name + " does not parse, so its use of " + String.join(", ", classes)
-                    + " was left as written.");
+            left.add(name + " does not parse, so any use of " + String.join(", ", classes)
+                    + " in it was left as written.");
             return null;
         }
 
         EditContext ctx = EditContext.of(unit, null, PluginHost.typesOnly());
+        boolean importGoes = false;
         for (Object each : unit.imports()) {
             ImportDeclaration imported = (ImportDeclaration) each;
             String target = imported.getName().getFullyQualifiedName();
@@ -195,6 +232,7 @@ public record PluginHolders(Map<Path, String> files, List<String> references) {
                 gone = files.containsValue(target);
             }
             if (!gone) continue;
+            importGoes = true;
             ctx.rewriter().remove(imported, null);
             if (imported.isStatic()) {
                 left.add(name + " imported " + target + " statically; what it used from there is left as written.");
@@ -221,6 +259,7 @@ public record PluginHolders(Map<Path, String> files, List<String> references) {
                 return false;
             }
         });
+        if (!importGoes && naming.isEmpty()) return null;
         naming.forEach((method, used) -> {
             String names = String.join(", ", used);
             ReviewMarks.mark(ctx, method,
@@ -244,9 +283,5 @@ public record PluginHolders(Map<Path, String> files, List<String> references) {
     private static String packageOf(String source) {
         CompilationUnit unit = BotParser.syntax(source);
         return unit == null || unit.getPackage() == null ? "" : unit.getPackage().getName().getFullyQualifiedName();
-    }
-
-    private static Pattern named(List<String> classes) {
-        return Pattern.compile("\\b(" + String.join("|", classes.stream().map(Pattern::quote).toList()) + ")\\b");
     }
 }
