@@ -18,7 +18,8 @@ per user.
   `BlockId` path, as a string. Undo and redo are a `HistoryStep`, sent alone: the history is the project's, a
   request one file's.
 - `event`: what the core tells every client. `CoreEvent` is sealed: `MethodsChanged` (the methods whose source or
-  id changed, and the ids removed), `Diagnostics`, `RunState`, `RunOutput`, `UiRequest`, `Refusal`.
+  id changed, and the ids removed), `Diagnostics`, `RunState`, `RunOutput`, `RunLogged`, `InputAsked`, `Status`,
+  `UiRequest`, `Refusal`.
 - `CoreJson`: the one mapper every protocol record is read and written with, strict on reading (a missing component
   or trailing text is refused); phase 10's channel carries exactly this.
 - The rest came from Studio (phase 6a, 2026-11-05), each in the package it had there: `project` (the open project,

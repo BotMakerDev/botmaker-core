@@ -17,6 +17,9 @@ import java.util.List;
         @JsonSubTypes.Type(value = CoreEvent.Diagnostics.class, name = "diagnostics"),
         @JsonSubTypes.Type(value = CoreEvent.RunState.class, name = "runState"),
         @JsonSubTypes.Type(value = CoreEvent.RunOutput.class, name = "runOutput"),
+        @JsonSubTypes.Type(value = CoreEvent.RunLogged.class, name = "runLogged"),
+        @JsonSubTypes.Type(value = CoreEvent.InputAsked.class, name = "inputAsked"),
+        @JsonSubTypes.Type(value = CoreEvent.Status.class, name = "status"),
         @JsonSubTypes.Type(value = CoreEvent.UiRequest.class, name = "uiRequest"),
         @JsonSubTypes.Type(value = CoreEvent.Refusal.class, name = "refusal")})
 public sealed interface CoreEvent {
@@ -89,6 +92,38 @@ public sealed interface CoreEvent {
         }
 
         public enum Stream { OUT, ERR }
+    }
+
+    /**
+     * The bot's process ended after a run (not a try or a debug session), after its {@link RunState} ended: its run
+     * folder is written and its problems can be reported. {@code folder} is that folder's absolute path, empty when it
+     * kept no log.
+     */
+    record RunLogged(String folder) implements CoreEvent {
+        public RunLogged {
+            folder = folder == null ? "" : folder;
+        }
+    }
+
+    /**
+     * The running bot asks its user a question ({@code Ask.choice(…)}); a client answers {@code id}. {@code kind} is a
+     * {@code TelemetryEvent.Ask.Kind} id and stays a string, as on the bot's wire, so a kind a newer bot adds still
+     * reads; a client asks one it does not know as plain text. {@code line} is the bot's source line asking, {@code -1}
+     * when unknown.
+     */
+    record InputAsked(long id, String kind, String prompt, List<String> choices, int line) implements CoreEvent {
+        public InputAsked {
+            kind = kind == null ? "" : kind;
+            prompt = prompt == null ? "" : prompt;
+            choices = choices == null ? List.of() : List.copyOf(choices);
+        }
+    }
+
+    /** A line for the user's status bar: what a compile, a run or a debug session is doing now. */
+    record Status(String message) implements CoreEvent {
+        public Status {
+            if (message == null) throw new IllegalArgumentException("a status has a message");
+        }
     }
 
     /**

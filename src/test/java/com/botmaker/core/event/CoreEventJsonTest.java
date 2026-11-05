@@ -30,6 +30,9 @@ class CoreEventJsonTest {
                             "The import java.util.List is never used"))),
             new CoreEvent.RunState(CoreEvent.RunState.Phase.ENDED, "stopped by the user"),
             new CoreEvent.RunOutput(CoreEvent.RunOutput.Stream.ERR, "Ore not found\n"),
+            new CoreEvent.RunLogged("/home/me/BotMakerProjects/MyBot/runs/20261105-101500"),
+            new CoreEvent.InputAsked(3, "choice", "Which ore?", List.of("Iron", "Gold"), 12),
+            new CoreEvent.Status("Compiling..."),
             new CoreEvent.UiRequest("7", CoreEvent.UiRequest.Kind.WINDOW, "Screens"),
             new CoreEvent.Refusal(FILE, "Pictures.ORE is not a number."));
 
