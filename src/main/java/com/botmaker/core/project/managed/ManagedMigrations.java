@@ -13,7 +13,6 @@ import com.botmaker.java.index.nav.Refactor;
 import com.botmaker.java.edit.ImportManager;
 import com.botmaker.java.edit.helpers.AstRewriteHelper;
 import com.botmaker.java.grammar.SourceFormatter;
-import com.botmaker.java.grammar.SourceParser;
 import com.botmaker.java.grammar.JavaNames;
 import com.botmaker.java.grammar.JavaValue;
 import com.botmaker.java.grammar.SourceNode;
@@ -415,14 +414,12 @@ public final class ManagedMigrations {
     }
 
     /**
-     * {@code body} with every use of a parameter replaced by its part ({@link Template}, the rewrite of the bot's
-     * other code fills a rule's body the same way), parsed. A body that declares a name a parameter has — a
-     * lambda's own {@code file} — is empty: which is which is not clear; so is one whose result does not parse.
+     * {@code body} with every use of a parameter replaced by its part, as a tree ({@link Template}, the rewrite of
+     * the bot's other code fills a rule's body the same way). A body that declares a name a parameter has — a
+     * lambda's own {@code file} — is empty: which is which is not clear; so is one that does not parse.
      */
     static Optional<Expression> substituted(String body, Map<String, Expression> bound) {
-        Map<String, Template.Part> parts = new LinkedHashMap<>();
-        bound.forEach((name, part) -> parts.put(name, Template.Part.of(part, part.toString())));
-        return Template.filled(body, false, parts).map(text -> SourceParser.expression(JavaLevel.LATEST, text));
+        return Template.substituted(body, bound);
     }
 
     // --- writing -----------------------------------------------------------------------------------------

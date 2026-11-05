@@ -9,6 +9,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- The `@Migrate` engine substitutes trees (2026-11-05, clean-java phase 7): a rule's body is parsed once per plan and
+  filled through an `ASTRewrite`, each part keeping the bot's spelling and comments; parentheses come from
+  `Precedence` on the tree, so `twice(inc(x))` becomes `(x + 1) * 2`, not `x + 1 * 2`. A managed value's rule substitutes
+  copies of its parts. A seeded rule is built with `ast.new*`, and `migrate write` parses the author's body and refuses
+  one that is not one expression or statement; a comment inside that body is not kept.
 - New files and moved imports are trees (2026-11-05, clean-java phase 6): `ClassKind.source`, `BotMethods`' new
   class and `Seed.skeleton` build their unit through `ManagedHolders.unit`, which writes no package for the default
   one; `HolderMove` renames and adds imports through an `ASTRewrite`, not text offsets. An edit whose rewrite cannot

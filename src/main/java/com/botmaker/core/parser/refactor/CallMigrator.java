@@ -17,6 +17,7 @@ import com.botmaker.java.parse.SourceSet;
 import com.botmaker.core.project.ProjectConfig;
 import com.botmaker.java.types.ProjectAnalyzer;
 import com.botmaker.java.types.ResolvedType;
+import org.eclipse.jdt.core.dom.AST;
 import org.eclipse.jdt.core.dom.ASTNode;
 import org.eclipse.jdt.core.dom.ASTVisitor;
 import org.eclipse.jdt.core.dom.ClassInstanceCreation;
@@ -163,21 +164,21 @@ public final class CallMigrator {
     }
 
     /**
-     * A default for {@code typeName} that compiles whatever the type turns out to be, spelled as source spells
-     * it: {@code false}, {@code 0}, {@code ""} or {@code null}, and nothing that needs an import — what a
+     * A default for {@code typeName} that compiles whatever the type turns out to be, as a node of {@code ast}:
+     * {@code false}, {@code 0}, {@code ""} or {@code null}, and nothing that needs an import — what a
      * seeded {@code @Migrate} rule returns ({@code migrate.Seed}).
      *
      * <p>Deliberately blunter than {@link #defaultFor}, which asks the palette and may answer {@code new Point()}:
      * right for a signature edit, wrong where the type may be the very one a new jar dropped. {@code null} for
      * every reference type, including {@code List} and the boxed primitives.
      */
-    public static String literalDefaultText(String typeName) {
+    public static Expression literalDefault(AST ast, String typeName) {
         String type = typeName == null ? "" : typeName.trim();
         return switch (type) {
-            case "boolean" -> "false";
-            case "byte", "short", "int", "long", "float", "double", "char" -> "0";
-            case "String", "java.lang.String" -> "\"\"";
-            default -> "null";
+            case "boolean" -> ast.newBooleanLiteral(false);
+            case "byte", "short", "int", "long", "float", "double", "char" -> ast.newNumberLiteral("0");
+            case "String", "java.lang.String" -> ast.newStringLiteral();
+            default -> ast.newNullLiteral();
         };
     }
 

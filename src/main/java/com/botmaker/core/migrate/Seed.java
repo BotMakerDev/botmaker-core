@@ -11,14 +11,25 @@ import com.botmaker.core.parser.refactor.CallMigrator;
 import com.botmaker.core.project.managed.ManagedHolders;
 import com.botmaker.java.index.BotIndex;
 import com.botmaker.java.parse.BotParser;
+import com.botmaker.java.types.ProjectAnalyzer;
 import org.eclipse.jdt.core.dom.AST;
-import org.eclipse.jdt.core.dom.ASTNode;
+import org.eclipse.jdt.core.dom.Annotation;
+import org.eclipse.jdt.core.dom.Block;
 import org.eclipse.jdt.core.dom.CompilationUnit;
+import org.eclipse.jdt.core.dom.Expression;
 import org.eclipse.jdt.core.dom.ImportDeclaration;
+import org.eclipse.jdt.core.dom.MarkerAnnotation;
+import org.eclipse.jdt.core.dom.MemberValuePair;
 import org.eclipse.jdt.core.dom.MethodDeclaration;
 import org.eclipse.jdt.core.dom.Modifier;
+import org.eclipse.jdt.core.dom.NormalAnnotation;
+import org.eclipse.jdt.core.dom.PrimitiveType;
+import org.eclipse.jdt.core.dom.ReturnStatement;
+import org.eclipse.jdt.core.dom.SingleMemberAnnotation;
 import org.eclipse.jdt.core.dom.SingleVariableDeclaration;
+import org.eclipse.jdt.core.dom.StringLiteral;
 import org.eclipse.jdt.core.dom.TypeDeclaration;
+import org.eclipse.jdt.core.dom.TypeLiteral;
 import org.eclipse.jdt.core.dom.rewrite.ASTRewrite;
 import org.eclipse.jdt.core.dom.rewrite.ListRewrite;
 
@@ -95,7 +106,7 @@ public final class Seed {
             Map<String, String> names = new HashMap<>(imported);
             Set<String> needs = new LinkedHashSet<>();
             Writer writer = new Writer(names, needs);
-            String method = writer.method(element, gone);
+            MethodDeclaration method = writer.method(unit.getAST(), element, gone);
             if (!taken.add(writer.signature)) {
                 unseeded.put(element, "the bot's " + holder.getName().getIdentifier() + " already has a method "
                         + writer.signature + ", and a rule is named by its old element");
@@ -103,7 +114,7 @@ public final class Seed {
             }
             imported.putAll(names);
             imports.addAll(needs);
-            body.insertLast(rewrite.createStringPlaceholder(method, ASTNode.METHOD_DECLARATION), null);
+            body.insertLast(method, null);
             seeded.add(element);
         }
         if (seeded.isEmpty()) return new Seeded(null, List.of(), unseeded);
@@ -131,7 +142,7 @@ public final class Seed {
         return null;
     }
 
-    /** One seed's text, and the imports it needs. */
+    /** One seed's method, and the imports it needs. */
     private static final class Writer {
 
         private final Map<String, String> imported;
@@ -143,49 +154,108 @@ public final class Seed {
             this.imports = imports;
         }
 
-        String method(OldElement element, Set<String> gone) {
+        /** {@code element}'s seed, as a method of {@code ast}. */
+        MethodDeclaration method(AST ast, OldElement element, Set<String> gone) {
             boolean ownerGone = gone.contains(element.owner());
             String owner = ownerGone ? null : name(element.owner());
-            String kind = element.kind() == Migrate.Kind.METHOD ? "" : ", kind = Migrate.Kind." + element.kind().name();
-            String mark = owner == null
-                    ? "@Migrate(name = \"" + element.owner() + "\"" + kind + ")"
-                    : kind.isEmpty() ? "@Migrate(" + owner + ".class)" : "@Migrate(value = " + owner + ".class" + kind
-                    + ")";
+            MethodDeclaration seed = ast.newMethodDeclaration();
 
-            List<String> params = new ArrayList<>();
+            SingleMemberAnnotation refactor = ast.newSingleMemberAnnotation();
+            refactor.setTypeName(ast.newSimpleName("Refactor"));
+            refactor.setValue(text(ast, MARK));
+            seed.modifiers().add(refactor);
+            seed.modifiers().add(mark(ast, element, owner));
+            seed.modifiers().add(ast.newModifier(Modifier.ModifierKeyword.STATIC_KEYWORD));
+
             List<String> erased = new ArrayList<>();
             Set<String> names = new HashSet<>();
             if (element.instance()) {
-                params.add("@Migrate.Self " + owner + " self");
+                SingleVariableDeclaration self = parameter(ast, owner, "self");
+                MarkerAnnotation marker = ast.newMarkerAnnotation();
+                marker.setTypeName(ast.newName("Migrate.Self"));
+                self.modifiers().add(marker);
+                seed.parameters().add(self);
                 erased.add(element.owner());
                 names.add("self");
             }
             for (String param : element.params()) {
-                params.add(name(param) + " " + free(param, names));
+                seed.parameters().add(parameter(ast, name(param), free(param, names)));
                 erased.add(param);
             }
 
             String returns = element.kind() == Migrate.Kind.CONSTRUCTOR ? element.owner() : element.type();
-            boolean nothing = "void".equals(returns);
-            String body;
-            String type;
-            if (nothing) {
-                type = "void";
-                body = "";
+            Block body = ast.newBlock();
+            Expression returned;
+            if ("void".equals(returns)) {
+                seed.setReturnType2(ast.newPrimitiveType(PrimitiveType.VOID));
+                returned = null;
             } else if (element.instance() && returns.equals(element.owner())) {
-                type = owner;
-                body = "return self;";
+                seed.setReturnType2(ProjectAnalyzer.createTypeNode(ast, owner));
+                returned = ast.newSimpleName("self");
             } else if (gone.contains(base(returns))) {
-                type = "Object";
-                body = "return null;";
+                seed.setReturnType2(ast.newSimpleType(ast.newSimpleName("Object")));
+                returned = ast.newNullLiteral();
             } else {
-                type = name(returns);
-                body = "return " + CallMigrator.literalDefaultText(type) + ";";
+                String type = name(returns);
+                seed.setReturnType2(ProjectAnalyzer.createTypeNode(ast, type));
+                returned = CallMigrator.literalDefault(ast, type);
             }
+            if (returned != null) {
+                ReturnStatement statement = ast.newReturnStatement();
+                statement.setExpression(returned);
+                body.statements().add(statement);
+            }
+            seed.setBody(body);
             String method = element.kind() == Migrate.Kind.CONSTRUCTOR ? constructorName(element) : element.name();
+            seed.setName(ast.newSimpleName(method));
             signature = signature(method, erased.stream().map(OldElement::simple).toList());
-            return "@Refactor(\"" + MARK + "\")\n" + mark + "\nstatic " + type + " " + method + "("
-                    + String.join(", ", params) + ") {" + (body.isEmpty() ? "" : "\n    " + body + "\n") + "}";
+            return seed;
+        }
+
+        /**
+         * {@code @Migrate(Owner.class)}, with {@code kind = …} when it names no method, or
+         * {@code @Migrate(name = "…")} when the owner is gone.
+         */
+        private static Annotation mark(AST ast, OldElement element, String owner) {
+            boolean method = element.kind() == Migrate.Kind.METHOD;
+            if (owner != null && method) {
+                SingleMemberAnnotation mark = ast.newSingleMemberAnnotation();
+                mark.setTypeName(ast.newSimpleName("Migrate"));
+                mark.setValue(classOf(ast, owner));
+                return mark;
+            }
+            NormalAnnotation mark = ast.newNormalAnnotation();
+            mark.setTypeName(ast.newSimpleName("Migrate"));
+            mark.values().add(pair(ast, owner == null ? "name" : "value",
+                    owner == null ? text(ast, element.owner()) : classOf(ast, owner)));
+            if (!method) mark.values().add(pair(ast, "kind", ast.newName("Migrate.Kind." + element.kind().name())));
+            return mark;
+        }
+
+        private static MemberValuePair pair(AST ast, String name, Expression value) {
+            MemberValuePair pair = ast.newMemberValuePair();
+            pair.setName(ast.newSimpleName(name));
+            pair.setValue(value);
+            return pair;
+        }
+
+        private static TypeLiteral classOf(AST ast, String type) {
+            TypeLiteral literal = ast.newTypeLiteral();
+            literal.setType(ProjectAnalyzer.createTypeNode(ast, type));
+            return literal;
+        }
+
+        private static StringLiteral text(AST ast, String value) {
+            StringLiteral literal = ast.newStringLiteral();
+            literal.setLiteralValue(value);
+            return literal;
+        }
+
+        private static SingleVariableDeclaration parameter(AST ast, String type, String name) {
+            SingleVariableDeclaration parameter = ast.newSingleVariableDeclaration();
+            parameter.setType(ProjectAnalyzer.createTypeNode(ast, type));
+            parameter.setName(ast.newSimpleName(name));
+            return parameter;
         }
 
         /**

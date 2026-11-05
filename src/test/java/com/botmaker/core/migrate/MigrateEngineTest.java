@@ -98,6 +98,25 @@ class MigrateEngineTest {
             """;
     private static final String STATE_OLD = "package lib; public enum State { OFF, ON, DISABLED }";
     private static final String STATE_NEW = "package lib; public enum State { ON, DISABLED }";
+    private static final String CALC_OLD = """
+            package lib;
+            public final class Calc {
+                public static int twice(int value) { return value * 2; }
+                public static int inc(int value) { return value + 1; }
+                public static int keep(int value) { return value; }
+                public static int neg(int value) { return -value; }
+                public static int minus(int total, int value) { return total - value; }
+                public static int bump(int value) { return value + 1; }
+                public static int[] cells(int size) { return new int[size]; }
+                public static int first(int[] value) { return value[0]; }
+            }
+            """;
+    private static final String CALC_NEW = """
+            package lib;
+            public final class Calc {
+                public static int keep(int value) { return value; }
+            }
+            """;
     private static final String AREA_OLD = """
             package lib;
             public class Area {
@@ -189,9 +208,9 @@ class MigrateEngineTest {
     @BeforeAll
     static void jars() throws IOException {
         oldJar = jar("old", Map.of("Screen", SCREEN_OLD, "Run", RUN_OLD, "Finder", FINDER_OLD, "Rect", RECT_OLD,
-                "State", STATE_OLD, "Area", AREA_OLD));
+                "State", STATE_OLD, "Area", AREA_OLD, "Calc", CALC_OLD));
         newJar = jar("new", Map.of("Screen", SCREEN_NEW, "Run", RUN_NEW, "Finder", FINDER_NEW, "Rect", RECT_NEW,
-                "State", STATE_NEW));
+                "State", STATE_NEW, "Calc", CALC_NEW));
     }
 
     @Test
@@ -573,6 +592,340 @@ class MigrateEngineTest {
                 .get(bot.botFile());
         assertTrue(migrated.contains("Screen.named(\"home\").markers(List.of(\"a\")).markers(List.of(\"b\"))"),
                 migrated);
+    }
+
+    /**
+     * A part or a body of lower precedence than where it lands keeps its meaning: the tree says where parentheses
+     * go, as the hand-added ones did — and a part that is itself a rewritten use is judged by what it became.
+     */
+    @Test
+    void aLowerPrecedencePartOrBodyKeepsItsMeaning() throws IOException {
+        String bot = """
+                package bot;
+
+                import lib.Calc;
+
+                public class Bot {
+                    static int a(int x, int y) {
+                        return Calc.twice(x + y);
+                    }
+
+                    static int b(int x) {
+                        return 10 - Calc.inc(x);
+                    }
+
+                    static int c(int x) {
+                        return Calc.twice(Calc.inc(x));
+                    }
+
+                    static int d(int x) {
+                        return Calc.inc(x) * 3;
+                    }
+
+                    static int e(int x, int y) {
+                        return Calc.inc(x > y ? x : y);
+                    }
+                }
+                """;
+        String rules = """
+                package bot;
+
+                import com.botmaker.plugin.api.meta.Migrate;
+                import lib.Calc;
+
+                public class Migrations {
+                    @Migrate(Calc.class)
+                    static int twice(int value) {
+                        return value * 2;
+                    }
+
+                    @Migrate(Calc.class)
+                    static int inc(int value) {
+                        return value + 1;
+                    }
+                }
+                """;
+        Bot fixture = bot(bot, rules);
+        Rewrite.Result result = Migration.of(fixture.now(), fixture.old()).plan(false);
+        Refactor.Planned plan = assertInstanceOf(Refactor.Planned.class, result.outcome(),
+                () -> result.outcome() + " left " + result.left());
+        String text = plan.rewrites().get(fixture.botFile());
+        assertTrue(text.contains("return (x + y) * 2;"), text);
+        assertTrue(text.contains("return 10 - (x + 1);"), text);
+        assertTrue(text.contains("return (x + 1) * 2;"), text);
+        assertTrue(text.contains("return (x + 1) * 3;"), text);
+        assertTrue(text.contains("return (x > y ? x : y) + 1;"), text);
+        assertEquals(List.of(), fixture.now().with(plan.rewrites()).errors().get(fixture.botFile()), text);
+    }
+
+    /** Glued to an operator, {@code -y} would read as {@code --}; and {@code new int[3]} would take the index itself. */
+    @Test
+    void aSignOrAnArrayCreationIsPutInParenthesesWhereAnOperatorWouldBindToIt() throws IOException {
+        String bot = """
+                package bot;
+
+                import lib.Calc;
+
+                public class Bot {
+                    static int a(int x) {
+                        return 10-Calc.neg(x);
+                    }
+
+                    static int b(int t, int y) {
+                        return Calc.minus(t, -y);
+                    }
+
+                    static int c() {
+                        return Calc.first(new int[3]);
+                    }
+                }
+                """;
+        String rules = """
+                package bot;
+
+                import com.botmaker.plugin.api.meta.Migrate;
+                import lib.Calc;
+
+                public class Migrations {
+                    @Migrate(Calc.class)
+                    static int neg(int value) {
+                        return -value;
+                    }
+
+                    @Migrate(Calc.class)
+                    static int minus(int total, int value) {
+                        return total-value;
+                    }
+
+                    @Migrate(Calc.class)
+                    static int first(int[] value) {
+                        return value[0];
+                    }
+                }
+                """;
+        Bot fixture = bot(bot, rules);
+        Rewrite.Result result = Migration.of(fixture.now(), fixture.old()).plan(false);
+        Refactor.Planned plan = assertInstanceOf(Refactor.Planned.class, result.outcome(),
+                () -> result.outcome() + " left " + result.left());
+        String text = plan.rewrites().get(fixture.botFile());
+        assertTrue(text.contains("return 10-(-x);"), text);
+        assertTrue(text.contains("return t-(-y);"), text);
+        assertTrue(text.contains("return (new int[3])[0];"), text);
+    }
+
+    /** Where parentheses are not allowed at all, none are added: a loop's update is a statement expression. */
+    @Test
+    void aLoopsUpdateTakesARewriteWithoutParentheses() throws IOException {
+        String bot = """
+                package bot;
+
+                import lib.Calc;
+
+                public class Bot {
+                    static void loop(int n) {
+                        for (int i = 0; i < n; Calc.bump(i)) {
+                        }
+                    }
+                }
+                """;
+        String rules = """
+                package bot;
+
+                import com.botmaker.plugin.api.meta.Migrate;
+                import lib.Calc;
+
+                public class Migrations {
+                    @Migrate(Calc.class)
+                    static int bump(int value) {
+                        return value += 1;
+                    }
+                }
+                """;
+        Bot fixture = bot(bot, rules);
+        Rewrite.Result result = Migration.of(fixture.now(), fixture.old()).plan(false);
+        Refactor.Planned plan = assertInstanceOf(Refactor.Planned.class, result.outcome(),
+                () -> result.outcome() + " left " + result.left());
+        assertTrue(plan.rewrites().get(fixture.botFile()).contains("i < n; i += 1)"),
+                plan.rewrites().get(fixture.botFile()));
+    }
+
+    /** A rule's author may write a statement ending in a block, which takes no {@code ;}. */
+    @Test
+    void aWrittenBodyEndingInABlockIsOneStatement() throws IOException {
+        Bot bot = bot(BOT, """
+                package bot;
+
+                import com.botmaker.plugin.api.meta.Migrate;
+                import com.botmaker.plugin.api.meta.Refactor;
+                import lib.Finder;
+
+                public class Migrations {
+                    @Refactor("write the replacement")
+                    @Migrate(Finder.class)
+                    static void untilFind(String picture, Runnable step) {
+                    }
+                }
+                """);
+        Migration migration = Migration.of(bot.now(), bot.old());
+        Rule rule = migration.rules().stream().filter(r -> r.method().equals("untilFind")).findFirst().orElseThrow();
+        Refactor.Planned plan = assertInstanceOf(Refactor.Planned.class,
+                migration.write(rule, "if (step != null) { Finder.repeatUntil(picture, step); }", List.of()));
+        assertTrue(plan.rewrites().get(rule.file()).contains("if (step != null) {"), plan.rewrites().toString());
+    }
+
+    /** A file with CRLF line ends stays one: a part's line breaks are not the rule file's nor this machine's. */
+    @Test
+    void aPartKeepsItsFilesLineEnds() throws IOException {
+        String bot = """
+                package bot;
+
+                import lib.Finder;
+
+                public class Bot {
+                    static void step() {
+                        Finder.untilFind("p", () -> {
+                            System.out.println(1);
+                        });
+                    }
+                }
+                """.replace("\n", "\r\n");
+        String rules = """
+                package bot;
+
+                import com.botmaker.plugin.api.meta.Migrate;
+                import lib.Finder;
+
+                public class Migrations {
+                    @Migrate(Finder.class)
+                    static void untilFind(String picture, Runnable step) {
+                        Finder.repeatUntil(picture, step);
+                    }
+                }
+                """;
+        Bot fixture = bot(bot, rules);
+        Rewrite.Result result = Migration.of(fixture.now(), fixture.old()).plan(false);
+        Refactor.Planned plan = assertInstanceOf(Refactor.Planned.class, result.outcome(),
+                () -> result.outcome() + " left " + result.left());
+        String text = plan.rewrites().get(fixture.botFile());
+        assertTrue(text.contains("() -> {\r\n"), text);
+        assertTrue(!text.replace("\r\n", "").contains("\n"), text);
+    }
+
+    /** A rule's body laid out over lines moves a part's later lines; a use inside that part still counts as applied. */
+    @Test
+    void aMultiLineUseInsideAMultiLineBodyStillCountsAsApplied() throws IOException {
+        String bot = """
+                package bot;
+
+                import lib.Finder;
+
+                public class Bot {
+                    static void step() {
+                        Finder.untilFind("p", () -> {
+                            Finder.untilFind("q", () -> {
+                                System.out.println(1);
+                            });
+                        });
+                    }
+                }
+                """;
+        String rules = """
+                package bot;
+
+                import com.botmaker.plugin.api.meta.Migrate;
+                import lib.Finder;
+
+                public class Migrations {
+                    @Migrate(Finder.class)
+                    static void untilFind(String picture, Runnable step) {
+                        Finder.repeatUntil(picture,
+                                step);
+                    }
+                }
+                """;
+        Bot fixture = bot(bot, rules);
+        Rewrite.Result result = Migration.of(fixture.now(), fixture.old()).plan(false);
+        assertInstanceOf(Refactor.Planned.class, result.outcome(), () -> result.outcome() + " left " + result.left());
+        assertEquals(2, result.applied().size(), () -> "applied " + result.applied());
+    }
+
+    /** A part goes in as the bot wrote it: its comments, its spacing and its line breaks stay. */
+    @Test
+    void aPartKeepsTheSpellingAndCommentsTheBotWroteItWith() throws IOException {
+        String bot = """
+                package bot;
+
+                import lib.Finder;
+
+                public class Bot {
+                    static void step(int x) {
+                        Finder.untilFind( "p"  /* the picture */, () -> {
+                            // keep me
+                            System.out.println(x   + 1);
+                        });
+                    }
+                }
+                """;
+        String rules = """
+                package bot;
+
+                import com.botmaker.plugin.api.meta.Migrate;
+                import lib.Finder;
+
+                public class Migrations {
+                    @Migrate(Finder.class)
+                    static void untilFind(String picture, Runnable step) {
+                        Finder.repeatUntil(picture, step);
+                    }
+                }
+                """;
+        Bot fixture = bot(bot, rules);
+        Rewrite.Result result = Migration.of(fixture.now(), fixture.old()).plan(false);
+        Refactor.Planned plan = assertInstanceOf(Refactor.Planned.class, result.outcome(),
+                () -> result.outcome() + " left " + result.left());
+        String text = plan.rewrites().get(fixture.botFile());
+        assertTrue(text.contains("""
+                        Finder.repeatUntil("p", () -> {
+                            // keep me
+                            System.out.println(x   + 1);
+                        });
+                """), text);
+    }
+
+    /** A seed is built as a tree and laid out as the file's other methods are. */
+    @Test
+    void aSeedReadsAsAMethodTheAuthorWouldWrite() throws IOException {
+        Bot bot = bot(BOT, """
+                package bot;
+
+                public class Migrations {
+                }
+                """);
+        Path file = bot.botFile().resolveSibling("Migrations.java");
+        Migration.Finished finished = Migration.of(bot.now(), bot.old()).finished(file, "bot", true);
+        Refactor.Planned plan = assertInstanceOf(Refactor.Planned.class, finished.result().outcome(),
+                () -> finished.result().outcome() + " left " + finished.result().left());
+        String migrations = plan.rewrites().get(file);
+        assertTrue(migrations.contains("""
+                    @Refactor("write the replacement")
+                    @Migrate(Run.class)
+                    static Run popups(@Migrate.Self Run self, Runnable runnable) {
+                        return self;
+                    }
+                """), migrations);
+        assertTrue(migrations.contains("""
+                    @Refactor("write the replacement")
+                    @Migrate(value = Rect.class, kind = Migrate.Kind.CONSTRUCTOR)
+                    static Rect rect(int value, int value2) {
+                        return null;
+                    }
+                """), migrations);
+        assertTrue(migrations.contains("""
+                    @Refactor("write the replacement")
+                    @Migrate(Finder.class)
+                    static void untilFind(String string, Runnable runnable) {
+                    }
+                """), migrations);
     }
 
     @Test

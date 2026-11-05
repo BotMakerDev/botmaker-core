@@ -1,6 +1,5 @@
 package com.botmaker.core.migrate;
 
-import com.botmaker.java.parse.JavaLevel;
 import com.botmaker.plugin.api.meta.Migrate;
 import com.botmaker.java.index.nav.Refactor;
 import com.botmaker.java.index.nav.Uses;
@@ -9,9 +8,9 @@ import com.botmaker.java.edit.ImportManager;
 import com.botmaker.java.edit.guard.CompileGuard;
 import com.botmaker.java.edit.guard.CompileGuard.Problem;
 import com.botmaker.java.edit.helpers.AstRewriteHelper;
+import com.botmaker.java.edit.helpers.Precedence;
 import com.botmaker.java.edit.refactor.ReviewMarks;
 import com.botmaker.core.plugin.PluginHost;
-import com.botmaker.java.grammar.SourceParser;
 import com.botmaker.java.index.BotIndex;
 import com.botmaker.java.parse.BotParser;
 import org.eclipse.jdt.core.dom.AST;
@@ -95,9 +94,15 @@ public final class Rewrite {
      * One use, planned: the range of the original text it replaces and its new text, or why it has none.
      *
      * @param methodStart the start of the function it is in, or -1
+     * @param shape       the expression its new text binds as, for a use around it that puts it in; {@code null}
+     *                    when no operator can split it
      */
     private record Candidate(Sites.Site site, Rule rule, int start, int end, String text, String why,
-                             int methodStart) {
+                             int methodStart, Expression shape) {
+
+        Candidate(Sites.Site site, Rule rule, int start, int end, String text, String why, int methodStart) {
+            this(site, rule, start, end, text, why, methodStart, null);
+        }
 
         boolean ok() {
             return text != null;
@@ -141,6 +146,8 @@ public final class Rewrite {
         }
         Set<Path> ruleFiles = new LinkedHashSet<>();
         for (Rule rule : rules) ruleFiles.add(rule.file());
+        // Each rule's body is parsed once, however many uses it fills.
+        Map<Rule, Optional<Template.Body>> bodies = new HashMap<>();
         List<FilePlan> files = old.read(units -> {
             List<FilePlan> out = new ArrayList<>();
             units.forEach((file, unit) -> {
@@ -148,7 +155,7 @@ public final class Rewrite {
                 List<Uses.Found> found = Uses.in(unit, elements.keySet(), true);
                 if (!found.isEmpty()) {
                     out.add(planned(file, old.sources().get(file), unit, found, byKey, why, elements,
-                            ruleFiles.contains(file)));
+                            ruleFiles.contains(file), bodies));
                 }
             });
             return out;
@@ -224,7 +231,8 @@ public final class Rewrite {
 
     private static FilePlan planned(Path file, String source, CompilationUnit unit, List<Uses.Found> found,
                                     Map<String, Rule> byKey, Map<String, String> unruled,
-                                    Map<String, OldElement> elements, boolean holdsRules) {
+                                    Map<String, OldElement> elements, boolean holdsRules,
+                                    Map<Rule, Optional<Template.Body>> bodies) {
         List<Uses.Found> ordered = new ArrayList<>(found);
         ordered.sort(Comparator.comparingInt((Uses.Found f) -> f.node().getLength()));
         List<Candidate> candidates = new ArrayList<>();
@@ -240,7 +248,8 @@ public final class Rewrite {
             }
             Rule rule = byKey.get(each.key());
             candidates.add(rule == null ? left(site, null, node, unruled.get(each.key()), methodStart(node))
-                    : candidate(site, node, rule, source, candidates));
+                    : candidate(site, node, rule, source, candidates,
+                            bodies.computeIfAbsent(rule, r -> Template.body(r.body(), r.statement()))));
         }
         candidates.sort(Comparator.comparingInt(Candidate::start));
         return new FilePlan(file, source, List.copyOf(candidates), List.copyOf(imports), importRanges, holdsRules,
@@ -254,7 +263,7 @@ public final class Rewrite {
     }
 
     private static Candidate candidate(Sites.Site site, ASTNode node, Rule rule, String source,
-                                       List<Candidate> inner) {
+                                       List<Candidate> inner, Optional<Template.Body> body) {
         int methodStart = methodStart(node);
         int start = node.getStartPosition();
         int end = start + node.getLength();
@@ -274,8 +283,7 @@ public final class Rewrite {
                         methodStart);
             }
             case CASE -> {
-                Expression body = SourceParser.expression(JavaLevel.LATEST, rule.body());
-                if (!(body instanceof Name constant)) {
+                if (body.isEmpty() || !(body.get().root() instanceof Name constant)) {
                     return left(site, rule, node, "a case label takes a constant, and " + name
                             + " returns something else", methodStart);
                 }
@@ -289,13 +297,13 @@ public final class Rewrite {
                             methodStart);
                 }
                 if (rule.self()) {
-                    ASTNode receiver = switch (node) {
+                    Expression receiver = switch (node) {
                         case QualifiedName qualified -> qualified.getQualifier();
                         case FieldAccess access -> access.getExpression();
                         default -> null;
                     };
-                    parts.put(rule.params().getFirst(), receiver == null ? new Template.Part("this", true)
-                            : Template.Part.of(receiver, textOf(receiver, source, inner)));
+                    parts.put(rule.params().getFirst(), receiver == null ? Template.Part.THIS
+                            : part(receiver, source, inner));
                 }
             }
             case CREATION -> {
@@ -317,8 +325,8 @@ public final class Rewrite {
                 }
                 if (rule.self()) {
                     Expression receiver = call.getExpression();
-                    parts.put(rule.params().getFirst(), receiver == null ? new Template.Part("this", true)
-                            : Template.Part.of(receiver, textOf(receiver, source, inner)));
+                    parts.put(rule.params().getFirst(), receiver == null ? Template.Part.THIS
+                            : part(receiver, source, inner));
                 }
                 arguments = call.arguments();
                 if (rule.statement()) {
@@ -347,20 +355,31 @@ public final class Rewrite {
                     + names.size(), methodStart);
         }
         for (int i = 0; i < arguments.size(); i++) {
-            ASTNode argument = (ASTNode) arguments.get(i);
-            parts.put(names.get(i), Template.Part.of(argument, textOf(argument, source, inner)));
+            parts.put(names.get(i), part((Expression) arguments.get(i), source, inner));
         }
-        Optional<String> filled = Template.filled(rule.body(), rule.statement(), parts);
+        if (body.isEmpty()) {
+            return left(site, rule, node, name + "'s body is not one Java " + (rule.statement() ? "statement"
+                    : "expression"), methodStart);
+        }
+        Optional<Template.Filled> filled;
+        try {
+            filled = Template.filled(body.get(), parts);
+        } catch (AstRewriteHelper.RewriteFailed failed) {
+            return left(site, rule, node, name + "'s body could not be filled in: " + failed.getMessage(),
+                    methodStart);
+        }
         if (filled.isEmpty()) {
             return left(site, rule, node, name + "'s body could not be filled in: it declares a name one of its"
                     + " parameters has", methodStart);
         }
-        String text = filled.get();
-        if (!rule.statement() && !Template.bare(node)) {
-            Expression result = SourceParser.expression(JavaLevel.LATEST, text);
-            if (result == null || !Template.primary(result)) text = "(" + text + ")";
+        // The rewrite writes a part's line breaks as the body's text has them, and it has the machine's: the file's.
+        String text = filled.get().text().replaceAll("\\R", source.contains("\r\n") ? "\r\n" : "\n");
+        Expression shape = filled.get().shape();
+        if (!rule.statement() && Precedence.needsParentheses(shape, node)) {
+            text = "(" + text + ")";
+            shape = null;
         }
-        return new Candidate(site, rule, start, end, text, null, methodStart);
+        return new Candidate(site, rule, start, end, text, null, methodStart, shape);
     }
 
     private static Candidate left(Sites.Site site, Rule rule, ASTNode node, String why, int methodStart) {
@@ -377,26 +396,40 @@ public final class Rewrite {
         String original = each.ok() && !failed.containsKey(each) ? each.text()
                 : file.source().substring(each.start(), each.end());
         if (original.isEmpty()) return false;
+        // Compared without white space: a body laid out over lines moves a part's later lines.
+        String sought = unspaced(original);
         for (Candidate outer : file.candidates()) {
-            if (outer.ok() && !failed.containsKey(outer) && outer.contains(each) && !outer.text().contains(original)) {
+            if (outer.ok() && !failed.containsKey(outer) && outer.contains(each)
+                    && !unspaced(outer.text()).contains(sought)) {
                 return true;
             }
         }
         return false;
     }
 
-    /** {@code node}'s text with each use inside it already planned put in its place. */
-    private static String textOf(ASTNode node, String source, List<Candidate> inner) {
+    private static String unspaced(String text) {
+        return text.replaceAll("\\s+", "");
+    }
+
+    /**
+     * {@code node} as a part: its text with each use inside it already planned put in its place, binding as the
+     * use it wholly is became binds, else as {@code node} does.
+     */
+    private static Template.Part part(Expression node, String source, List<Candidate> inner) {
         int from = node.getStartPosition();
         int to = from + node.getLength();
         List<Candidate> inside = new ArrayList<>();
         for (Candidate each : inner) {
             if (each.ok() && each.start() >= from && each.end() <= to) inside.add(each);
         }
+        List<Candidate> outermost = top(inside);
         StringBuilder out = new StringBuilder(source.substring(from, to));
-        top(inside).stream().sorted(Comparator.comparingInt(Candidate::start).reversed())
+        outermost.stream().sorted(Comparator.comparingInt(Candidate::start).reversed())
                 .forEach(each -> out.replace(each.start() - from, each.end() - from, each.text()));
-        return out.toString();
+        for (Candidate each : outermost) {
+            if (each.start() == from && each.end() == to) return new Template.Part(out.toString(), each.shape());
+        }
+        return Template.Part.of(node, out.toString());
     }
 
     /** The candidates no other one of them contains. */

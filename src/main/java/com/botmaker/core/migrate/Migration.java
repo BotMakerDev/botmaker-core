@@ -5,10 +5,16 @@ import com.botmaker.java.edit.helpers.AstRewriteHelper;
 import com.botmaker.java.grammar.BotAnnotation;
 import com.botmaker.java.index.BotIndex;
 import com.botmaker.java.parse.BotParser;
+import com.botmaker.java.parse.JavaLevel;
+import org.eclipse.jdt.core.dom.AST;
+import org.eclipse.jdt.core.dom.ASTNode;
 import org.eclipse.jdt.core.dom.ASTVisitor;
 import org.eclipse.jdt.core.dom.Annotation;
+import org.eclipse.jdt.core.dom.Block;
 import org.eclipse.jdt.core.dom.CompilationUnit;
+import org.eclipse.jdt.core.dom.Expression;
 import org.eclipse.jdt.core.dom.MethodDeclaration;
+import org.eclipse.jdt.core.dom.ReturnStatement;
 import org.eclipse.jdt.core.dom.TypeDeclaration;
 import org.eclipse.jdt.core.dom.rewrite.ASTRewrite;
 
@@ -302,22 +308,36 @@ public final class Migration {
         if (method == null || method.getBody() == null) {
             return new Refactor.Refused(rule.qualified() + " has changed since it was read. Try again.");
         }
-        ASTRewrite rewrite = ASTRewrite.create(unit.getAST());
-        String statement = rule.statement() ? text + ";" : "return " + text + ";";
-        // The rewrite indents each line after the first to the method's own level.
-        rewrite.replace(method.getBody(), rewrite.createStringPlaceholder("{\n    " + statement + "\n}",
-                method.getBody().getNodeType()), null);
+        // The tail ; was cut above: a call needs it back, and a statement ending in a block must stay without it.
+        Optional<Template.Body> read = Template.body(rule.statement() ? text + ";" : text, rule.statement());
+        if (read.isEmpty() && rule.statement()) read = Template.body(text, true);
+        if (read.isEmpty()) {
+            return new Refactor.Refused("That body is not one Java " + (rule.statement() ? "statement" : "expression")
+                    + ": write what each use becomes, as " + (rule.statement() ? "a call." : "a value."));
+        }
+        AST ast = unit.getAST();
+        ASTNode written = JavaLevel.copy(ast, read.get().root());
+        Block block = ast.newBlock();
+        if (rule.statement()) {
+            block.statements().add(written);
+        } else {
+            ReturnStatement returned = ast.newReturnStatement();
+            returned.setExpression((Expression) written);
+            block.statements().add(returned);
+        }
+        ASTRewrite rewrite = ASTRewrite.create(ast);
+        rewrite.replace(method.getBody(), block, null);
         for (Object each : method.modifiers()) {
             if (each instanceof Annotation mark
                     && BotAnnotation.REFACTOR.on(List.of(mark)) != null) {
                 rewrite.remove(mark, null);
             }
         }
-        String written = AstRewriteHelper.applyRewrite(rewrite, source);
+        String after = AstRewriteHelper.applyRewrite(rewrite, source);
         if (imports != null && !imports.isEmpty()) {
-            written = Rewrite.imported(written, new LinkedHashSet<>(imports), Set.of());
+            after = Rewrite.imported(after, new LinkedHashSet<>(imports), Set.of());
         }
         return Refactor.checked(now, new Refactor.Planned("Wrote " + rule.qualified() + ": each use becomes "
-                + text, Map.of(rule.file(), written)), "That body");
+                + text, Map.of(rule.file(), after)), "That body");
     }
 }
