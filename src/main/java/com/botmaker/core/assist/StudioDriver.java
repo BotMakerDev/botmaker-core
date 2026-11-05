@@ -4,9 +4,7 @@ import com.botmaker.plugin.api.assist.AgentContext;
 import com.botmaker.plugin.api.assist.AssistantTool;
 import com.botmaker.plugin.api.overlay.Area;
 import com.botmaker.core.project.ClassKind;
-import com.botmaker.core.run.RunEntries;
 
-import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -22,7 +20,7 @@ import java.util.Optional;
  * <p>Each action answers a sentence saying what it did, or throws {@link IllegalArgumentException} with the
  * sentence saying why not and what to do instead; {@link McpTools} sends that back as a refusal.
  */
-public interface StudioDriver {
+public interface StudioDriver extends BotRuns {
 
     /**
      * Where blocks go: a method a plugin's target type found in the bot ({@code OverlayPart.targets}).
@@ -37,11 +35,6 @@ public interface StudioDriver {
 
     /** How a bot built on a plugin is laid out, in the plugin's own words ({@code StudioPlugin.assistantGuide}). */
     record PluginGuide(String pluginName, String text) {}
-
-    /** The open project's folder; empty with none open. */
-    default Optional<Path> projectDir() {
-        return Optional.empty();
-    }
 
     /** After a plugin's tool changed the project's folder: the explorer lists what is there now. */
     default void projectFilesChanged() {
@@ -64,12 +57,6 @@ public interface StudioDriver {
     /** Boxes {@code area}, in the bot's pixels, on the game, captioned {@code label}. */
     String showArea(Area area, String label);
 
-    /** ▶ Run the bot, as the toolbar does. */
-    String runBot();
-
-    /** ▶ Run {@code entry}, a plugin's declared run, instead of the bot's {@code main}, as its toolbar button does. */
-    String runEntry(RunEntries.Declared entry);
-
     /** ▶ Run {@code key}'s method on its own, through the plugin's trial entry. */
     String runActivity(String key);
 
@@ -79,9 +66,6 @@ public interface StudioDriver {
      * the Try dialog defaults it, and one that can be neither is refused, named.
      */
     String tryStatement(String file, String blockId, Map<String, String> values);
-
-    /** Stops the run, the try or the debug session. */
-    String stop();
 
     /** Closes Studio as its window's close button does, once this answer is sent. */
     default String quit() {

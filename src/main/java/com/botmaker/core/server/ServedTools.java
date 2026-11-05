@@ -26,9 +26,9 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * The tools the core's MCP serves (plan phase 10d): its own, over the open project's files, while a project is open
- * and a client with a screen serves (until phase 11), and each attached client's, registered over its channel ({@link Request.Tools}) and forwarded to it call by call
- * ({@link Reply.Call}). Studio's screen, runs and plugin windows are Studio's tools, so they come and go with Studio; the
+ * The tools the core's MCP serves (plan phase 10d): its own, over the open project's files while a project is open,
+ * each attached client's, registered over its channel ({@link Request.Tools}) and forwarded to it call by call
+ * ({@link Reply.Call}), and last its home and run tools, which a client's of the same name shadow (phase 11). Studio's screen, runs and plugin windows are Studio's tools, so they come and go with Studio; the
  * bot's Java is the core's.
  *
  * <p>A call of the core's own tool is first admitted by the client with a screen ({@link Request.Tools#admits}): a
@@ -49,6 +49,8 @@ public final class ServedTools {
     /** The client the core's own tools ask first, the last one that said it admits. */
     private volatile Channel admitting;
     private List<SyncToolSpecification> own = List.of();
+    /** The core's home and run tools, served after every client's, so a client's of the same name wins. */
+    private List<SyncToolSpecification> fallback = List.of();
     /** Every tool served now by name, so a change removes and adds exactly what changed. */
     private final Map<String, SyncToolSpecification> served = new LinkedHashMap<>();
     private McpSyncServer mcp;
@@ -66,6 +68,12 @@ public final class ServedTools {
     /** The core's own tools over {@code bot}, the open project's; none when {@code bot} is null (no project open). */
     synchronized void own(LiveBot bot) {
         own = bot == null ? List.of() : McpTools.own(json, bot).stream().map(this::admitted).toList();
+        refresh();
+    }
+
+    /** The core's own home and run tools ({@code CoreHome}), served after every client's. */
+    synchronized void fallback(List<SyncToolSpecification> tools) {
+        fallback = List.copyOf(tools);
         refresh();
     }
 
@@ -167,14 +175,18 @@ public final class ServedTools {
 
     /**
      * What is served made what is registered now; a name taken by an earlier tool keeps the first. The core's own are
-     * served only while a client with a screen admits them: a Studio that stopped serving stops them too. Only what
-     * changed is removed and added, so a call of a tool that stays never finds it gone. Under this.
+     * served with no client registered (plan phase 11, the MCP without Studio) or while a client with a screen admits
+     * them: a Studio that stopped serving stops them too. Only what changed is removed and added, so a call of a tool
+     * that stays never finds it gone. Under this.
      */
     private void refresh() {
         if (mcp == null) return;
         Map<String, SyncToolSpecification> now = new LinkedHashMap<>();
-        if (admitting != null) own.forEach(tool -> now.putIfAbsent(tool.tool().name(), tool));
+        boolean ours = admitting != null || theirs.isEmpty();
+        if (ours) own.forEach(tool -> now.putIfAbsent(tool.tool().name(), tool));
         theirs.values().forEach(specs -> specs.forEach(now::putIfAbsent));
+        // The core's home and run tools stand in for a client's only while none is registered.
+        if (theirs.isEmpty()) fallback.forEach(tool -> now.putIfAbsent(tool.tool().name(), tool));
         try {
             for (Map.Entry<String, SyncToolSpecification> was : List.copyOf(served.entrySet())) {
                 if (now.get(was.getKey()) == was.getValue()) continue;

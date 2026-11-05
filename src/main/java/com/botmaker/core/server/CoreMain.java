@@ -81,7 +81,8 @@ public final class CoreMain {
         Projects projects = new Projects(libraries, tools);
         CoreServer server;
         try {
-            server = CoreServer.start(port, token, version, new CoreServer.Hooks(idle, () -> false,
+            // A bot kept running, or started through the MCP, keeps the core up with no client (plan phase 11).
+            server = CoreServer.start(port, token, version, new CoreServer.Hooks(idle, projects::busy,
                     projects::attach, () -> {
                         awaitQuietly(started);
                         self[0].close();

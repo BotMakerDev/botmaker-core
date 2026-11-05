@@ -181,7 +181,11 @@ public sealed interface Request {
     record Reload(long id) implements Request {
     }
 
-    /** Detaches the client from its project; the last client to leave closes it. */
-    record Close(long id) implements Request {
+    /**
+     * Detaches the client from its project; the last client to leave closes it. {@code keepRun}: the bot running now
+     * goes on, and the project stays open until it ends (plan phase 11, the user's "keep it running"); else the last
+     * client to leave ends it.
+     */
+    record Close(long id, boolean keepRun) implements Request {
     }
 }

@@ -90,6 +90,10 @@ per user.
   gives the pid, once there is a process, and a run's end clears it. A run's check (`RunCheck`) is still a client's: here
   it is `NONE`, javac judges. A run or a fit writes to disk and `sourcesWritten` has the owner read back; what changed
   beside the open file is told by name (`SourcesChanged`), never its text: a parameter's value stays off the channel.
+- Since phase 11 (2026-11-05) the MCP works with no client: `ServedTools` adds `CoreHome`'s tools (`list_projects`,
+  `open_project`, the run tools over `Projects`' own `RunLog`) after every client's, so Studio's shadow them. `Projects`
+  keeps a project open with no client while the MCP opened it or a kept run goes (`Request.Close(keepRun)`), and the
+  core stays up while one runs. `CoreLauncher` saves its start command as `core-command.json` for `botmaker mcp-bridge`.
 - Plugins load in both processes since phase 10c (2026-11-05). The core alone resolves the pom and tells
   `LibrariesResolved`, and Studio binds its copy to it. Each copy's writes are `PluginWrite`s that the core makes on the
   project's thread (`Request.PluginWriting`, `Request.Batch`). Studio's copy forwards over the channel

@@ -15,12 +15,14 @@ import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -38,6 +40,8 @@ public final class CoreLauncher {
     public static final String START_LOCK = "core.lock";
     /** The MCP's own config, whose token guards the core too. */
     public static final String TOKEN_FILE = "mcp.json";
+    /** The last core command a Studio ran, which the MCP bridge runs when no core answers ({@link #remember}). */
+    public static final String COMMAND_FILE = "core-command.json";
 
     /** How long a start waits for the core it started, or an old core it asked to quit. */
     public static final Duration WAIT = Duration.ofSeconds(30);
@@ -114,7 +118,9 @@ public final class CoreLauncher {
 
             @Override
             public void start(Path dir) throws IOException {
-                ProcessBuilder builder = new ProcessBuilder(command(dir));
+                List<String> command = command(dir);
+                remember(dir, command);
+                ProcessBuilder builder = new ProcessBuilder(command);
                 builder.redirectErrorStream(true);
                 builder.redirectOutput(ProcessBuilder.Redirect.appendTo(dir.resolve("core.log").toFile()));
                 builder.redirectInput(ProcessBuilder.Redirect.from(nullFile()));
@@ -127,6 +133,22 @@ public final class CoreLauncher {
                 return process != null && !process.isAlive();
             }
         };
+    }
+
+    /**
+     * Saves {@code command} as {@link #COMMAND_FILE} in {@code dir}, {@code {"command": [...]}}: how {@code botmaker
+     * mcp-bridge}, which cannot link the core, starts one with no Studio running (plan phase 11). A Studio that cannot
+     * write it still starts its core.
+     */
+    static void remember(Path dir, List<String> command) {
+        try {
+            Path file = dir.resolve(COMMAND_FILE);
+            Path written = Files.createTempFile(dir, COMMAND_FILE, ".tmp");
+            JSON.writeValue(written.toFile(), Map.of("command", command));
+            Files.move(written, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        } catch (IOException e) {
+            System.err.println("How to start BotMaker's core was not saved for the MCP bridge: " + e.getMessage());
+        }
     }
 
     /** The core's command line: this Java, the native access the bot's capture needs, both paths, its cache dir. */

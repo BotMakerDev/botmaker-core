@@ -113,6 +113,16 @@ public final class HomeTools {
     }
 
     static String openProject(Shell shell, String path, boolean run) {
+        Path wanted = projectAt(path);
+        // A project made after the user agrees would switch the window away from this one.
+        String asked = shell.busy();
+        if (!asked.isEmpty()) throw new IllegalArgumentException(asked + " Wait for it: an answer after it says how it ended.");
+        shell.open(wanted, run);
+        return "Opening " + wanted.getFileName() + ". " + opening(run);
+    }
+
+    /** The project folder {@code path} names, absolute; refused, saying why, when it names none. */
+    static Path projectAt(String path) {
         Path dir;
         try {
             dir = Path.of(given(path).strip());
@@ -126,11 +136,7 @@ public final class HomeTools {
             throw new IllegalArgumentException(wanted + " has no " + ProjectManager.PROJECT_SHAPE
                     + ", so there is no project here to open.");
         }
-        // A project made after the user agrees would switch the window away from this one.
-        String asked = shell.busy();
-        if (!asked.isEmpty()) throw new IllegalArgumentException(asked + " Wait for it: an answer after it says how it ended.");
-        shell.open(wanted, run);
-        return "Opening " + wanted.getFileName() + ". " + opening(run);
+        return wanted;
     }
 
     private static String opening(boolean run) {

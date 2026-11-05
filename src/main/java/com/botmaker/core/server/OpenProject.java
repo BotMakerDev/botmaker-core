@@ -61,12 +61,14 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -186,6 +188,8 @@ public final class OpenProject implements AutoCloseable {
     private final Libraries libraries;
     private final ExecutorService owner;
     private final Set<Channel> clients = new CopyOnWriteArraySet<>();
+    /** Hears every event the clients hear, a client or none ({@link Projects}: the core's run log, a kept run's end). */
+    private volatile Consumer<CoreEvent> watcher = event -> { };
     /** Where what steers a run is done: never behind an ask the owner is busy with ({@link Request.Control}). */
     private final ExecutorService control;
     /** How many stops have arrived, counted as they arrive: see {@link #ask}. */
@@ -317,6 +321,30 @@ public final class OpenProject implements AutoCloseable {
         channel.send(CoreJson.write(new Reply.Told(new CoreEvent.LibrariesResolved(resolved.jars(),
                 resolved.problems()))));
         channel.send(CoreJson.write(new Reply.Told(new CoreEvent.Opened(state.openReport()))));
+        // A bot kept running, or started through the MCP, is this client's to see and stop too (plan phase 11).
+        // Before its process exists the run still compiles; RUNNING follows when it starts.
+        if (execution.isRunning()) {
+            OptionalLong pid = execution.runningBotPid();
+            CoreEvent.RunState.Phase phase = pid.isPresent() ? CoreEvent.RunState.Phase.RUNNING
+                    : CoreEvent.RunState.Phase.COMPILING;
+            channel.send(CoreJson.write(new Reply.Told(new CoreEvent.RunState(phase, ""))));
+            pid.ifPresent(id -> channel.send(CoreJson.write(new Reply.Told(new CoreEvent.RunProcess(id)))));
+        }
+    }
+
+    /** {@code watcher} hears every event from now on. */
+    void watch(Consumer<CoreEvent> watcher) {
+        this.watcher = watcher;
+    }
+
+    /** Whether a run is asked for and has not ended, its compile included. */
+    boolean running() {
+        return execution.isRunning();
+    }
+
+    /** Whether no client is attached. */
+    boolean unattended() {
+        return clients.isEmpty();
     }
 
     /**
@@ -850,6 +878,7 @@ public final class OpenProject implements AutoCloseable {
         String told = CoreJson.write(new Reply.Told(event));
         clients.forEach(channel -> channel.send(told));
         heardByPlugins(event);
+        watcher.accept(event);
     }
 
     /** What this process's plugins hear of the project: the history's state and a run's start, end, frames and lines. */

@@ -158,7 +158,12 @@ public final class CoreClient implements AutoCloseable {
 
     /** Detaches from the project; the channel stays open for another. */
     public EditResult leave() throws IOException {
-        return ask(new Request.Close(ids.incrementAndGet()), ANSWER_TIMEOUT);
+        return leave(false);
+    }
+
+    /** {@link #leave()}, the bot running now kept going when {@code keepRun} ({@link Request.Close}). */
+    public EditResult leave(boolean keepRun) throws IOException {
+        return ask(new Request.Close(ids.incrementAndGet(), keepRun), ANSWER_TIMEOUT);
     }
 
     public boolean isOpen() {

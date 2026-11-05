@@ -9,6 +9,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- The MCP without Studio (2026-11-05, plan phase 11). With no client attached the core serves `list_projects`,
+  `open_project` and the run tools (`run_bot`, `stop`, `run_state`, `read_trace`, `reports`) itself (`CoreHome`), beside
+  its edit tools. A project the MCP opened stays open until a client takes it. A run its client kept going on leaving
+  (`Request.Close(keepRun)`) keeps the project open, and the core up, until it ends; a client that opens the project
+  meanwhile hears `RunState(RUNNING)` and the pid. `CoreLauncher` saves the command it started a core with as
+  `core-command.json`, which `botmaker mcp-bridge` runs when no core answers.
 - Phase 10d (2026-11-05), one way in.
   - The core serves the MCP for every client. Its own edit tools run on the open project's thread (`OpenProject.bot()`).
     A client registers its tools over its channel (`Request.Tools`), and the core forwards each call (`Reply.Call`).
