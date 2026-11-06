@@ -117,6 +117,8 @@ class MigrateEngineTest {
                 public static int keep(int value) { return value; }
             }
             """;
+    private static final String MARK_OLD = "package lib; public @interface Mark {}";
+    private static final String TAG_NEW = "package lib; public @interface Tag {}";
     private static final String AREA_OLD = """
             package lib;
             public class Area {
@@ -208,9 +210,10 @@ class MigrateEngineTest {
     @BeforeAll
     static void jars() throws IOException {
         oldJar = jar("old", Map.of("Screen", SCREEN_OLD, "Run", RUN_OLD, "Finder", FINDER_OLD, "Rect", RECT_OLD,
-                "State", STATE_OLD, "Area", AREA_OLD, "Calc", CALC_OLD));
+                "State", STATE_OLD, "Area", AREA_OLD, "Calc", CALC_OLD,
+                "Mark", MARK_OLD));
         newJar = jar("new", Map.of("Screen", SCREEN_NEW, "Run", RUN_NEW, "Finder", FINDER_NEW, "Rect", RECT_NEW,
-                "State", STATE_NEW, "Calc", CALC_NEW));
+                "State", STATE_NEW, "Calc", CALC_NEW, "Tag", TAG_NEW));
     }
 
     @Test
@@ -328,6 +331,44 @@ class MigrateEngineTest {
         assertTrue(problems.get("popups3").contains("matches no method popups"), problems.toString());
         assertTrue(problems.get("nothing1").contains("matches no method nothing"), problems.toString());
         assertTrue(problems.get("area4").contains("@Migrate(name ="), problems.toString());
+    }
+
+    /** A type rule renames an annotation type where it marks a class. */
+    @Test
+    void aTypeRuleRenamesAnAnnotationOfAClass() throws IOException {
+        String source = """
+                package bot;
+
+                import lib.Mark;
+
+                @Mark
+                public class Bot {}
+                """;
+        String rules = """
+                package bot;
+
+                import com.botmaker.plugin.api.meta.Migrate;
+                import lib.Tag;
+
+                public class Migrations {
+                    @Migrate(name = "lib.Mark", kind = Migrate.Kind.TYPE)
+                    static Tag mark() { return null; }
+                }
+                """;
+        Bot bot = bot(source, rules);
+        Migration migration = Migration.of(bot.now(), bot.old());
+        migration.rules().forEach(rule -> assertNull(rule.problem(), rule.qualified() + " " + rule.problem()));
+
+        Rewrite.Result result = migration.plan(true);
+        Refactor.Planned plan = assertInstanceOf(Refactor.Planned.class, result.outcome(),
+                () -> result.outcome() + " left " + result.left());
+        assertTrue(result.left().isEmpty(), () -> "left " + result.left());
+        String text = plan.rewrites().get(bot.botFile());
+
+        assertTrue(text.contains("@Tag\n"), text);
+        assertTrue(text.contains("import lib.Tag;"), text);
+        assertTrue(!text.contains("lib.Mark"), text);
+        assertEquals(List.of(), bot.now().with(plan.rewrites()).errors().getOrDefault(bot.botFile(), List.of()), text);
     }
 
     @Test

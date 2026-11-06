@@ -201,6 +201,52 @@ class PluginRulesTest {
             }
             """;
 
+    /**
+     * A plugin renames an annotation it deprecates, with the new one beside it in the same release: every class it
+     * marks takes the new name and import, and the bot compiles (2026-11-06).
+     */
+    @Test
+    void aPluginsTypeRuleRenamesAnAnnotationItDeprecates() throws IOException {
+        Map<String, String> classes = Map.of(
+                "Old", "package lib; @Deprecated(forRemoval = true) public @interface Old {}",
+                "Fresh", "package lib; public @interface Fresh {}",
+                "Migrations", """
+                        package lib;
+
+                        import com.botmaker.plugin.api.meta.Migrate;
+
+                        final class Migrations {
+                            @Migrate(value = Old.class, kind = Migrate.Kind.TYPE)
+                            static Fresh old() {
+                                return null;
+                            }
+                        }
+                        """);
+        Path jar = plugin("annotation", classes);
+        Path sources = sources("annotation", classes);
+        BotIndex now = bot("""
+                package bot;
+
+                import lib.Old;
+
+                @Old
+                public class Bot {}
+                """, NO_RULES, jar);
+        Migration migration = Migration.of(now, now.classpath(),
+                new PluginRules((at, coordinate) -> Optional.ofNullable(at.equals(jar) ? sources : null)));
+        for (Rule rule : migration.rules()) assertNull(rule.problem(), rule.toString());
+
+        Rewrite.Result result = migration.plan(false);
+        Refactor.Planned planned = assertInstanceOf(Refactor.Planned.class, result.outcome(),
+                () -> result.outcome() + " left " + result.left());
+        assertTrue(result.left().isEmpty(), () -> "left " + result.left());
+        String bot = planned.rewrites().values().iterator().next();
+        assertTrue(bot.contains("@Fresh\n"), bot);
+        assertTrue(bot.contains("import lib.Fresh;"), bot);
+        assertFalse(bot.contains("lib.Old"), bot);
+        assertTrue(now.with(planned.rewrites()).errors().values().stream().allMatch(List::isEmpty), bot);
+    }
+
     /** A rule for an override is the override's, not ambiguous with the method it overrides (2026-11-01). */
     @Test
     void aRuleForAnOverrideTakesTheOwnersMethodNotTheOneItOverrides() throws IOException {
