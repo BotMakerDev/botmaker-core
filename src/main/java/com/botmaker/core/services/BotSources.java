@@ -10,12 +10,15 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.function.BiPredicate;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
@@ -129,10 +132,11 @@ public final class BotSources {
         Map<Path, ProjectFile> open = openBuffers(state);
         Set<Path> seen = new LinkedHashSet<>();
 
-        for (Path file : javaFiles(config)) {
+        for (Map.Entry<Path, String> onDisk : onDisk(config).entrySet()) {
+            Path file = onDisk.getKey();
             if (!seen.add(file)) continue;
             ProjectFile buffer = open.get(file);
-            String source = buffer != null ? buffer.getContent() : read(file);
+            String source = buffer != null ? buffer.getContent() : onDisk.getValue();
             if (source != null && matches.test(file, source)) return file;
         }
         for (Map.Entry<Path, ProjectFile> entry : open.entrySet()) {
@@ -206,6 +210,88 @@ public final class BotSources {
             if (file.getPath() != null) open.put(file.getPath().toAbsolutePath().normalize(), file);
         }
         return open;
+    }
+
+    /**
+     * The last read of a source root: each file's text by path (null when unreadable), in {@link #javaFiles} order,
+     * with the stamp of every file and every directory under the root it was read at.
+     */
+    private record Disk(Path root, Map<Path, String> files, Map<Path, String> stamps) {}
+
+    private static Disk disk;
+
+    /**
+     * Every {@code .java} file under the source root with its text on disk, the last read reused while nothing under
+     * the root changed (2026-11-09): a map of 68 screens asked for its 284 inputs one by one, and each answer walked
+     * and read the whole tree again, most of the half second it held the FX thread. A stat of each file and directory
+     * says whether anything did: a file written changes its own time or size, one added, removed or renamed its
+     * directory's time. Whoever wrote it, this process or another, the next walk sees it.
+     */
+    private static Map<Path, String> onDisk(ProjectConfig config) {
+        Path root = config.sourceRoot();
+        Disk last;
+        synchronized (BotSources.class) {
+            last = disk;
+        }
+        if (last != null && last.root().equals(root) && unchanged(last.stamps())) return last.files();
+        Map<Path, String> stamps = new LinkedHashMap<>();
+        // The root's own stamp, even when it is not there yet: a missing root is empty, never kept as unchanged.
+        if (root != null) stamps.put(root, stamp(root));
+        boolean whole = true;
+        if (root != null && Files.isDirectory(root)) {
+            try (Stream<Path> paths = Files.walk(root)) {
+                paths.filter(Files::isDirectory).forEach(dir -> stamps.put(dir, stamp(dir)));
+            } catch (IOException | UncheckedIOException unreadable) {
+                whole = false;   // a file gone mid-walk, as an editor's save does: answer this read, keep none
+            }
+        }
+        Map<Path, String> files = new LinkedHashMap<>();
+        List<Path> listed = javaFiles(config);
+        // javaFiles answers an empty list when its walk failed: an empty listing under a root that has directories
+        // to walk is read again next time rather than kept as a project with no files.
+        if (listed.isEmpty() && stamps.size() > 1) whole = false;
+        for (Path file : listed) {
+            stamps.put(file, stamp(file));
+            files.put(file, read(file));
+        }
+        Map<Path, String> read = Collections.unmodifiableMap(files);
+        // A file's time is as coarse as its file system's clock, a few milliseconds: one written again that soon at
+        // the same size would keep its stamp. A read that recent is not kept, as git does with a racy index entry.
+        boolean racy = stamps.keySet().stream().anyMatch(BotSources::recent);
+        synchronized (BotSources.class) {
+            disk = root == null || !whole || racy || stamps.containsValue("") ? null : new Disk(root, read, stamps);
+        }
+        return read;
+    }
+
+    /** How close to now a modification time is too close to trust: a write that soon may not have moved it. */
+    private static final long RACY_MILLIS = 100;
+
+    private static boolean recent(Path path) {
+        try {
+            return System.currentTimeMillis() - Files.getLastModifiedTime(path).toMillis() < RACY_MILLIS;
+        } catch (IOException | RuntimeException gone) {
+            return true;
+        }
+    }
+
+    /** Whether every path in {@code stamps} still has its stamp. */
+    private static boolean unchanged(Map<Path, String> stamps) {
+        for (Map.Entry<Path, String> each : stamps.entrySet()) {
+            if (!stamp(each.getKey()).equals(each.getValue())) return false;
+        }
+        return true;
+    }
+
+    /** {@code path}'s modification time to the nanosecond, size and file key; empty when it cannot be read. */
+    private static String stamp(Path path) {
+        try {
+            BasicFileAttributes attributes = Files.readAttributes(path, BasicFileAttributes.class);
+            return attributes.lastModifiedTime().to(TimeUnit.NANOSECONDS) + ":" + attributes.size() + ":"
+                    + attributes.fileKey();
+        } catch (IOException | RuntimeException gone) {
+            return "";
+        }
     }
 
     /** Every {@code .java} file under the project's source root, absolute and normalized. */

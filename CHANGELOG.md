@@ -29,6 +29,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- `BotSources`' read-only walks (`firstMatch`, `scan`, `index`) reuse their last read of the source tree while no file
+  or directory under it has changed, checked by one stat each (2026-11-09). A read made within 100 ms of a file's
+  modification time is not kept, since the file system's clock is coarse. Before, every value a plugin opened walked
+  and read the whole tree again.
 - `ProjectConfig` finds the entry's package, and whether a file holds `main`, through botmaker-java's `BotEntry`
   (2026-11-09). It no longer uses a regex prefilter of its own.
 - `StarterSources.blank` builds the blank bot's class as a tree and prints it through `SourceFormatter` (2026-11-09).
