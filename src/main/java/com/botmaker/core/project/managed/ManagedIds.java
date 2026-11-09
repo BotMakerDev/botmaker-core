@@ -21,7 +21,7 @@ import java.util.Optional;
 
 /**
  * Which of a plugin's values a declaration in the bot's source is marked as: a plugin's own
- * {@link ManagedMarker} annotation — {@code @SdkValue(SdkValue.Id.FLOW)}.
+ * {@link ManagedMarker} annotation — {@code @SdkValue(SdkValue.Id.SETTINGS)}.
  *
  * <p><b>The id is the contract's</b>, {@link ManagedValue#idOf}: the enum's binary name and the constant, so a
  * binding answers {@code getBinaryName()} — {@code SdkValue$Id}, never the qualified {@code SdkValue.Id}.
@@ -43,7 +43,7 @@ public final class ManagedIds {
      * A value's names, taken apart once: what a holder's annotation is written as, and what a source is
      * matched against.
      *
-     * @param id           {@link ManagedValue#id()}, {@code <the SDK's api.bot>.SdkValue$Id.FLOW}
+     * @param id           {@link ManagedValue#id()}, {@code <the SDK's api.bot>.SdkValue$Id.SETTINGS}
      * @param markerBinary the annotation's binary name, {@code <the SDK's api.bot>.SdkValue}
      * @param enumBinary   the enum's, {@code <the SDK's api.bot>.SdkValue$Id}
      * @param constant     {@code FLOW}
@@ -88,7 +88,7 @@ public final class ManagedIds {
     }
 
     /**
-     * The mark a bot writes for {@code id}, for a sentence: {@code @SdkValue(SdkValue.Id.FLOW)}, from the
+     * The mark a bot writes for {@code id}, for a sentence: {@code @SdkValue(SdkValue.Id.SETTINGS)}, from the
      * plugin in {@code known} that declares it, else from the id's own shape, else the id as it is.
      */
     public static String spelled(String id, Collection<ManagedValue<?>> known) {
@@ -174,7 +174,7 @@ public final class ManagedIds {
         return null;
     }
 
-    /** The constant a name ends in — {@code FLOW} of {@code SdkValue.Id.FLOW} — or null for anything else. */
+    /** The constant a name ends in — {@code SETTINGS} of {@code SdkValue.Id.SETTINGS} — or null for anything else. */
     private static String constantName(Expression value) {
         return switch (value) {
             case QualifiedName qualified -> qualified.getName().getIdentifier();

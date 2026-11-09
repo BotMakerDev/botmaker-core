@@ -20,7 +20,7 @@ import java.util.TreeSet;
 import java.util.function.BiPredicate;
 
 /**
- * The bound plugins' entry points ({@code @EntryPoint}, the SDK's {@code Bot.runFlow}): the call in {@code main}
+ * The bound plugins' entry points ({@code @EntryPoint}, the SDK's {@code Bot.run}): the call in {@code main}
  * that starts a bot. A project whose {@code main} calls none never starts one, and nothing said so until
  * 2026-10-12 — a new SDK bot's {@code main} only prints, and its entry point sat in a submenu.
  */
@@ -33,7 +33,7 @@ public final class EntryPoints {
      *
      * @param facade the class serving it
      * @param method its name
-     * @param label  what a user reads: the catalog's label ({@code Run activity flow}), else {@code Bot.runFlow}
+     * @param label  what a user reads: the catalog's label ({@code Run the bot's plan}), else {@code Bot.run}
      */
     public record Entry(FacadeEntry facade, String method, String label) {}
 

@@ -370,7 +370,7 @@ public class StatementFactory {
             Map<PluginCoordinate, List<ManagedValue<?>>> byPlugin = takesHolders ? pluginValues() : Map.of();
             List<HolderUnit> holders = takesHolders ? valuesHolders(ctx.sources(), byPlugin) : List.of();
             if (!holders.isEmpty()) {
-                // An entry point taking the bot's values classes — Bot.runFlow(Sdk.class) — is handed every
+                // An entry point taking the bot's values classes — Bot.run(Sdk.class) — is handed every
                 // plugin's holder of values, from which the plugin finds its parameters' group (2026-11-04: a
                 // parameter is a method of its group in params/, never a holder's field to pass).
                 Map<String, HolderFiles.Key> named = new HashMap<>();

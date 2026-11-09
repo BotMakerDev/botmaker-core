@@ -51,7 +51,7 @@ import java.util.List;
  * Parameters window's wherever its author put it, so being in another file does not make it editable. A
  * plugin says which ids it keeps in step through its own window ({@code StudioPlugin.managedValues}, read
  * from {@code PluginHost}), and this class matches a marked method or type
- * ({@code @SdkValue(SdkValue.Id.FLOW)}) against them without knowing what any of them are.
+ * ({@code @SdkValue(SdkValue.Id.SETTINGS)}) against them without knowing what any of them are.
  *
  * <p>The third is the only rule left that is about a <em>member</em>, and it is the narrowest thing that
  * works: <b>{@code main}'s signature is fixed and its body is the user's.</b> The signature is not a

@@ -30,7 +30,7 @@ import java.util.List;
  * @param grammar   the value grammar a slot's value is read and written with
  * @param constants the bot's managed constants, which a slot may be set to by name ({@code Pictures.ORE})
  * @param others    the bot's other files as they were when the session began, read only: an insert that names
- *                  another class of the bot ({@code Bot.runFlow(Sdk.class)}) looks for it among them
+ *                  another class of the bot ({@code Bot.run(Sdk.class)}) looks for it among them
  * @param level     the Java the bot is written in, which each staged step is parsed at
  */
 public record EditWorkspace(ProjectConfig config,

@@ -211,7 +211,7 @@ public final class EditSession {
                     return Outcome.Refused.because(call.scope() + "." + call.methodName()
                             + " starts the bot: it goes in main only.");
                 }
-                // An entry point is written as the statement menu writes it: Bot.runFlow(Sdk.class), each
+                // An entry point is written as the statement menu writes it: Bot.run(Sdk.class), each
                 // holder of the bot's values handed over, never a (Class) null no slot can take a class into.
                 BlockType entry = new BlockType.LibraryCall("SDK_" + call.scope() + "_" + call.methodName(),
                         call.methodName(), BlockCategory.INPUT, found.get().facade().type(), call.methodName(),

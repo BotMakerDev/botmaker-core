@@ -151,7 +151,7 @@ public final class TrialCaller {
 
     /**
      * The bot's classes holding managed values (a plugin's marker on a method) — the ones a run names,
-     * {@code Bot.runFlow(…, Sdk.class)} — read off the bindings, in name order.
+     * {@code Bot.run(…, Sdk.class)} — read off the bindings, in name order.
      */
     public static List<String> holders(BotIndex index) {
         return holders(index, ITypeBinding::getQualifiedName);

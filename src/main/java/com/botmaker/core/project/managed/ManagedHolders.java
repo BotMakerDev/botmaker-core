@@ -333,7 +333,7 @@ public final class ManagedHolders {
         return ManagedIds.Typed.of(value).markerSimple();
     }
 
-    /** {@code value}'s mark, {@code @SdkValue(SdkValue.Id.FLOW)}, its import added to {@code imports}. */
+    /** {@code value}'s mark, {@code @SdkValue(SdkValue.Id.SETTINGS)}, its import added to {@code imports}. */
     private static SingleMemberAnnotation mark(AST ast, ManagedValue<?> value, Set<String> imports) {
         SingleMemberAnnotation annotation = ast.newSingleMemberAnnotation();
         ManagedIds.Typed id = ManagedIds.Typed.of(value);
@@ -687,9 +687,9 @@ public final class ManagedHolders {
         return drift;
     }
 
-    /** The member a value is written as: its id constant camel-cased, {@code FLOW_LAYOUT} as {@code flowLayout}. */
+    /** The member a value is written as: its id constant camel-cased, {@code LAUNCH_TARGETS} as {@code launchTargets}. */
     public static String memberName(ManagedValue<?> value) {
-        // FLOW_LAYOUT as flow-layout: no identifier, so methodName camel-cases it rather than keeping it.
+        // LAUNCH_TARGETS as launch-targets: no identifier, so methodName camel-cases it rather than keeping it.
         return methodName(ManagedIds.Typed.of(value).constant().toLowerCase(Locale.ROOT).replace('_', '-'));
     }
 
