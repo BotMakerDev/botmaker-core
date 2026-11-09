@@ -9,6 +9,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- The run's trace rewrites the classes a reload compiles beside the bot's class folder too
+  (`target/botmaker-explore/gen-<n>`, `TracePlan.isBotClass`, 2026-11-09), so a bot reloaded by a run exploring on
+  its own keeps its call trace.
 - `LockResolver` locks a whole class that carries an annotation marked `@Param.WrittenByRun` (the SDK's `@Facts`), with
   the reason "Facts are written by the run." (`RunWritten`, 2026-11-09), and the file declaring one is
   `Managed.FACTS`, badge `Facts - Read Only`. The annotation is read by its binding, or resolved through the unit's

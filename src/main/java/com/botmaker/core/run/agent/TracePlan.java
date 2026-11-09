@@ -47,11 +47,20 @@ public record TracePlan(Set<Path> botClasses, Set<String> traced, Set<String> hi
                 && !hidden.contains(className + "#" + method);
     }
 
-    /** Whether a class from {@code location} is the bot's own, so its calls are rewritten. */
+    /**
+     * Where a run exploring on its own compiles the bot again, beside its class folder ({@code target/classes}):
+     * the SDK's {@code Generation.FOLDER}, one {@code gen-<n>} folder a reload.
+     */
+    static final String GENERATIONS = "botmaker-explore";
+
+    /** Whether a class from {@code location} is the bot's own, or a reload's of it, so its calls are rewritten. */
     public boolean isBotClass(URL location) {
         if (location == null) return false;
         try {
-            return botClasses.contains(Path.of(location.toURI()).toAbsolutePath().normalize());
+            Path from = Path.of(location.toURI()).toAbsolutePath().normalize();
+            return botClasses.contains(from) || from.getParent() != null && botClasses.stream()
+                    .anyMatch(folder -> folder.getParent() != null
+                            && from.getParent().equals(folder.getParent().resolve(GENERATIONS)));
         } catch (URISyntaxException | IllegalArgumentException | java.nio.file.FileSystemNotFoundException e) {
             return false;
         }
