@@ -18,6 +18,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   refuses with a sentence when it cannot. The write is one step of the core's history. The open file's new text comes
   as `MethodsChanged`, and another file comes as `SourcesChanged`. `CoreClient.restore` sends it.
 - `ManagedMigrations.anyMethod(BotIndex)` says whether any method is annotated `@Migrate`, read from the trees.
+- `PluginUpgradeService.rebuiltRepair()` plans the repair a rebuilt dev plugin needs under the same `-SNAPSHOT`
+  (2026-11-09): gone ids removed, values that no longer compile reset and marked `@Refactor`. It returns a `Rebuilt`
+  with the plan and what could not be checked. `applyRepair` writes it, and `pinnedJar` resolves the pinned jar.
+- `ManagedRepairs` retypes a marked method whose return type no longer resolves to the type the plugin declares now:
+  a type that moved package (the SDK's `Run`, `api.flow` → `api.bot`). It writes the simple name and re-points the
+  import, or the whole name when the file imports another type of that name. A generic type is not retyped. An
+  unresolved import that only a removed value used goes with it, and the repair says so. An unused import the author
+  left stays.
 
 ### Changed
 

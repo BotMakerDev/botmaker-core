@@ -14,10 +14,18 @@ import com.botmaker.java.grammar.JavaValue;
 import com.botmaker.java.grammar.SourceFormatter;
 import com.botmaker.java.grammar.ValueGrammar;
 import com.botmaker.java.grammar.BotAnnotation;
+import com.botmaker.java.edit.ImportManager;
 import com.botmaker.java.index.BotIndex;
 import com.botmaker.java.parse.BotParser;
 import org.eclipse.jdt.core.dom.AST;
 import org.eclipse.jdt.core.dom.ASTNode;
+import org.eclipse.jdt.core.dom.ASTVisitor;
+import org.eclipse.jdt.core.dom.IBinding;
+import org.eclipse.jdt.core.dom.ImportDeclaration;
+import org.eclipse.jdt.core.dom.QualifiedName;
+import org.eclipse.jdt.core.dom.QualifiedType;
+import org.eclipse.jdt.core.dom.SimpleName;
+import org.eclipse.jdt.core.dom.SimpleType;
 import org.eclipse.jdt.core.dom.AbstractTypeDeclaration;
 import org.eclipse.jdt.core.dom.Annotation;
 import org.eclipse.jdt.core.dom.Block;
@@ -213,6 +221,25 @@ public final class ManagedRepairs {
                     continue;
                 }
             }
+            // A value whose type no longer resolves, while the plugin still declares it: the type moved package. By its
+            // simple name and import first; by its whole name when another import of that name is the file's own.
+            for (boolean whole : new boolean[] {false, true}) {
+                Optional<String> retyped = value == null ? Optional.empty()
+                        : retyped(sources.get(mark.file()), mark, value, whole);
+                if (retyped.isEmpty()) break;
+                Map<Path, String> tried = new LinkedHashMap<>(sources);
+                tried.put(mark.file(), retyped.get());
+                BotIndex after = current.replacing(tried);
+                Mark again = marks(after, live, markers).stream().filter(first::same).findFirst().orElse(null);
+                if (again != null && fits(again, value) && current.firstNewError(after).isEmpty()) {
+                    sources = tried;
+                    current = after;
+                    mark = again;
+                    repaired.add(mark.qualified() + " (" + spelled + ") names a type that moved, so it names "
+                            + value.type().getCanonicalName() + " now.");
+                    break;
+                }
+            }
             if (value == null || !fits(mark, value)) {
                 if (!removable.test(mark)) continue;
                 String why = value == null ? "is no longer one of the plugin's values" : "is declared another way now";
@@ -254,8 +281,9 @@ public final class ManagedRepairs {
             String text = sources.get(mark.file());
             Optional<JavaValue> initial = method.initial() == null ? Optional.empty()
                     : grammar.spell(method.type(), method.initial());
-            String reset = initial.map(v -> JavaManagedEdits.setValue(text, mark.className(), mark.member(), v))
-                    .orElse(text);
+            String className = mark.className();
+            String member = mark.member();
+            String reset = initial.map(v -> JavaManagedEdits.setValue(text, className, member, v)).orElse(text);
             Map<Path, String> tried = new LinkedHashMap<>(sources);
             tried.put(mark.file(), reset);
             BotIndex after = current.replacing(tried);
@@ -274,9 +302,22 @@ public final class ManagedRepairs {
         }
 
         Map<Path, String> rewrites = new LinkedHashMap<>();
-        sources.forEach((file, text) -> {
-            if (!text.equals(index.sources().get(file))) rewrites.put(file, text);
-        });
+        for (Map.Entry<Path, String> each : sources.entrySet()) {
+            String before = index.sources().get(each.getKey());
+            if (each.getValue().equals(before)) continue;
+            // What a removed value alone used, and is gone from the plugin too, goes with it, and is said.
+            String text = each.getValue();
+            for (String dead : deadImports(current, each.getKey(), before)) {
+                CompilationUnit unit = BotParser.syntax(text);
+                ASTRewrite rewrite = ASTRewrite.create(unit.getAST());
+                ImportManager.removeImport(unit, rewrite, dead);
+                text = SourceFormatter.formatChanged(JavaLevel.of(rewrite.getAST()), text,
+                        AstRewriteHelper.applyRewrite(rewrite, text));
+                repaired.add(each.getKey().getFileName() + "'s import of " + dead + " named nothing that is left, so"
+                        + " it was removed.");
+            }
+            rewrites.put(each.getKey(), text);
+        }
         Set<Path> deleted = new LinkedHashSet<>(index.sources().keySet());
         deleted.removeAll(sources.keySet());
         return new Planned(rewrites, deleted, repaired, left);
@@ -334,6 +375,98 @@ public final class ManagedRepairs {
         }
         out.add(new Mark(id, kind, enumType, file, className, member, returns, declaration.getStartPosition(),
                 declaration.getLength()));
+    }
+
+    /**
+     * A marked method whose return type no longer resolves, retyped as the type the plugin declares its value with: a
+     * type the plugin moved to another package (2026-11-09: the SDK's {@code Run}, from {@code api.flow} to
+     * {@code api.bot}). By its simple name, an import of that name naming elsewhere going with it, or {@code whole}, by
+     * its whole name with the imports left as they are. Only a plain type is retyped: a type argument is the author's,
+     * and a generic value's raw name would drop it. Empty when the mark is no such method.
+     */
+    private static Optional<String> retyped(String source, Mark mark, ManagedValue<?> value, boolean whole) {
+        if (source == null || mark.kind() != Kind.METHOD || mark.returns() != null
+                || !(value instanceof ManagedMethod<?> || value instanceof ManagedParam<?>)) {
+            return Optional.empty();
+        }
+        Class<?> type = value.type();
+        if (type.isPrimitive() || type.isArray() || type.getTypeParameters().length > 0
+                || type.getCanonicalName() == null) {
+            return Optional.empty();
+        }
+        CompilationUnit unit = BotParser.syntax(source);
+        if (!(declaration(unit, mark) instanceof MethodDeclaration method)
+                || !(method.getReturnType2() instanceof SimpleType || method.getReturnType2() instanceof QualifiedType)) {
+            return Optional.empty();
+        }
+        AST ast = unit.getAST();
+        ASTRewrite rewrite = ASTRewrite.create(ast);
+        if (whole) {
+            rewrite.replace(method.getReturnType2(), ast.newSimpleType(ast.newName(type.getCanonicalName())), null);
+            return Optional.of(SourceFormatter.formatChanged(JavaLevel.of(rewrite.getAST()), source,
+                    AstRewriteHelper.applyRewrite(rewrite, source)));
+        }
+        rewrite.replace(method.getReturnType2(), ast.newSimpleType(ast.newSimpleName(type.getSimpleName())), null);
+        boolean imported = false;
+        for (Object each : unit.imports()) {
+            ImportDeclaration declared = (ImportDeclaration) each;
+            if (declared.isStatic() || declared.isOnDemand() || !(declared.getName() instanceof QualifiedName name)
+                    || !name.getName().getIdentifier().equals(type.getSimpleName())) {
+                continue;
+            }
+            if (name.getFullyQualifiedName().equals(type.getCanonicalName())) {
+                imported = true;
+            } else {
+                rewrite.getListRewrite(unit, CompilationUnit.IMPORTS_PROPERTY).remove(declared, null);
+            }
+        }
+        if (!imported) ImportManager.addImport(unit, rewrite, type.getCanonicalName());
+        return Optional.of(SourceFormatter.formatChanged(JavaLevel.of(rewrite.getAST()), source,
+                AstRewriteHelper.applyRewrite(rewrite, source)));
+    }
+
+    /**
+     * The single-type imports of {@code file} as {@code index} holds it now that resolve to nothing on its classpath and
+     * that only what this repair removed named: named in {@code before}, the file as it was, and nowhere now. An unused
+     * import the author left is theirs, resolved or not.
+     */
+    private static Set<String> deadImports(BotIndex index, Path file, String before) {
+        Set<String> namedBefore = before == null ? Set.of() : named(BotParser.syntax(before));
+        return index.read(units -> {
+            CompilationUnit unit = units.get(file);
+            Set<String> out = new LinkedHashSet<>();
+            if (unit == null) return out;
+            Set<String> named = named(unit);
+            for (Object each : unit.imports()) {
+                ImportDeclaration declared = (ImportDeclaration) each;
+                if (declared.isStatic() || declared.isOnDemand()) continue;
+                IBinding binding = declared.resolveBinding();
+                if (binding != null && !binding.isRecovered()) continue;
+                if (declared.getName() instanceof QualifiedName name) {
+                    String simple = name.getName().getIdentifier();
+                    if (namedBefore.contains(simple) && !named.contains(simple)) out.add(name.getFullyQualifiedName());
+                }
+            }
+            return out;
+        });
+    }
+
+    /** Every simple name {@code unit} spells outside its imports. */
+    private static Set<String> named(CompilationUnit unit) {
+        Set<String> named = new LinkedHashSet<>();
+        unit.accept(new ASTVisitor() {
+            @Override
+            public boolean visit(ImportDeclaration node) {
+                return false;
+            }
+
+            @Override
+            public boolean visit(SimpleName node) {
+                named.add(node.getIdentifier());
+                return true;
+            }
+        });
+        return named;
     }
 
     /** {@code method}'s return type by binary name, a primitive boxed; null when it does not resolve. */

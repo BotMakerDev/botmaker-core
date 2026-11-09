@@ -528,6 +528,11 @@ public final class PluginUpgradeService {
      * @param strand also what the move strands ({@link Report#stranded}): asked before the move, not during it
      */
     ValuesPlan values(Path newJar, String to, boolean strand) {
+        return values(newJar, to, strand, "Reset by the " + name() + " " + to + " upgrade: it no longer compiled.");
+    }
+
+    /** {@link #values(Path, String, boolean)}, a reset value marked for review with {@code reason}. */
+    private ValuesPlan values(Path newJar, String to, boolean strand, String reason) {
         Optional<StagedPlugin> opened = StagedPlugin.open(config.projectPath(), coordinate(), to, newJar);
         if (opened.isEmpty()) {
             if (!holdsOwnValues()) return ValuesPlan.NONE;
@@ -540,8 +545,7 @@ public final class PluginUpgradeService {
                         + " this bot's values in its files are left as written."), List.of());
             }
             BotIndex index = BotSources.index(config, state).against(staged.classpath());
-            String note = ReviewMarker.available(state)
-                    ? "Reset by the " + name() + " " + to + " upgrade: it no longer compiled." : null;
+            String note = ReviewMarker.available(state) ? reason : null;
             return new ValuesPlan(ManagedRepairs.plan(index, staged.declared(), staged.grammar(), note), List.of(),
                     strand ? stranded(staged.declared()) : List.of());
         } catch (RuntimeException | LinkageError e) {
@@ -608,6 +612,46 @@ public final class PluginUpgradeService {
         if (plan.planned() == null) return new Values(0, List.of(), plan.problems(), List.of());
         ManagedRepairs.Planned planned = plan.planned();
         if (planned.isEmpty()) return new Values(0, planned.repaired(), planned.left(), List.of());
+        write(planned.rewrites(), planned.deleted());
+        return new Values(planned.rewrites().size() + planned.deleted().size(), planned.repaired(), planned.left(),
+                List.copyOf(planned.deleted()));
+    }
+
+    /**
+     * The repair of this bot's values against the jar it pins as it is now: a dev build rebuilt under the same
+     * {@code -SNAPSHOT} (2026-11-09, the user's call), which no version change ever repairs. The same plan as an
+     * upgrade's — an id that is gone removed, a value that no longer compiles reset and marked — offered on Reload
+     * for the user to accept. <b>Blocking</b>: it resolves the jar and parses the bot.
+     */
+    public Rebuilt rebuiltRepair() {
+        String version = currentVersion();
+        Optional<Path> jar = pinnedJar();
+        if (jar.isEmpty()) {
+            return new Rebuilt(null, holdsOwnValues() ? List.of(name() + " " + version + " could not be resolved,"
+                    + " so this bot's values were not checked.") : List.of());
+        }
+        ValuesPlan plan = values(jar.get(), version, false,
+                "Reset after the " + name() + " " + version + " rebuild: it no longer compiled.");
+        return new Rebuilt(plan.planned() == null || plan.planned().isEmpty() ? null : plan.planned(), plan.problems());
+    }
+
+    /**
+     * What {@link #rebuiltRepair} found: the repair, null when nothing would change, and what could not be checked,
+     * which a caller says — a plugin whose values would not load looks otherwise like one whose values all fit.
+     */
+    public record Rebuilt(ManagedRepairs.Planned planned, List<String> problems) {
+        public Rebuilt {
+            problems = List.copyOf(problems);
+        }
+    }
+
+    /** The jar of the version the pom pins, resolved: what a dev build's rebuild changes in place. Blocking. */
+    public Optional<Path> pinnedJar() {
+        return resolve(currentVersion());
+    }
+
+    /** Writes {@code planned}, from {@link #rebuiltRepair} — buffers and disk, no snapshot (the caller took it). */
+    public Values applyRepair(ManagedRepairs.Planned planned) {
         write(planned.rewrites(), planned.deleted());
         return new Values(planned.rewrites().size() + planned.deleted().size(), planned.repaired(), planned.left(),
                 List.copyOf(planned.deleted()));

@@ -551,6 +551,76 @@ class ManagedRepairsTest {
                 .toAbsolutePath().normalize();
     }
 
+    /** A value the plugin declares as {@link TestOutcome}: the type the bot below names from a package it left. */
+    static final ManagedValue<TestOutcome> FAREWELL = ManagedValue.method(TestValue.Id.FAREWELL)
+            .in(TestValue.Holder.VALUES).holds(TestOutcome.class, TestOutcome.named("bye")).because("New.");
+
+    /** {@code farewell} names its type from the package it moved out of; {@code greeting}'s id is gone. */
+    private static final String MOVED = """
+            package %s.plugins.test;
+
+            import com.botmaker.core.project.managed.TestValue;
+            import com.botmaker.gone.Layout;
+            import com.botmaker.gone.TestOutcome;
+
+            public final class Values {
+                @TestValue(TestValue.Id.FAREWELL)
+                public static TestOutcome farewell() {
+                    return null;
+                }
+
+                @TestValue(TestValue.Id.GREETING_V1)
+                public static Layout greeting() {
+                    return null;
+                }
+
+                private Values() {}
+            }
+            """;
+
+    @Test
+    void aValueWhoseTypeMovedNamesItWhereItIsNow(@TempDir Path dir) {
+        ProjectConfig config = ProjectConfig.forDirectory(dir.resolve("bot"));
+        Path values = holder(config, "Values");
+        BotIndex index = index(config, Map.of(values, MOVED.formatted(config.mainPackage())));
+
+        ManagedRepairs.Planned plan = ManagedRepairs.plan(index, List.of(FAREWELL), GRAMMAR, NOTE);
+
+        String after = plan.rewrites().get(values);
+        assertTrue(after.contains("import com.botmaker.core.project.managed.TestOutcome;")
+                && !after.contains("com.botmaker.gone.TestOutcome"), "the import follows the type: " + after);
+        assertTrue(after.contains("public static TestOutcome farewell()"), after);
+        assertTrue(plan.repaired().stream().anyMatch(s -> s.contains("names a type that moved")), plan.repaired().toString());
+        assertTrue(index.replacing(Map.of(values, after)).errors().getOrDefault(values, List.of()).isEmpty(),
+                "it compiles: " + index.replacing(Map.of(values, after)).errors());
+    }
+
+    @Test
+    void anImportOnlyARemovedValueUsedGoesWithIt(@TempDir Path dir) {
+        ProjectConfig config = ProjectConfig.forDirectory(dir.resolve("bot"));
+        Path values = holder(config, "Values");
+        BotIndex index = index(config, Map.of(values, MOVED.formatted(config.mainPackage())));
+
+        String after = ManagedRepairs.plan(index, List.of(FAREWELL), GRAMMAR, NOTE).rewrites().get(values);
+
+        assertTrue(!after.contains("greeting()") && !after.contains("com.botmaker.gone.Layout"),
+                "the gone value and the import only it used are both gone: " + after);
+    }
+
+    @Test
+    void anUnusedImportTheAuthorLeftStays(@TempDir Path dir) {
+        ProjectConfig config = ProjectConfig.forDirectory(dir.resolve("bot"));
+        Path values = holder(config, "Values");
+        String source = MOVED.formatted(config.mainPackage())
+                .replace("import com.botmaker.gone.Layout;", "import com.botmaker.gone.Layout;\nimport com.elsewhere.Unused;");
+        BotIndex index = index(config, Map.of(values, source));
+
+        String after = ManagedRepairs.plan(index, List.of(FAREWELL), GRAMMAR, NOTE).rewrites().get(values);
+
+        assertTrue(after.contains("import com.elsewhere.Unused;") && !after.contains("com.botmaker.gone.Layout"),
+                "only what the removed value used goes; the author's own unused import stays: " + after);
+    }
+
     private static Path holder(ProjectConfig config, String className) {
         return config.mainPackageDir().resolve("plugins").resolve("test").resolve(className + ".java")
                 .toAbsolutePath().normalize();
