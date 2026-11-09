@@ -7,6 +7,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Removed
+
+- `SessionEnvironment.x11InstallCommand`: nothing installs an X11 session now (Studio's `WaylandNotice`, 2026-11-09).
+
 ### Added
 
 - `Request.Restore` is Review's Undo, asked of the core (2026-11-09). `parser.refactor.FunctionRestore` finds the
