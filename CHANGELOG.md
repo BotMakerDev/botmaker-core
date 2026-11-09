@@ -9,6 +9,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- `LockResolver` locks a whole class that carries an annotation marked `@Param.WrittenByRun` (the SDK's `@Facts`), with
+  the reason "Facts are written by the run." (`RunWritten`, 2026-11-09), and the file declaring one is
+  `Managed.FACTS`, badge `Facts - Read Only`. The annotation is read by its binding, or resolved through the unit's
+  imports and package (a single-type import shadowing the rest, a nested name tried with `$`) and loaded from the
+  plugins' loader; a file's verdict is kept until it changes.
 - A tool's refusal that shows an image (save_digits' cut boxes) is sent as a result whose text starts `REFUSED:`,
   not as an MCP error: Claude Code shows only an error's text, so the image never reached the assistant (2026-11-09).
 

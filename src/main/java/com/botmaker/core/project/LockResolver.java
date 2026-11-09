@@ -35,6 +35,7 @@ import java.util.List;
  * denied  &lt;- anything in the file the Parameters window owns, or a loaded plugin's file ({@link Managed})
  * denied  &lt;- a {@code @Param} field, wherever it is
  * denied  &lt;- a marked method's body, and all of a marked class or enum ({@link ManagedValue})
+ * denied  &lt;- all of a group only a run writes, the SDK's {@code @Facts} ({@link RunWritten})
  * allowed &lt;- otherwise, the BODY of {@code main} included
  * </pre>
  *
@@ -62,7 +63,8 @@ import java.util.List;
  * be edited. Nothing is "installed" there and no plugin is registered — {@code PopupGuard.enabled},
  * {@code Bot.start} and {@code FlowGraph.run} are ordinary static API methods a user calls or does not.</p>
  *
- * <p>Pure and cheap: no I/O, no state, constructed per call. A null {@code config} or {@code file} means "we
+ * <p>Cheap and constructed per call. Its one I/O is {@link RunWritten}'s: a file's top level is read once, and an
+ * annotation's class loaded once per plugin loader, then cached. A null {@code config} or {@code file} means "we
  * don't know what project this is" — used by tests and by editor paths with no project open — and permits
  * everything. A null <em>node</em>, by contrast, is a caller that forgot to say what it was editing, and is
  * always denied.
@@ -111,6 +113,9 @@ public record LockResolver(ProjectConfig config, Path file, boolean readerMode) 
                 "Parameters.java holds the bot's parameters. Change them in Project ▸ Parameters…",
                 "Parameters - Read Only");
 
+        /** A file declaring a group only a run writes, the SDK's {@code @Facts} ({@link RunWritten}). */
+        public static final Managed FACTS = new Managed(RunWritten.REASON, RunWritten.BADGE);
+
         static Managed of(PluginFiles.Holder holder) {
             return new Managed(holder.reason(), holder.badge());
         }
@@ -126,6 +131,7 @@ public record LockResolver(ProjectConfig config, Path file, boolean readerMode) 
         if (config == null || file == null) return null;
         Path normalized = file.toAbsolutePath().normalize();
         if (normalized.equals(config.parametersSourceFile().toAbsolutePath().normalize())) return Managed.PARAMETERS;
+        if (RunWritten.declaredIn(normalized, PluginHost.classLoader())) return Managed.FACTS;
         return PluginFiles.owner(normalized, holders).map(Managed::of).orElse(null);
     }
 
@@ -149,12 +155,17 @@ public record LockResolver(ProjectConfig config, Path file, boolean readerMode) 
 
     /** True when {@code node}'s member may be renamed/retyped/deleted, or its class-level structure changed. */
     public boolean signatureEditable(ASTNode node) {
-        return editable() && !isEntryPointMain(node) && managedReason(node, PluginHost.managedValues()) == null;
+        return editable() && !isEntryPointMain(node) && hostReason(node) == null;
     }
 
     /** True when statements inside {@code node}'s method may be changed — {@code main}'s included. */
     public boolean bodyEditable(ASTNode node) {
-        return editable() && managedReason(node, PluginHost.managedValues()) == null;
+        return editable() && hostReason(node) == null;
+    }
+
+    /** {@link #managedReason} against the bound plugins: their managed values and their loader. */
+    private static String hostReason(ASTNode node) {
+        return managedReason(node, PluginHost.managedValues(), PluginHost.classLoader());
     }
 
     /** Why the Parameters window, not the canvas, changes a {@code @Param} field. */
@@ -175,8 +186,19 @@ public record LockResolver(ProjectConfig config, Path file, boolean readerMode) 
      * it carries which of a plugin's values a method holds.
      */
     public static String managedReason(ASTNode node, List<ManagedValue<?>> managed) {
+        return managedReason(node, managed, null);
+    }
+
+    /**
+     * The same, a group only a run writes ({@link RunWritten}) locked whole too: {@code plugins} is where its
+     * annotation is loaded from when the unit has no bindings, {@code null} to read bindings alone.
+     */
+    public static String managedReason(ASTNode node, List<ManagedValue<?>> managed, ClassLoader plugins) {
         FieldDeclaration field = enclosing(node, FieldDeclaration.class);
         if (field != null && JavaParameterSource.paramAnnotation(field) != null) return PARAM_REASON;
+        for (ASTNode n = node; n != null; n = n.getParent()) {
+            if (n instanceof AbstractTypeDeclaration type && RunWritten.marks(type, plugins)) return RunWritten.REASON;
+        }
         if (managed.isEmpty()) return null;
         // The method's own annotation first: a marked method inside a class that is not annotated is one
         // value of many in an ordinary file, and only its body is the plugin's.
@@ -284,7 +306,7 @@ public record LockResolver(ProjectConfig config, Path file, boolean readerMode) 
         if (role().isReadOnly()) return Verdict.no(role().reason());
         Managed managed = managed();
         if (managed != null) return Verdict.no(managed.reason());
-        String reason = managedReason(node, PluginHost.managedValues());
+        String reason = hostReason(node);
         if (reason != null) return Verdict.no(reason);
         if (kind == EditKind.SIGNATURE && isEntryPointMain(node)) return Verdict.no(entryPointReason());
         return Verdict.ok();
