@@ -29,7 +29,7 @@
         <!-- The contract's, for compiling against its slot editors only. -->
         <javafx.version>27</javafx.version>
         <!-- Each upstream's main version; a release commit sets the released one (doc 43). -->
-        <botmaker.studioapi.version>0.14.2-SNAPSHOT</botmaker.studioapi.version>
+        <botmaker.studioapi.version>0.16.1-SNAPSHOT</botmaker.studioapi.version>
         <botmaker.java.version>0.1.0-SNAPSHOT</botmaker.java.version>
         <botmaker.pluginhost.version>0.10.2-SNAPSHOT</botmaker.pluginhost.version>
         <botmaker.runlog.version>0.1.0-SNAPSHOT</botmaker.runlog.version>
