@@ -17,6 +17,7 @@ import com.botmaker.plugin.api.source.ManagedValue;
 import com.botmaker.java.grammar.SourceFormatter;
 import com.botmaker.core.plugin.DuplicatePlugins;
 import com.botmaker.java.grammar.JavaValue;
+import com.botmaker.java.grammar.ParamsFitter;
 import com.botmaker.java.grammar.ValueGrammar;
 import com.botmaker.java.grammar.ValueTypes;
 import com.botmaker.core.project.ProjectConfig;
@@ -735,6 +736,19 @@ public final class ManagedHolders {
         Path group = artifact == null ? null : artifact.getParent();
         Path plugins = group == null ? null : group.getParent();
         return plugins != null && plugins.getFileName() != null && plugins.getFileName().toString().equals("plugins")
+                ? group.getFileName() + "." + artifact.getFileName() : null;
+    }
+
+    /**
+     * The {@link #segment} of {@code file} when it lies in {@code params/<group>/<artifact>/}, a plugin's parameter
+     * groups (2026-11-04), else null.
+     */
+    public static String groupSegmentOf(Path file) {
+        Path artifact = file == null ? null : file.getParent();
+        Path group = artifact == null ? null : artifact.getParent();
+        Path params = group == null ? null : group.getParent();
+        return params != null && params.getFileName() != null
+                && params.getFileName().toString().equals(ParamsFitter.PARAMS)
                 ? group.getFileName() + "." + artifact.getFileName() : null;
     }
 

@@ -1,5 +1,6 @@
 package com.botmaker.core.project;
 
+import com.botmaker.plugin.api.source.ManagedParam;
 import com.botmaker.plugin.api.source.ManagedValue;
 import com.botmaker.plugin.host.LoadedPlugin;
 import com.botmaker.plugin.host.PluginCoordinate;
@@ -60,6 +61,15 @@ public final class PluginFiles {
         /** A holder known by its folder only. */
         public Holder(PluginCoordinate plugin, String pluginName, String segment, String className) {
             this(plugin, pluginName, segment, className, List.of());
+        }
+
+        /**
+         * Whether this holder is a group of parameters only, whose file lies in {@code params/}, private, never in
+         * {@code plugins/} (2026-11-04).
+         */
+        public boolean parameterGroup() {
+            List<ManagedValue<?>> held = values.stream().filter(value -> className.equals(value.holder())).toList();
+            return !held.isEmpty() && held.stream().allMatch(ManagedParam.class::isInstance);
         }
 
         /** The status-line badge of a file this holder is. */

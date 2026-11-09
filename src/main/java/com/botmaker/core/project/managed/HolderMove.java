@@ -93,9 +93,19 @@ public final class HolderMove {
     public static boolean anyOutside(Map<Path, String> sources, List<PluginFiles.Holder> holders) {
         for (Map.Entry<Path, String> each : sources.entrySet()) {
             Optional<PluginFiles.Holder> owner = PluginFiles.owner(each.getKey(), each.getValue(), holders);
-            if (owner.isPresent() && !owner.get().segment().equals(ManagedHolders.segmentOf(each.getKey()))) return true;
+            if (owner.isPresent() && !inPlace(owner.get(), each.getKey())) return true;
         }
         return false;
+    }
+
+    /**
+     * Whether {@code file} of {@code holder} is where Studio writes it: anything in the plugin's own folder of
+     * {@code params/} stays there, private (2026-11-09: a parameter group moved to {@code plugins/} was committed
+     * with its values); a holder with values of its own is in place in its folder of {@code plugins/}.
+     */
+    static boolean inPlace(PluginFiles.Holder holder, Path file) {
+        if (holder.segment().equals(ManagedHolders.groupSegmentOf(file))) return true;
+        return !holder.parameterGroup() && holder.segment().equals(ManagedHolders.segmentOf(file));
     }
 
     /** The banner's line offering {@code plan}: how many files, from which folders and to which. */
@@ -117,11 +127,15 @@ public final class HolderMove {
         index.read(units -> {
             units.forEach((path, unit) -> PluginFiles.owner(path, index.sources().get(path), holders).ifPresent(holder -> {
                 // A holder in the default package stays: no import can name it from the folder it would go to.
-                if (holder.segment().equals(ManagedHolders.segmentOf(path)) || unit.getPackage() == null) return;
+                if (inPlace(holder, path) || unit.getPackage() == null) return;
                 String pkg = unit.getPackage().getName().getFullyQualifiedName();
-                String newPkg = config.mainPackage() + ".plugins." + holder.segment();
-                Path to = config.mainPackageDir().resolve("plugins").resolve(holder.segment().replace('.', '/'))
-                        .resolve(holder.className() + ".java").toAbsolutePath().normalize();
+                // A parameter group goes to params/, private; a holder of values to plugins/.
+                boolean group = holder.parameterGroup();
+                String newPkg = (group ? config.parametersPackage() : config.mainPackage() + ".plugins") + "."
+                        + holder.segment();
+                Path to = (group ? config.parametersPackageDir() : config.mainPackageDir().resolve("plugins"))
+                        .resolve(holder.segment().replace('.', '/')).resolve(holder.className() + ".java")
+                        .toAbsolutePath().normalize();
                 out.add(new Moved(path, to, qualified(pkg, holder.className()), newPkg + "." + holder.className()));
             }));
             return null;

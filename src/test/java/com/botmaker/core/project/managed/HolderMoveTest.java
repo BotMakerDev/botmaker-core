@@ -19,6 +19,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -143,5 +144,73 @@ class HolderMoveTest {
         String text = MARKED.replace("com.bot.plugins.sdk", "com.bot.plugins.com_github_botmakerdev.botmaker_sdk");
 
         assertEquals(Optional.empty(), HolderMove.plan(index(Map.of(at, text)), config(), HOLDERS));
+    }
+
+    /** The SDK's {@code Sdk} holder with a value and a parameter, and its parameter-only group {@code Values}. */
+    private static final List<ManagedValue<?>> WITH_PARAMS = List.of(DECLARED.getFirst(),
+            ManagedValue.param(TestValue.Id.DO_SETUP).in(TestValue.Holder.VALUES).startsAs(HolderMoveTest::setup)
+                    .shown("Setup", null).because("Mine."),
+            ManagedValue.param(TestValue.Id.PAUSE).in(TestValue.Holder.SDK).startsAs(HolderMoveTest::setup)
+                    .shown("Pause", null).because("Mine."));
+    private static final List<PluginFiles.Holder> WITH_GROUPS = List.of(
+            new PluginFiles.Holder(SDK, "SDK", "com_github_botmakerdev.botmaker_sdk", "Sdk", WITH_PARAMS),
+            new PluginFiles.Holder(SDK, "SDK", "com_github_botmakerdev.botmaker_sdk", "Values", WITH_PARAMS));
+
+    /** {@code class} in {@code pkg} with the one parameter method {@code id} marks. */
+    private static String group(String pkg, String className, String id, String method) {
+        return """
+                package %s;
+
+                import %s;
+
+                public class %s {
+
+                    @TestValue(TestValue.Id.%s)
+                    public boolean %s() {
+                        return true;
+                    }
+                }
+                """.formatted(pkg, TestValue.class.getCanonicalName(), className, id, method);
+    }
+
+    /** A parameter group lives in params/, private: moving it to plugins/ would commit its values (2026-11-09). */
+    @Test
+    void aParameterGroupInParamsIsNotMoved() {
+        Path at = java("params/com_github_botmakerdev/botmaker_sdk/Values.java");
+        String text = group("com.bot.params.com_github_botmakerdev.botmaker_sdk", "Values", "DO_SETUP", "doSetup");
+
+        assertTrue(WITH_GROUPS.get(1).parameterGroup());
+        assertFalse(WITH_GROUPS.get(0).parameterGroup(), "Sdk holds a value of its own");
+        assertFalse(HolderMove.anyOutside(Map.of(at, text), WITH_GROUPS));
+        assertEquals(Optional.empty(), HolderMove.plan(index(Map.of(at, text)), config(), WITH_GROUPS));
+    }
+
+    /** A holder of values and parameters has two files; the one in params/ stays there. */
+    @Test
+    void aMixedHoldersParametersStayInParams() {
+        Path at = java("params/com_github_botmakerdev/botmaker_sdk/Sdk.java");
+        String text = group("com.bot.params.com_github_botmakerdev.botmaker_sdk", "Sdk", "PAUSE", "pause");
+
+        assertFalse(HolderMove.anyOutside(Map.of(at, text), WITH_GROUPS));
+        assertEquals(Optional.empty(), HolderMove.plan(index(Map.of(at, text)), config(), WITH_GROUPS));
+    }
+
+    /** A parameter group found in plugins/, committed, is offered back to params/, never to plugins/. */
+    @Test
+    void aParameterGroupInPluginsGoesToParams() {
+        Path from = java("plugins/com_github_botmakerdev/botmaker_sdk/Values.java");
+        String text = group("com.bot.plugins.com_github_botmakerdev.botmaker_sdk", "Values", "DO_SETUP", "doSetup");
+
+        assertTrue(HolderMove.anyOutside(Map.of(from, text), WITH_GROUPS));
+        Refactor.Planned plan = assertInstanceOf(Refactor.Planned.class,
+                HolderMove.plan(index(Map.of(from, text)), config(), WITH_GROUPS).orElseThrow());
+
+        assertEquals(Map.of(from, java("params/com_github_botmakerdev/botmaker_sdk/Values.java")), plan.moves());
+        assertTrue(plan.rewrites().get(from).startsWith("package com.bot.params.com_github_botmakerdev.botmaker_sdk;"),
+                plan.rewrites().get(from));
+    }
+
+    private static boolean setup() {
+        return true;
     }
 }
