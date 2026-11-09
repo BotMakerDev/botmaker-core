@@ -9,6 +9,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- A statement dropped on the line after a comment (insert, paste, a host's statement, a move, a lifted value) goes
+  through the rewrite like any other (2026-11-09). It was the node's debug print, spliced in as text at the comment's
+  end, which ignored the formatter and could fail to parse. `CodeEditor`'s `PendingInsert` is gone.
+- Taking a plugin's mark off a value the bot still names removes the annotation with `ASTRewrite.remove`
+  (2026-11-09), not by cutting its characters out of the file (`ManagedRepairs.unmarked`).
+
 - A plugin's old parameter fields are repaired on every bind (2026-11-05, params-cleanup phase 1), not only on an
   upgrade. A field whose id the group in `params/` also marks is removed, or kept unmarked while the bot still names it.
   A field of what is now a method value (`launchTargets`) becomes that method. A dev-mode reload of the same

@@ -117,6 +117,8 @@ class ManagedRepairsTest {
         String kept = plan.rewrites().get(greetings);
         assertTrue(kept != null && !kept.contains("@TestValue") && kept.contains("return \"hello\";"),
                 "kept as the user's code, unmarked: " + kept);
+        assertTrue(kept.contains("public final class Greetings {\n    public static String greeting() {"),
+                "its line goes with it, no blank left: " + kept);
     }
 
     /** An enum where the plugin now declares a class of enums is declared another way: removed. */

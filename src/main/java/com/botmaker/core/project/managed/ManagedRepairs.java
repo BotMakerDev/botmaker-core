@@ -488,21 +488,21 @@ public final class ManagedRepairs {
 
     /** {@code sources} with {@code mark}'s annotation removed: the declaration is the user's code from then on. */
     private static Map<Path, String> unmarked(Map<Path, String> sources, BotIndex index, Mark mark) {
-        int[] span = index.read(units -> {
+        String text = sources.get(mark.file());
+        if (text == null) return sources;
+        String written = index.read(units -> {
             CompilationUnit unit = units.get(mark.file());
             BodyDeclaration found = unit == null ? null : declaration(unit, mark);
             Annotation annotation = found == null ? null : JavaManagedSource.managedAnnotation(found);
-            return annotation == null ? null : new int[] {annotation.getStartPosition(), annotation.getLength()};
+            if (annotation == null) return null;
+            ASTRewrite rewriter = ASTRewrite.create(unit.getAST());
+            rewriter.remove(annotation, null);
+            return SourceFormatter.formatChanged(JavaLevel.of(unit.getAST()), text,
+                    AstRewriteHelper.applyRewrite(rewriter, text));
         });
-        String text = sources.get(mark.file());
-        if (span == null || text == null) return sources;
-        int end = span[0] + span[1];
-        while (end < text.length() && (text.charAt(end) == ' ' || text.charAt(end) == '\t')) end++;
-        if (end < text.length() && text.charAt(end) == '\n') end++;
-        int start = span[0];
-        while (start > 0 && (text.charAt(start - 1) == ' ' || text.charAt(start - 1) == '\t')) start--;
+        if (written == null) return sources;
         Map<Path, String> out = new LinkedHashMap<>(sources);
-        out.put(mark.file(), text.substring(0, start) + text.substring(end));
+        out.put(mark.file(), written);
         return out;
     }
 

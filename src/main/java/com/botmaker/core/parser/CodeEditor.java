@@ -4,6 +4,7 @@ import com.botmaker.java.edit.ExpressionChoice;
 import com.botmaker.java.edit.helpers.CommentText;
 import com.botmaker.java.parse.JavaLevel;
 import com.botmaker.java.edit.BodyChildren;
+import com.botmaker.java.edit.BodyInserts;
 import com.botmaker.java.edit.BlockId;
 import com.botmaker.java.edit.EditContext;
 import com.botmaker.java.edit.ImportManager;
@@ -1157,13 +1158,7 @@ public class CodeEditor {
                     ast.newExpressionStatement((Expression) JavaLevel.copy(ast, source));
             vacateSlot(context, source);
             ListRewrite targetList = AstRewriteHelper.getListRewriteForBody(context.rewriter(), targetBody);
-            PendingInsert deferred =
-                    insertIntoList(targetList, targetBody, lifted, targetIndex, lifted.toString());
-            if (deferred != null) {
-                // The vacancy stays on the rewriter; the RangeMarker keeps the drop offset correct across it.
-                return AstRewriteHelper.applyRewriteAndInsertAt(
-                        context.rewriter(), code, deferred.offset(), deferred.text());
-            }
+            insertIntoList(targetList, targetBody, lifted, targetIndex, code);
             return AstRewriteHelper.applyRewrite(context.rewriter(), code);
         });
     }
@@ -1288,10 +1283,7 @@ public class CodeEditor {
             EditContext ctx = ctx(cu);
             Statement statement = StatementFactory.createEnumDeclaration(cu.getAST(), draft);
             ListRewrite listRewrite = AstRewriteHelper.getListRewriteForBody(ctx.rewriter(), targetBody);
-            PendingInsert deferred = insertIntoList(listRewrite, targetBody, statement, index, statement.toString());
-            if (deferred != null) {
-                return AstRewriteHelper.applyRewriteAndInsertAt(ctx.rewriter(), code, deferred.offset(), deferred.text());
-            }
+            insertIntoList(listRewrite, targetBody, statement, index, code);
             return AstRewriteHelper.applyRewrite(ctx.rewriter(), code);
         });
     }
@@ -1313,10 +1305,7 @@ public class CodeEditor {
             VariableDeclarationStatement statement = ast.newVariableDeclarationStatement(fragment);
             statement.setType(com.botmaker.core.parser.handlers.MethodHandler.typeNodeFor(ctx, type));
             ListRewrite listRewrite = AstRewriteHelper.getListRewriteForBody(ctx.rewriter(), targetBody);
-            PendingInsert deferred = insertIntoList(listRewrite, targetBody, statement, index, statement.toString());
-            if (deferred != null) {
-                return AstRewriteHelper.applyRewriteAndInsertAt(ctx.rewriter(), code, deferred.offset(), deferred.text());
-            }
+            insertIntoList(listRewrite, targetBody, statement, index, code);
             return AstRewriteHelper.applyRewrite(ctx.rewriter(), code);
         });
     }
@@ -1367,13 +1356,7 @@ public class CodeEditor {
             ASTRewrite rewriter = ctx.rewriter();
             Statement copied = (Statement) JavaLevel.copy(cu.getAST(), statement);
             ListRewrite listRewrite = AstRewriteHelper.getListRewriteForBody(rewriter, targetBody);
-            // A statement after a comment has no list slot and is inserted as text at an offset: laid out as
-            // the formatter would, never as JDT's unspaced print of a node it built.
-            PendingInsert deferred = insertIntoList(listRewrite, targetBody, copied, index,
-                    SourceFormatter.statement(JavaLevel.of(cu), statement.toString()));
-            if (deferred != null) {
-                return AstRewriteHelper.applyRewriteAndInsertAt(rewriter, code, deferred.offset(), deferred.text());
-            }
+            insertIntoList(listRewrite, targetBody, copied, index, code);
             return AstRewriteHelper.applyRewrite(rewriter, code);
         });
     }
@@ -1755,11 +1738,7 @@ public class CodeEditor {
         Statement newStatement = NodeCreator.createDefaultStatement(ctx, type, insertionContext(targetBody, index));
         if (newStatement == null) return originalCode;
         ListRewrite listRewrite = AstRewriteHelper.getListRewriteForBody(rewriter, targetBody);
-        PendingInsert deferred = insertIntoList(listRewrite, targetBody, newStatement, index, newStatement.toString());
-        if (deferred != null) {
-            // The rewriter still carries any imports the new statement needs; only the placement is textual.
-            return AstRewriteHelper.applyRewriteAndInsertAt(rewriter, originalCode, deferred.offset(), deferred.text());
-        }
+        insertIntoList(listRewrite, targetBody, newStatement, index, originalCode);
         return AstRewriteHelper.applyRewrite(rewriter, originalCode);
     }
 
@@ -1858,10 +1837,7 @@ public class CodeEditor {
         }
         Statement placeHolder = (Statement) rewriter.createStringPlaceholder(codeToPaste, ASTNode.EMPTY_STATEMENT);
         ListRewrite listRewrite = AstRewriteHelper.getListRewriteForBody(rewriter, targetBody);
-        PendingInsert deferred = insertIntoList(listRewrite, targetBody, placeHolder, index, codeToPaste);
-        if (deferred != null) {
-            return AstRewriteHelper.applyRewriteAndInsertAt(rewriter, originalCode, deferred.offset(), deferred.text());
-        }
+        insertIntoList(listRewrite, targetBody, placeHolder, index, originalCode);
         return AstRewriteHelper.applyRewrite(rewriter, originalCode);
     }
 
@@ -1877,12 +1853,7 @@ public class CodeEditor {
         ListRewrite targetListRewrite = AstRewriteHelper.getListRewriteForBody(rewriter, targetBody);
         Statement copiedStatement = (Statement) JavaLevel.copy(ast, statement);
         sourceListRewrite.remove(statement, null);
-        PendingInsert deferred =
-                insertIntoList(targetListRewrite, targetBody, copiedStatement, targetIndex, statement.toString());
-        if (deferred != null) {
-            // The removal stays on the rewriter; the RangeMarker keeps the drop offset correct across it.
-            return AstRewriteHelper.applyRewriteAndInsertAt(rewriter, originalCode, deferred.offset(), deferred.text());
-        }
+        insertIntoList(targetListRewrite, targetBody, copiedStatement, targetIndex, originalCode);
         return AstRewriteHelper.applyRewrite(rewriter, originalCode);
     }
 
@@ -2102,27 +2073,14 @@ public class CodeEditor {
     }
 
     /**
-     * Inserts {@code newStatement} at a body's child index, which counts the comments drawn in it.
-     *
-     * <p>Returns a {@link PendingInsert} when the insertion could <b>not</b> be expressed on the rewriter and
-     * has to be done as a raw text edit instead — see {@link BodyChildren#commentBefore}. In that case the caller must
-     * finish through {@link AstRewriteHelper#applyRewriteAndInsertAt} and {@code newStatement} is not added to
-     * the list. {@code null} means the rewriter has it.
+     * Inserts {@code newStatement} at a body's child index, which counts the comments drawn in it, always on the
+     * rewriter: after a comment too ({@link BodyInserts}, which reads {@code source}, the text the tree was parsed
+     * from, only to write a comment again). A statement the same rewrite removes from that body is removed first.
      */
-    private static PendingInsert insertIntoList(ListRewrite listRewrite, ASTNode node, Statement newStatement,
-                                                int relativeIndex, String textIfDeferred) {
+    private static void insertIntoList(ListRewrite listRewrite, ASTNode node, Statement newStatement,
+                                       int relativeIndex, String source) {
         if (node instanceof Block block) {
-            Comment anchor = BodyChildren.commentBefore(block, relativeIndex);
-            if (anchor != null) return PendingInsert.after(anchor, textIfDeferred);
-
-            // relativeIndex counts BodyBlock children, which include CommentBlocks — a Comment is not a JDT
-            // Statement and so isn't in Block.statements(). Inserting at the raw index into a body whose only
-            // child is a comment asked to insert at index 1 of an empty statement list and threw. Translate to
-            // the statements() index by counting the children that DO occupy a statements() slot — i.e. all but
-            // the comments. (Checking `instanceof Statement` is wrong: an expression-backed statement block —
-            // e.g. a bare method call — has a MethodInvocation as its node, not the ExpressionStatement, yet it
-            // still occupies a slot.)
-            listRewrite.insertAt(newStatement, BodyChildren.statementIndex(block, relativeIndex), null);
+            BodyInserts.insert(listRewrite.getASTRewrite(), block, relativeIndex, newStatement, source);
         } else if (node instanceof SwitchCase caseNode) {
             // Colon form only. A case's statements are siblings of its label here, so offsetting from the label
             // is the insertion point. An arrow rule's body is a Block instead, and this arithmetic would write
@@ -2138,30 +2096,6 @@ public class CodeEditor {
             int caseIndex = allStatements.indexOf(caseNode);
             int absoluteIndex = caseIndex + 1 + relativeIndex;
             listRewrite.insertAt(newStatement, absoluteIndex, null);
-        }
-        return null;
-    }
-
-    /** A text insertion the rewriter can't express: {@code text} goes at {@code offset} in the original code. */
-    private record PendingInsert(int offset, String text) {
-
-        /** Placed at the end of {@code anchor}'s line, indented to match it. */
-        static PendingInsert after(Comment anchor, String text) {
-            if (text == null || text.isBlank()) return null;
-            String indent = indentOf(anchor);
-            return new PendingInsert(anchor.getStartPosition() + anchor.getLength(),
-                    "\n" + indent + text.strip());
-        }
-
-        /** The anchor's own column, so the inserted statement lines up with the comment rather than the brace. */
-        private static String indentOf(Comment anchor) {
-            ASTNode root = anchor.getRoot();
-            if (!(root instanceof CompilationUnit cu)) return "    ";
-            int line = cu.getLineNumber(anchor.getStartPosition());
-            if (line < 1) return "    ";
-            int lineStart = cu.getPosition(line, 0);
-            int column = anchor.getStartPosition() - lineStart;
-            return column > 0 ? " ".repeat(column) : "    ";
         }
     }
 }
