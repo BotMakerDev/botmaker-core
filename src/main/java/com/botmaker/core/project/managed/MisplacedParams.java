@@ -209,6 +209,10 @@ public final class MisplacedParams {
      * {@code className.method} moved from {@code from} into {@code toClass} of {@code to}, as the text it is
      * written as, its leading comments and the imports its names need with it; empty when {@code from} lacks it or
      * {@code to} has a method of its name already.
+     *
+     * <p>The method crosses as a string placeholder of its own source, from its extended start, so the author's
+     * method lands in the other file exactly as written: its comments, javadoc and layout. A copied tree would be
+     * printed again by JDT. Both files are still edited as trees: the removal, the imports and the member list.
      */
     private static Optional<Moved> move(String from, String to, String className, String method, String toClass) {
         CompilationUnit source = BotParser.syntax(from);

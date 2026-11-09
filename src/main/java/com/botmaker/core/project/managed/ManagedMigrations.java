@@ -120,6 +120,24 @@ public final class ManagedMigrations {
 
     // --- reading the author's methods ----------------------------------------------------------------------
 
+    /**
+     * Whether any method of the bot is annotated {@code @Migrate}, read from its trees (written with or without its
+     * package, never one in a comment). A field copied by a migration carries {@code @Migrated}, which is not this.
+     */
+    public static boolean anyMethod(BotIndex index) {
+        return index.read(units -> {
+            boolean[] found = {false};
+            units.values().forEach(unit -> unit.accept(new ASTVisitor() {
+                @Override
+                public boolean visit(MethodDeclaration method) {
+                    found[0] |= BotAnnotation.MIGRATE.on(method) != null;
+                    return false;
+                }
+            }));
+            return found[0];
+        });
+    }
+
     /** Every {@code @Migrate} method in the bot, in file order; a method that cannot be used says why. */
     public static List<Method> methods(BotIndex index, ValueGrammar grammar) {
         return index.read(units -> {

@@ -7,6 +7,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- `Request.Restore` is Review's Undo, asked of the core (2026-11-09). `parser.refactor.FunctionRestore` finds the
+  newest version without the refactor's mark and writes the function back from it, with the imports it names. It
+  refuses with a sentence when it cannot. The write is one step of the core's history. The open file's new text comes
+  as `MethodsChanged`, and another file comes as `SourcesChanged`. `CoreClient.restore` sends it.
+- `ManagedMigrations.anyMethod(BotIndex)` says whether any method is annotated `@Migrate`, read from the trees.
+
+### Changed
+
+- `ProjectConfig` finds the entry's package, and whether a file holds `main`, through botmaker-java's `BotEntry`
+  (2026-11-09). It no longer uses a regex prefilter of its own.
+- `StarterSources.blank` builds the blank bot's class as a tree and prints it through `SourceFormatter` (2026-11-09).
+  The formatter leaves no blank line between `public class MyBot {` and `main`.
+
 ### Fixed
 
 - A statement dropped on the line after a comment (insert, paste, a host's statement, a move, a lifted value) goes

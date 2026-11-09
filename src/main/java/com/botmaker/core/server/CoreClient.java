@@ -93,6 +93,11 @@ public final class CoreClient implements AutoCloseable {
         return ask(new Request.Step(ids.incrementAndGet(), step), ANSWER_TIMEOUT);
     }
 
+    /** Review's Undo of a refactor's change to {@code function}; see {@link Request.Restore}. */
+    public EditResult restore(String file, String function, List<String> entries) throws IOException {
+        return ask(new Request.Restore(ids.incrementAndGet(), file, function, entries), ANSWER_TIMEOUT);
+    }
+
     /** The MCP tools this client serves through the core from now on, each as its JSON; see {@link Request.Tools}. */
     public EditResult tools(List<String> tools, boolean admits) throws IOException {
         return ask(new Request.Tools(ids.incrementAndGet(), tools, admits), ANSWER_TIMEOUT);

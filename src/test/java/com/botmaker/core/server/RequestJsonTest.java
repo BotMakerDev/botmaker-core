@@ -30,6 +30,7 @@ class RequestJsonTest {
                 new Request.Apply(3, new EditRequest("com/mybot/MyBot.java", List.of(new Edit.Delete("0.1.2")))),
                 new Request.UserEdit(4, new Edit.Rename("0.1", "count")),
                 new Request.Step(5, HistoryStep.REDO),
+                new Request.Restore(5, "com/mybot/Miner.java", "mine", List.of("List.of is gone.")),
                 new Request.Tools(6, List.of("{\"name\":\"ui\",\"inputSchema\":{\"type\":\"object\"}}"), true),
                 new Request.Tools(22, List.of(), false),
                 new Request.Called(8, 4, "{\"content\":[],\"isError\":false}"),

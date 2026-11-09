@@ -1,6 +1,20 @@
 package com.botmaker.core.project;
 
+import com.botmaker.core.project.managed.ManagedHolders;
+import com.botmaker.java.parse.JavaLevel;
+import org.eclipse.jdt.core.dom.AST;
+import org.eclipse.jdt.core.dom.Block;
+import org.eclipse.jdt.core.dom.MethodDeclaration;
+import org.eclipse.jdt.core.dom.MethodInvocation;
+import org.eclipse.jdt.core.dom.Modifier;
+import org.eclipse.jdt.core.dom.PrimitiveType;
+import org.eclipse.jdt.core.dom.SingleVariableDeclaration;
+import org.eclipse.jdt.core.dom.StringLiteral;
+import org.eclipse.jdt.core.dom.TypeDeclaration;
+
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * The one {@code .java} a <b>blank</b> project starts with, composed by Studio.
@@ -65,27 +79,45 @@ public final class StarterSources {
      * install being broken. What it says instead is the one thing that is both true and actionable, which
      * is where the API comes from.
      */
+    @SuppressWarnings("unchecked")
     private static String blank(String pkg, String name) {
-        return """
-                package %1$s;
+        AST ast = JavaLevel.LATEST.newAst();
+        TypeDeclaration type = ast.newTypeDeclaration();
+        type.setJavadoc(ManagedHolders.javadoc(ast, DOC));
+        type.modifiers().add(ast.newModifier(Modifier.ModifierKeyword.PUBLIC_KEYWORD));
+        type.setName(ast.newSimpleName(name));
 
-                /**
-                 * Your project.
-                 *
-                 * <p>BotMaker wrote this file once, when the project was created, and will never touch it
-                 * again. Every line of it is yours — rename it, split it up, throw it away.
-                 *
-                 * <p>This is a plain Java project: it has a pom, a source folder and this main(). To make it
-                 * a bot, add the BotMaker SDK from <b>Project ▸ Plugins & Libraries</b> — it is a plugin like any
-                 * other, and installing it brings the palette, the pictures, the capture tools and the rest.
-                 * Or start from a published bot instead, which arrives with all of that already pinned.
-                 */
-                public class %2$s {
+        MethodInvocation println = ast.newMethodInvocation();
+        println.setExpression(ast.newName("System.out"));
+        println.setName(ast.newSimpleName("println"));
+        StringLiteral hello = ast.newStringLiteral();
+        hello.setLiteralValue("Hello from " + name + "!");
+        println.arguments().add(hello);
+        Block body = ast.newBlock();
+        body.statements().add(ast.newExpressionStatement(println));
 
-                    public static void main(String[] args) {
-                        System.out.println("Hello from %2$s!");
-                    }
-                }
-                """.formatted(pkg, name);
+        SingleVariableDeclaration args = ast.newSingleVariableDeclaration();
+        args.setType(ast.newArrayType(ast.newSimpleType(ast.newSimpleName("String"))));
+        args.setName(ast.newSimpleName("args"));
+        MethodDeclaration main = ast.newMethodDeclaration();
+        main.modifiers().addAll(ast.newModifiers(Modifier.PUBLIC | Modifier.STATIC));
+        main.setReturnType2(ast.newPrimitiveType(PrimitiveType.VOID));
+        main.setName(ast.newSimpleName("main"));
+        main.parameters().add(args);
+        main.setBody(body);
+        type.bodyDeclarations().add(main);
+        return ManagedHolders.unit(ast, pkg, Set.of(), type);
     }
+
+    /** The class's doc comment, a line each, an empty one between paragraphs. */
+    private static final List<String> DOC = List.of(
+            "Your project.",
+            "",
+            "<p>BotMaker wrote this file once, when the project was created, and will never touch it",
+            "again. Every line of it is yours — rename it, split it up, throw it away.",
+            "",
+            "<p>This is a plain Java project: it has a pom, a source folder and this main(). To make it",
+            "a bot, add the BotMaker SDK from <b>Project ▸ Plugins & Libraries</b> — it is a plugin like any",
+            "other, and installing it brings the palette, the pictures, the capture tools and the rest.",
+            "Or start from a published bot instead, which arrives with all of that already pinned.");
 }

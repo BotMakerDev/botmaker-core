@@ -1,10 +1,7 @@
 package com.botmaker.core.project;
 
 
-import com.botmaker.java.edit.helpers.FileTypeDetector;
-import com.botmaker.java.parse.BotParser;
-import org.eclipse.jdt.core.dom.CompilationUnit;
-import org.eclipse.jdt.core.dom.PackageDeclaration;
+import com.botmaker.java.edit.helpers.BotEntry;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -15,7 +12,6 @@ import java.util.Comparator;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.TreeSet;
-import java.util.regex.Pattern;
 
 /**
  * Immutable configuration for a single project.
@@ -71,19 +67,6 @@ public record ProjectConfig(
         return of(projectName, packageName, dir);
     }
 
-    /** What {@code main} looks like in text: only ever a reason not to parse a file, never a reason to believe it. */
-    private static final Pattern MAYBE_MAIN = Pattern.compile("\\bmain\\s*\\(");
-
-    /**
-     * {@code text} as a tree when it holds {@code main}, else empty. This runs over every bot the list shows, and
-     * most files never write {@code main(}, so a file that does not is not parsed.
-     */
-    private static Optional<CompilationUnit> withMain(String text) {
-        if (!MAYBE_MAIN.matcher(text).find()) return Optional.empty();
-        CompilationUnit unit = BotParser.syntax(text);
-        return FileTypeDetector.holdsJvmMain(unit, text) ? Optional.of(unit) : Optional.empty();
-    }
-
     /**
      * The package of the class holding {@code public static void main}. When several classes do, the one whose
      * package every other lies under — a bot's entry sits at its root, helpers below it. Empty when no class in
@@ -96,9 +79,8 @@ public record ProjectConfig(
         if (Files.isDirectory(sources)) {
             try (var walk = Files.walk(sources)) {
                 for (Path java : walk.filter(p -> p.toString().endsWith(".java")).toList()) {
-                    PackageDeclaration declared = withMain(Files.readString(java))
-                            .map(CompilationUnit::getPackage).orElse(null);
-                    if (declared != null) packages.add(declared.getName().getFullyQualifiedName());
+                    BotEntry.of(Files.readString(java)).map(BotEntry::packageName)
+                            .filter(declared -> !declared.isEmpty()).ifPresent(packages::add);
                 }
             } catch (IOException | UncheckedIOException unreadable) {
                 return Optional.empty();
@@ -116,7 +98,7 @@ public record ProjectConfig(
         if (!Files.isDirectory(sources)) return false;
         try (var walk = Files.walk(sources)) {
             for (Path java : walk.filter(p -> p.toString().endsWith(".java")).toList()) {
-                if (withMain(Files.readString(java)).isPresent()) return true;
+                if (BotEntry.of(Files.readString(java)).isPresent()) return true;
             }
             return false;
         } catch (IOException | UncheckedIOException unreadable) {
@@ -183,16 +165,16 @@ public record ProjectConfig(
      * path to complain about rather than a null.
      */
     public Path entrySourceFile() {
-        if (java.nio.file.Files.isRegularFile(mainSourceFile)) return mainSourceFile;
+        if (Files.isRegularFile(mainSourceFile)) return mainSourceFile;
         Path packageDir = mainSourceFile.getParent();
-        if (packageDir == null || !java.nio.file.Files.isDirectory(packageDir)) return mainSourceFile;
-        try (var files = java.nio.file.Files.list(packageDir)) {
+        if (packageDir == null || !Files.isDirectory(packageDir)) return mainSourceFile;
+        try (var files = Files.list(packageDir)) {
             return files.filter(p -> p.getFileName().toString().endsWith(".java"))
                     .filter(ProjectConfig::declaresMain)
                     .sorted()
                     .findFirst()
                     .orElse(mainSourceFile);
-        } catch (java.io.IOException unreadable) {
+        } catch (IOException unreadable) {
             return mainSourceFile;
         }
     }
@@ -206,16 +188,11 @@ public record ProjectConfig(
         return "com." + packageName + "." + file.substring(0, file.length() - ".java".length());
     }
 
-    /**
-     * A cheap textual test for {@code public static void main(String[])}. Deliberately not a parse: this runs
-     * on a directory listing, before anything is compiled, and the cost of a wrong answer is that Run names
-     * the wrong class in an error the user can read.
-     */
+    /** Whether {@code javaFile} declares the bot's entry, read from its tree ({@link BotEntry}). */
     private static boolean declaresMain(Path javaFile) {
         try {
-            String source = java.nio.file.Files.readString(javaFile);
-            return source.contains("static void main(") || source.contains("static void main (");
-        } catch (java.io.IOException | RuntimeException unreadable) {
+            return BotEntry.of(Files.readString(javaFile)).isPresent();
+        } catch (IOException | RuntimeException unreadable) {
             return false;
         }
     }

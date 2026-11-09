@@ -90,6 +90,10 @@ public final class Template {
     /**
      * {@code body} with each parameter replaced by its part, or empty when it declares a parameter's name.
      *
+     * <p>A part goes in as a string placeholder of its own source: it is the user's code at the call site, copied
+     * exactly as written, comments and spacing included. Rebuilt as a tree it would be printed again by JDT. The
+     * template around it is a tree, and its parentheses are tree nodes, chosen by {@code Precedence}.
+     *
      * @throws AstRewriteHelper.RewriteFailed when the rewrite cannot be applied
      */
     public static Optional<Filled> filled(Body body, Map<String, Part> parts) {

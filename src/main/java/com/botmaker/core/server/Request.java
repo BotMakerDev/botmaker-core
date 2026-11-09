@@ -25,6 +25,7 @@ import java.util.Set;
         @JsonSubTypes.Type(value = Request.Apply.class, name = "apply"),
         @JsonSubTypes.Type(value = Request.UserEdit.class, name = "userEdit"),
         @JsonSubTypes.Type(value = Request.Step.class, name = "step"),
+        @JsonSubTypes.Type(value = Request.Restore.class, name = "restore"),
         @JsonSubTypes.Type(value = Request.Tools.class, name = "tools"),
         @JsonSubTypes.Type(value = Request.Called.class, name = "called"),
         @JsonSubTypes.Type(value = Request.PluginWriting.class, name = "pluginWriting"),
@@ -144,6 +145,20 @@ public sealed interface Request {
     record UserEdit(long id, Edit edit) implements Request {
         public UserEdit {
             if (edit == null) throw new IllegalArgumentException("a user's edit carries its edit");
+        }
+    }
+
+    /**
+     * Puts {@code function} back in {@code file}, by its path below the source root, as the newest saved version had
+     * it before the refactor whose open {@code @Refactor} entries are {@code entries} (Review's Undo). The core reads
+     * the versions and writes the function; refused, saying why, when it cannot. One step of the history.
+     */
+    record Restore(long id, String file, String function, List<String> entries) implements Request {
+        public Restore {
+            if (file == null || file.isBlank() || function == null || function.isBlank()) {
+                throw new IllegalArgumentException("a restore names its file and function");
+            }
+            entries = entries == null ? List.of() : List.copyOf(entries);
         }
     }
 

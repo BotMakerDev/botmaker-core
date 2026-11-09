@@ -15,6 +15,7 @@ import com.botmaker.core.events.EventBus;
 import com.botmaker.core.events.FileEdit;
 import com.botmaker.core.index.TypeSummaryManager;
 import com.botmaker.core.parser.EditorOutput;
+import com.botmaker.core.parser.refactor.FunctionRestore;
 import com.botmaker.core.plugin.HostHistory;
 import com.botmaker.core.plugin.HostPluginValues;
 import com.botmaker.core.plugin.HostRuns;
@@ -475,6 +476,7 @@ public final class OpenProject implements AutoCloseable {
             case Request.Step step -> editor.step(step.step()) ? new EditResult.Accepted(List.of())
                     : new EditResult.Refused(step.step() == HistoryStep.UNDO ? "There is nothing to undo."
                     : "There is nothing to redo.");
+            case Request.Restore asked -> restore(asked);
             case Request.PluginWriting writing -> perform(writing.write())
                     .<EditResult>map(EditResult.Refused::new).orElseGet(() -> new EditResult.Accepted(List.of()));
             case Request.Batch batched -> {
@@ -617,6 +619,35 @@ public final class OpenProject implements AutoCloseable {
             readDiskAgain();
             return perform(write);
         });
+    }
+
+    /**
+     * Review's Undo: {@code asked}'s function put back from the bot's versions ({@link FunctionRestore}), saved, one step
+     * of the history. The open file's new text is told as {@code MethodsChanged}, another file's by name.
+     */
+    private EditResult restore(Request.Restore asked) {
+        Path file = config.sourceRoot().resolve(asked.file()).normalize();
+        ProjectFile known = file.startsWith(config.sourceRoot()) ? state.getFile(file).orElse(null) : null;
+        if (known == null) return new EditResult.Refused(asked.file() + " is not one of this bot's files.");
+        String original = known.getContent();
+        return switch (FunctionRestore.restore(config.projectPath(), file, original, asked.function(), asked.entries())) {
+            case FunctionRestore.Outcome.Refused refused -> new EditResult.Refused(refused.reason());
+            case FunctionRestore.Outcome.Restored restored -> {
+                try {
+                    Files.writeString(file, restored.source());
+                } catch (IOException e) {
+                    yield new EditResult.Refused(file.getFileName() + " could not be saved (" + e.getMessage() + ").");
+                }
+                known.setContent(restored.source());
+                known.setAst(null);
+                editor.recordRewrite("Undo the change to " + asked.function() + "()",
+                        List.of(new FileEdit(file, original, restored.source())));
+                if (known == state.getActiveFile()) openFileRead();
+                else tell(new CoreEvent.SourcesChanged(List.of(named(file))));
+                tell(new CoreEvent.Status(asked.function() + "() is back as \"" + restored.version() + "\" had it."));
+                yield new EditResult.Accepted(List.of());
+            }
+        };
     }
 
     /** {@code write} made on the bot, as part of the batch open now if one is; every client told what it changed. */
