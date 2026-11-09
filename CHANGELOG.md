@@ -7,6 +7,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- A plugin's window starts one of its declared runs (`Runs.start(RunEntry)`, 2026-11-09): `HostRuns` asks the host's
+  new `Requests.startEntry`, which the core runs as `Request.RunEntry`, and refuses with a status line while a run goes
+  or when no loaded plugin declares the entry. `RunEntries.Declared` carries `onBar`.
+
 ### Changed
 
 - The run's trace rewrites the classes a reload compiles beside the bot's class folder too

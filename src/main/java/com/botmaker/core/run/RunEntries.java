@@ -21,8 +21,9 @@ public final class RunEntries {
 
     private RunEntries() {}
 
-    /** One declared run, with the plugin that declared it. */
-    public record Declared(PluginCoordinate plugin, String pluginName, Path jar, String title, String mainClass) {}
+    /** One declared run, with the plugin that declared it; {@code onBar} false for one its plugin's window starts. */
+    public record Declared(PluginCoordinate plugin, String pluginName, Path jar, String title, String mainClass,
+                           boolean onBar) {}
 
     /** Every loaded plugin's runs, in plugin order; a plugin that cannot list its own costs only those. */
     public static List<Declared> all() {
@@ -33,7 +34,7 @@ public final class RunEntries {
                 if (entries == null) continue;
                 for (RunEntry entry : entries) {
                     out.add(new Declared(plugin.coordinate(), plugin.name(), plugin.jar(), entry.title(),
-                            entry.mainClass()));
+                            entry.mainClass(), entry.onBar()));
                 }
             } catch (RuntimeException | LinkageError e) {
                 // Includes a plugin built against a contract without runs: it declares none.

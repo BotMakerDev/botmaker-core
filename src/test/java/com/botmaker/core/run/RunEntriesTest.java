@@ -13,7 +13,7 @@ class RunEntriesTest {
 
     private static RunEntries.Declared declared(String artifact, String title) {
         return new RunEntries.Declared(PluginCoordinate.parse("com.example:" + artifact), artifact, null, title,
-                "com.example.Main");
+                "com.example.Main", true);
     }
 
     @Test

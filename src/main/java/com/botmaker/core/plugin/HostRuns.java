@@ -1,7 +1,9 @@
 package com.botmaker.core.plugin;
 
 import com.botmaker.plugin.api.Runs;
+import com.botmaker.plugin.api.StudioPlugin;
 import com.botmaker.plugin.api.TraceLine;
+import com.botmaker.plugin.api.run.RunEntry;
 import com.botmaker.plugin.api.run.RunProperty;
 
 import java.util.List;
@@ -9,6 +11,7 @@ import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 /**
@@ -45,6 +48,9 @@ public final class HostRuns implements Runs {
     public interface Requests {
         void start();
 
+        /** Runs the declared entry titled {@code title} with main class {@code mainClass}, as its toolbar button does. */
+        void startEntry(String title, String mainClass);
+
         void stop();
 
         void status(String message);
@@ -63,6 +69,7 @@ public final class HostRuns implements Runs {
     private final Requests requests;
     private final Supplier<OptionalLong> pid;
     private final Properties settings;
+    private final Predicate<RunEntry> declared;
 
     /** Plugin listeners, held here rather than on the bus, which cannot unsubscribe. */
     private final List<Consumer<Boolean>> stateListeners = new CopyOnWriteArrayList<>();
@@ -72,10 +79,11 @@ public final class HostRuns implements Runs {
     private volatile boolean running;
     private volatile boolean paused;
 
-    private HostRuns(Requests requests, Supplier<OptionalLong> pid, Properties settings) {
+    private HostRuns(Requests requests, Supplier<OptionalLong> pid, Properties settings, Predicate<RunEntry> declared) {
         this.requests = requests;
         this.pid = pid;
         this.settings = settings;
+        this.declared = declared;
     }
 
     /**
@@ -85,13 +93,37 @@ public final class HostRuns implements Runs {
      * and that it must hop for UI itself, and a pilot pushing a frame has no business queueing behind the editor's
      * rendering.
      */
-    public static synchronized HostRuns install(Requests requests, Supplier<OptionalLong> pid, Properties settings) {
+    public static HostRuns install(Requests requests, Supplier<OptionalLong> pid, Properties settings) {
+        return install(requests, pid, settings, HostRuns::declaredByAPlugin);
+    }
+
+    /** {@link #install}, with {@code declared} saying which entries a loaded plugin declares (a test's own list). */
+    static synchronized HostRuns install(Requests requests, Supplier<OptionalLong> pid, Properties settings,
+                                         Predicate<RunEntry> declared) {
         if (requests == null || pid == null) {
             clear();
             return null;
         }
-        current = new HostRuns(requests, pid, settings);
+        current = new HostRuns(requests, pid, settings, declared);
         return current;
+    }
+
+    /**
+     * Whether a bound plugin declares {@code entry}. The channel is shared by every plugin, so the host cannot tell
+     * which one asks: any loaded plugin's declared entry may be started, and nothing else. The same walk as
+     * {@code run.RunEntries.all()}, which this package cannot name ({@code run} imports it).
+     */
+    private static boolean declaredByAPlugin(RunEntry entry) {
+        for (StudioPlugin plugin : PluginHost.instances()) {
+            try {
+                List<RunEntry> entries = plugin.runEntries();
+                if (entries != null && entries.contains(entry)) return true;
+            } catch (RuntimeException | LinkageError e) {
+                // A plugin that cannot list its runs declares none.
+                System.err.println("Warning: a plugin could not offer its runs: " + e);
+            }
+        }
+        return false;
     }
 
     /** No project: a plugin asking now gets {@link Runs#NONE}. */
@@ -115,6 +147,19 @@ public final class HostRuns implements Runs {
     @Override
     public void start() {
         requests.start();
+    }
+
+    /** Runs {@code entry} as its button does; refused, with a status line, while a run goes or when none declares it. */
+    @Override
+    public void start(RunEntry entry) {
+        if (entry == null) return;
+        if (running) {
+            requests.status("Can't start " + entry.title() + ": a run is going.");
+        } else if (!declared.test(entry)) {
+            requests.status("Can't start " + entry.title() + ": no loaded plugin declares it.");
+        } else {
+            requests.startEntry(entry.title(), entry.mainClass());
+        }
     }
 
     @Override
