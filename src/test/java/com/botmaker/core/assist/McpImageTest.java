@@ -1,5 +1,8 @@
 package com.botmaker.core.assist;
 
+import com.botmaker.plugin.api.assist.AgentReply;
+import io.modelcontextprotocol.spec.McpSchema;
+import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
 import org.junit.jupiter.api.Test;
 
 import javax.imageio.ImageIO;
@@ -11,6 +14,7 @@ import java.util.Random;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -42,6 +46,21 @@ class McpImageTest {
         assertNotNull(read);
         assertEquals(400, read.getWidth());
         assertEquals(300, read.getHeight());
+    }
+
+    @Test
+    void aRefusalThatShowsAnImageIsSentAsAResultSoTheImageIsSeen() throws IOException {
+        AgentReply boxed = AgentReply.refused("That box holds 6 characters apart")
+                .and(AgentReply.image(png(busy(40, 20, BufferedImage.TYPE_INT_RGB))));
+        CallToolResult sent = McpTools.reply(boxed);
+        assertFalse(sent.isError(), "Claude Code drops an error result's image");
+        assertEquals("REFUSED: That box holds 6 characters apart",
+                ((McpSchema.TextContent) sent.content().getFirst()).text());
+        assertTrue(sent.content().get(1) instanceof McpSchema.ImageContent);
+
+        CallToolResult plain = McpTools.reply(AgentReply.refused("No screen Home"));
+        assertTrue(plain.isError());
+        assertEquals("No screen Home", ((McpSchema.TextContent) plain.content().getFirst()).text());
     }
 
     @Test

@@ -7,6 +7,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+
+- A tool's refusal that shows an image (save_digits' cut boxes) is sent as a result whose text starts `REFUSED:`,
+  not as an MCP error: Claude Code shows only an error's text, so the image never reached the assistant (2026-11-09).
+
 ### Removed
 
 - `SessionEnvironment.x11InstallCommand`: nothing installs an X11 session now (Studio's `WaylandNotice`, 2026-11-09).

@@ -373,16 +373,21 @@ public final class McpTools {
      * A tool's reply as MCP content: its text and its images, in order, a large frame as a JPEG. Texts next to each
      * other are one content, a blank line between them: a client shows a run of texts with nothing between, so the
      * sentences of several tries ran together (2026-10-15).
+     *
+     * <p>A refusal that shows an image (save_digits' boxes) is no error result but starts {@code REFUSED:}: Claude
+     * Code shows an error result's text alone, and the image was what said why (2026-11-09).
      */
     static CallToolResult reply(AgentReply reply) {
-        CallToolResult.Builder out = CallToolResult.builder().isError(reply.isRefused());
-        StringBuilder text = new StringBuilder();
+        boolean shows = reply.parts().stream().anyMatch(p -> p.kind() == AgentReply.Kind.IMAGE);
+        CallToolResult.Builder out = CallToolResult.builder().isError(reply.isRefused() && !shows);
+        String refused = reply.isRefused() && shows ? "REFUSED: " : "";
+        StringBuilder text = new StringBuilder(refused);
         for (AgentReply.Part part : reply.parts()) {
             switch (part.kind()) {
                 case TEXT -> {
                     String said = part.text().stripTrailing();    // a table's or a code's indent kept
                     if (said.isBlank()) continue;
-                    if (!text.isEmpty()) text.append("\n\n");
+                    if (!text.isEmpty() && !text.toString().equals(refused)) text.append("\n\n");
                     text.append(said);
                 }
                 case IMAGE -> {
