@@ -33,7 +33,7 @@
         <botmaker.java.version>0.1.1-SNAPSHOT</botmaker.java.version>
         <botmaker.pluginhost.version>0.11.1-SNAPSHOT</botmaker.pluginhost.version>
         <botmaker.runlog.version>0.1.0-SNAPSHOT</botmaker.runlog.version>
-        <botmaker.cli.version>0.10.2-SNAPSHOT</botmaker.cli.version>
+        <botmaker.cli.version>0.11.1-SNAPSHOT</botmaker.cli.version>
         <botmaker.shared.version>0.6.2-SNAPSHOT</botmaker.shared.version>
         <botmaker.session.version>0.6.2-SNAPSHOT</botmaker.session.version>
         <mcp.version>2.1.0</mcp.version>
