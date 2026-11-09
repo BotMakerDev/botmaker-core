@@ -31,7 +31,7 @@
         <!-- Each upstream's main version; a release commit sets the released one (doc 43). -->
         <botmaker.studioapi.version>0.15.1-SNAPSHOT</botmaker.studioapi.version>
         <botmaker.java.version>0.1.1-SNAPSHOT</botmaker.java.version>
-        <botmaker.pluginhost.version>0.10.2-SNAPSHOT</botmaker.pluginhost.version>
+        <botmaker.pluginhost.version>0.11.1-SNAPSHOT</botmaker.pluginhost.version>
         <botmaker.runlog.version>0.1.0-SNAPSHOT</botmaker.runlog.version>
         <botmaker.cli.version>0.10.2-SNAPSHOT</botmaker.cli.version>
         <botmaker.shared.version>0.6.2-SNAPSHOT</botmaker.shared.version>
