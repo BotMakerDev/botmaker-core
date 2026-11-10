@@ -294,7 +294,10 @@ public final class BotSources {
         }
     }
 
-    /** Every {@code .java} file under the project's source root, absolute and normalized. */
+    /**
+     * Every {@code .java} file under the project's source root, absolute and normalized, by path: a directory lists
+     * its files in the file system's order, which is not the same everywhere.
+     */
     private static List<Path> javaFiles(ProjectConfig config) {
         Path root = config.sourceRoot();
         if (root == null || !Files.isDirectory(root)) return List.of();
@@ -302,6 +305,7 @@ public final class BotSources {
             return files.filter(Files::isRegularFile)
                     .filter(p -> p.getFileName().toString().endsWith(".java"))
                     .map(p -> p.toAbsolutePath().normalize())
+                    .sorted()
                     .toList();
         } catch (IOException | UncheckedIOException e) {
             System.err.println("Couldn't list the project's sources: " + e.getMessage());
