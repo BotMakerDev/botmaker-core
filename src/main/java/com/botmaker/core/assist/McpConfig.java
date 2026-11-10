@@ -13,8 +13,8 @@ import java.util.HexFormat;
 import java.util.Optional;
 
 /**
- * Whether the MCP endpoint is on, the port it listens on and its token — {@code mcp.json} beside
- * {@code credentials.json}, readable by the user only. The port and token are kept so a client configured
+ * Whether the MCP endpoint is on, the port it listens on and its token — {@code mcp.json} in BotMaker's cache dir,
+ * readable by the user only. The port and token are kept so a client configured
  * once keeps working across restarts.
  *
  * @param port {@link #DEFAULT_PORT} unless the user moved it
