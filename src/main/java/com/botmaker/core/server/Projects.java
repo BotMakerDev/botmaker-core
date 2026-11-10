@@ -2,17 +2,22 @@ package com.botmaker.core.server;
 
 import com.botmaker.core.CoreJson;
 import com.botmaker.core.assist.CoreHome;
+import com.botmaker.core.assist.PluginTools;
 import com.botmaker.core.assist.RunLog;
 import com.botmaker.core.edit.EditResult;
 import com.botmaker.core.event.CoreEvent;
+import com.botmaker.core.plugin.HostServices;
+import com.botmaker.core.plugin.UiPort;
 import com.botmaker.core.run.RunEntries;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.modelcontextprotocol.json.McpJsonMapper;
 import io.modelcontextprotocol.json.jackson2.JacksonMcpJsonMapper;
 
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Clock;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -40,6 +45,7 @@ import java.util.function.Supplier;
 public final class Projects implements AutoCloseable, CoreHome.Host {
 
     private static final ObjectMapper LENIENT = new ObjectMapper();
+    private static final McpJsonMapper JSON = new JacksonMcpJsonMapper(new ObjectMapper());
 
     private final OpenProject.Libraries libraries;
     private final ServedTools tools;
@@ -54,6 +60,8 @@ public final class Projects implements AutoCloseable, CoreHome.Host {
     private final AtomicLong asks = new AtomicLong();
     /** Set and read on the opener's thread, and by {@link #close}. */
     private volatile OpenProject open;
+    /** The server serving these projects; null in Studio's in-process core and until it runs. */
+    private volatile CoreServer server;
     /** The MCP opened {@link #open} and no client took it over. On the opener's thread. */
     private boolean held;
     /** {@link #open}'s last client left keeping its run going. On the opener's thread. */
@@ -67,7 +75,8 @@ public final class Projects implements AutoCloseable, CoreHome.Host {
     Projects(OpenProject.Libraries libraries, ServedTools tools) {
         this.libraries = libraries;
         this.tools = tools;
-        tools.fallback(CoreHome.served(new JacksonMcpJsonMapper(new ObjectMapper()), this, log));
+        tools.fallback(CoreHome.served(JSON, this, log));
+        tools.lasting(CoreHome.lasting(JSON, this));
     }
 
     /** Serves {@code channel}'s requests from now on; what {@link CoreServer.Hooks#opened} is given. */
@@ -180,7 +189,16 @@ public final class Projects implements AutoCloseable, CoreHome.Host {
         if (was != null && was != open) closeIfLeft(was, channel);
         open.attach(channel);
         // With a client on it: what the first passes say, that client is who must hear it.
-        if (open != before) prepare(open);
+        if (open != before) {
+            try {
+                prepare(open);
+            } catch (RuntimeException | LinkageError failed) {
+                // Answered, or the client's open waits forever; half prepared is not open.
+                attached.remove(channel);
+                closeOpen();
+                return new EditResult.Refused(dir.getFileName() + " could not be opened: " + said(failed));
+            }
+        }
         // A channel that ended while the project opened heard nothing and never will: let it go now.
         if (!channel.isOpen()) leave(channel);
         return new EditResult.Accepted(List.of());
@@ -203,8 +221,9 @@ public final class Projects implements AutoCloseable, CoreHome.Host {
         OpenProject project;
         try {
             project = OpenProject.open(dir, libraries);
-        } catch (IOException | RuntimeException e) {
-            return Optional.of(e.getMessage() == null ? e.toString() : e.getMessage());
+        } catch (IOException | RuntimeException | LinkageError e) {
+            // A LinkageError too, answered, or the opener waits forever (2026-11-10).
+            return Optional.of(said(e));
         }
         open = project;
         held = false;
@@ -226,6 +245,27 @@ public final class Projects implements AutoCloseable, CoreHome.Host {
         }
         project.fitParams();
         tools.own(project.bot());
+        servePlugins(project);
+    }
+
+    /**
+     * Why an open failed, in a sentence. A class that would not load is the core's own jars rebuilt under it (a dev
+     * {@code mvn install}) when {@link CoreJars} sees one changed, else a library or plugin that doesn't fit the rest.
+     */
+    static String said(Throwable failure) {
+        String message = failure.getMessage() == null ? failure.toString() : failure.getMessage();
+        if (!(failure instanceof LinkageError)) return message;
+        List<String> rebuilt = CoreJars.changed();
+        if (!rebuilt.isEmpty()) {
+            return "BotMaker's core can't load " + message + ": " + String.join(", ", rebuilt) + " was rebuilt since it "
+                    + "started. quit_core (or closing Studio and every assistant using BotMaker) restarts it on them.";
+        }
+        return "a library or plugin of the bot doesn't fit the others: " + failure;
+    }
+
+    /** {@code project}'s bound plugins' tools, served by the core while no Studio serves them (2026-11-10). */
+    private void servePlugins(OpenProject project) {
+        tools.plugins(PluginTools.headless(JSON, () -> HostServices.forProject(project.config(), UiPort.NONE)));
     }
 
     private void leave(Channel channel) {
@@ -250,6 +290,7 @@ public final class Projects implements AutoCloseable, CoreHome.Host {
         held = false;
         kept = false;
         tools.own(null);
+        tools.plugins(List.of());
         if (project != null) closeQuietly(project);
     }
 
@@ -280,6 +321,11 @@ public final class Projects implements AutoCloseable, CoreHome.Host {
                     }
                 }
             }
+            // A client changed the libraries: the plugins were bound again, their tools with them.
+            // On the opener's thread, as closeOpen: a close in between serves no closed project's tools.
+            case CoreEvent.LibrariesResolved ignored -> inTurn(() -> {
+                if (project == open) servePlugins(project);
+            });
             case CoreEvent.RunOutput output -> log.output(output.text());
             case CoreEvent.RunTraced traced -> log.trace(traced.traceLine());
             case CoreEvent.DebugSession session -> {
@@ -307,10 +353,10 @@ public final class Projects implements AutoCloseable, CoreHome.Host {
                 held = true;
                 try {
                     prepare(open);
-                } catch (RuntimeException failed) {
+                } catch (RuntimeException | LinkageError failed) {
                     // Half prepared is not open: no file tools would act on it.
                     closeOpen();
-                    return Optional.of(wanted.getFileName() + " could not be opened: " + failed.getMessage());
+                    return Optional.of(wanted.getFileName() + " could not be opened: " + said(failed));
                 }
             }
             return why;
@@ -362,6 +408,39 @@ public final class Projects implements AutoCloseable, CoreHome.Host {
         if (project.ask(request.apply(asks.incrementAndGet())).join() instanceof EditResult.Refused refused) {
             throw new IllegalArgumentException(refused.reason());
         }
+    }
+
+    /** The server that serves these projects, which {@code core_status} and {@code quit_core} ask; set once it runs. */
+    void servedBy(CoreServer server) {
+        this.server = server;
+    }
+
+    @Override
+    public String coreStatus() {
+        CoreServer serving = server;
+        List<String> lines = new ArrayList<>();
+        if (serving != null) {
+            CoreServer.Info info = serving.info();
+            lines.add("BotMaker's core " + info.version() + ", pid " + info.pid() + (info.ending() ? ", ending" : "")
+                    + ".");
+            lines.add(info.clients() == 0 ? "No Studio is attached." : "Studio is attached (" + info.clients()
+                    + " window" + (info.clients() == 1 ? "" : "s") + ").");
+        }
+        OpenProject project = open;
+        lines.add(project == null ? "No project is open." : project.directory().getFileName() + " is open"
+                + (busy() ? ", and its bot runs." : "."));
+        List<String> rebuilt = CoreJars.changed();
+        lines.add(rebuilt.isEmpty() ? "Its jars are the ones it started on."
+                : "Rebuilt since it started, so it may fail to load their classes: " + String.join(", ", rebuilt)
+                + ". quit_core, and the next call starts a fresh core on them.");
+        return String.join("\n", lines);
+    }
+
+    @Override
+    public String quitCore(boolean force) {
+        CoreServer serving = server;
+        if (serving == null) throw new IllegalArgumentException("This core runs inside Studio: quit Studio instead.");
+        return serving.quit(force);
     }
 
     private static void answer(Channel channel, long id, EditResult result) {

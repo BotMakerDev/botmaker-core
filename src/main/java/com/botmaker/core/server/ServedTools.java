@@ -51,6 +51,10 @@ public final class ServedTools {
     private List<SyncToolSpecification> own = List.of();
     /** The core's home and run tools, served after every client's, so a client's of the same name wins. */
     private List<SyncToolSpecification> fallback = List.of();
+    /** The bound plugins' tools with no screen, served like {@link #fallback}, before it. */
+    private List<SyncToolSpecification> plugins = List.of();
+    /** The core's tools about itself, served with or without a client, after every other. */
+    private List<SyncToolSpecification> lasting = List.of();
     /** Every tool served now by name, so a change removes and adds exactly what changed. */
     private final Map<String, SyncToolSpecification> served = new LinkedHashMap<>();
     private McpSyncServer mcp;
@@ -74,6 +78,21 @@ public final class ServedTools {
     /** The core's own home and run tools ({@code CoreHome}), served after every client's. */
     synchronized void fallback(List<SyncToolSpecification> tools) {
         fallback = List.copyOf(tools);
+        refresh();
+    }
+
+    /** The core's tools about itself ({@code core_status}, {@code quit_core}), served whoever is attached. */
+    synchronized void lasting(List<SyncToolSpecification> tools) {
+        lasting = List.copyOf(tools);
+        refresh();
+    }
+
+    /**
+     * The bound plugins' tools the core serves with no screen ({@code PluginTools.headless}), while no client serves
+     * its own: Studio's copy of each, with its screen, wins once it attaches (2026-11-10).
+     */
+    synchronized void plugins(List<SyncToolSpecification> tools) {
+        plugins = List.copyOf(tools);
         refresh();
     }
 
@@ -186,7 +205,11 @@ public final class ServedTools {
         if (ours) own.forEach(tool -> now.putIfAbsent(tool.tool().name(), tool));
         theirs.values().forEach(specs -> specs.forEach(now::putIfAbsent));
         // The core's home and run tools stand in for a client's only while none is registered.
-        if (theirs.isEmpty()) fallback.forEach(tool -> now.putIfAbsent(tool.tool().name(), tool));
+        if (theirs.isEmpty()) {
+            plugins.forEach(tool -> now.putIfAbsent(tool.tool().name(), tool));
+            fallback.forEach(tool -> now.putIfAbsent(tool.tool().name(), tool));
+        }
+        lasting.forEach(tool -> now.putIfAbsent(tool.tool().name(), tool));
         try {
             for (Map.Entry<String, SyncToolSpecification> was : List.copyOf(served.entrySet())) {
                 if (now.get(was.getKey()) == was.getValue()) continue;

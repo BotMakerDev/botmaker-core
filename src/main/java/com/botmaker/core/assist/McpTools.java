@@ -456,7 +456,7 @@ public final class McpTools {
 
     // ---- plumbing ------------------------------------------------------------------------------------------
 
-    private static SyncToolSpecification spec(McpJsonMapper json, String name, String description, String schema,
+    static SyncToolSpecification spec(McpJsonMapper json, String name, String description, String schema,
                                               Function<CallToolRequest, CallToolResult> handler) {
         Tool tool = Tool.builder().name(name).description(description).inputSchema(json, schema).build();
         return SyncToolSpecification.builder().tool(tool)
@@ -464,7 +464,7 @@ public final class McpTools {
                 .build();
     }
 
-    private static Map<String, Object> arguments(CallToolRequest request) {
+    static Map<String, Object> arguments(CallToolRequest request) {
         return request.arguments() == null ? Map.of() : request.arguments();
     }
 
@@ -482,7 +482,7 @@ public final class McpTools {
         }).orElse(-1L);
     }
 
-    private static CallToolResult result(String text, boolean error) {
+    static CallToolResult result(String text, boolean error) {
         return CallToolResult.builder().addTextContent(text).isError(error).build();
     }
 }

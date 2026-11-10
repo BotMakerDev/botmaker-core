@@ -28,9 +28,23 @@ public final class CoreHome {
          * @throws IllegalArgumentException with why it was not opened
          */
         String open(Path dir);
+
+        /** The core itself: its version and process, who is attached, what is open, and the jars rebuilt under it. */
+        String coreStatus();
+
+        /**
+         * Ends the core, answering first.
+         *
+         * @throws IllegalArgumentException with why it keeps running
+         */
+        String quitCore(boolean force);
     }
 
     record Open(@Describe("the project's folder, absolute, as list_projects gives it") String path) {
+    }
+
+    record Quit(@Describe(value = "true to quit with Studio attached, which then joins a fresh core", optional = true)
+                Boolean force) {
     }
 
     private CoreHome() {
@@ -46,6 +60,18 @@ public final class CoreHome {
                 call -> host.open(HomeTools.projectAt(call.path()))));
         tools.addAll(RunTools.headless(host, log));
         tools.add(DeviceTools.tool());
+        return tools.stream().map(tool -> McpTools.served(json, tool)).toList();
+    }
+
+    /** {@code core_status} and {@code quit_core}: the core itself, served with Studio attached too. */
+    public static List<SyncToolSpecification> lasting(McpJsonMapper json, Host host) {
+        List<AssistantTool<?>> tools = new ArrayList<>();
+        tools.add(said("core_status", "BotMaker's core itself: its version and process, whether Studio is attached, "
+                + "the open project, whether a bot runs, and the jars rebuilt since it started (then quit_core).",
+                host::coreStatus));
+        tools.add(said("quit_core", "End BotMaker's core, so the next call starts a fresh one on the jars built now; "
+                + "refused while a bot runs, and while Studio is attached unless force.", Quit.class,
+                call -> host.quitCore(Boolean.TRUE.equals(call.force()))));
         return tools.stream().map(tool -> McpTools.served(json, tool)).toList();
     }
 

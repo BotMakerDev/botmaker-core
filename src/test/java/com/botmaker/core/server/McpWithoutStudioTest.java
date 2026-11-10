@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
@@ -86,6 +87,31 @@ class McpWithoutStudioTest {
 
                 String ran = call(toBridge, "run_bot", JSON.createObjectNode().put("wait", 50));
                 assertTrue(ran.contains("hello from the bot"), ran);
+            }
+        }
+    }
+
+    @Test
+    void quitCoreSaysWhatRunsThenEndsTheCoreAfterAnswering(@TempDir Path cache) throws Exception {
+        CountDownLatch ended = new CountDownLatch(1);
+        try (CoreMain.Running core = CoreMain.serve(cache, "1.0", SLOW, CoreServerTest.TEST_LIBRARIES,
+                ended::countDown)) {
+            McpBridge.Upstream at = new McpBridge.Upstream(
+                    URI.create("http://127.0.0.1:" + core.server().port() + McpEndpoint.PATH), CoreLauncher.token(cache));
+            try (PipedOutputStream toBridge = bridge(at)) {
+                request(toBridge, "initialize", JSON.createObjectNode().put("protocolVersion", "2025-06-18")
+                        .<ObjectNode>set("capabilities", JSON.createObjectNode())
+                        .set("clientInfo", JSON.createObjectNode().put("name", "test")));
+                notify(toBridge, "notifications/initialized");
+
+                String status = call(toBridge, "core_status", JSON.createObjectNode());
+                assertTrue(status.contains("BotMaker's core 1.0") && status.contains("No Studio is attached")
+                        && status.contains("No project is open"), status);
+                assertTrue(status.contains("Its jars are the ones it started on"), status);
+
+                String quit = call(toBridge, "quit_core", JSON.createObjectNode());
+                assertTrue(quit.contains("quits now"), quit);
+                assertTrue(ended.await(10, TimeUnit.SECONDS), "the core ended after answering");
             }
         }
     }

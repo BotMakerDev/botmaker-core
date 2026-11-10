@@ -29,9 +29,11 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -91,6 +93,7 @@ public final class CoreServer implements AutoCloseable {
     private CoreServer(String token, String version, Hooks hooks) {
         this.version = version;
         this.hooks = hooks;
+        CoreJars.remember();
         HttpServletStreamableServerTransportProvider transport = HttpServletStreamableServerTransportProvider.builder()
                 .jsonMapper(new JacksonMcpJsonMapper(new ObjectMapper())).mcpEndpoint(McpEndpoint.PATH).build();
         this.mcp = McpServer.sync(transport)
@@ -189,6 +192,42 @@ public final class CoreServer implements AutoCloseable {
         return channels.isEmpty() && !hooks.busy().getAsBoolean();
     }
 
+    /**
+     * Ends the core for an assistant's {@code quit_core} (2026-11-10): refused while a bot runs, and while a client is
+     * attached unless {@code force}, when Studio joins a fresh core. Ends a moment later, so this answer goes out first.
+     *
+     * @throws IllegalArgumentException with why it keeps running
+     */
+    public String quit(boolean force) {
+        Optional<String> refused = keepsRunning(force);
+        if (refused.isPresent()) throw new IllegalArgumentException(refused.get());
+        try {
+            // Asked again when it ends: a run started in between keeps the core.
+            ticks.schedule(() -> {
+                if (keepsRunning(force).isEmpty()) end();
+            }, 500, TimeUnit.MILLISECONDS);
+        } catch (RejectedExecutionException closing) {
+            return "BotMaker's core is already ending.";
+        }
+        return "BotMaker's core " + version + " (pid " + ProcessHandle.current().pid() + ") quits now; the next "
+                + "BotMaker call starts a fresh one on the jars built now.";
+    }
+
+    /**
+     * Why a quit is refused now, the one rule {@link #QUIT} and {@link #quit} share: a bot runs, or a client is
+     * attached and the quit is not forced.
+     */
+    private Optional<String> keepsRunning(boolean force) {
+        if (hooks.busy().getAsBoolean()) return Optional.of("A bot runs in BotMaker's core: stop it first, then quit.");
+        int attached = clients();
+        if (attached > 0 && !force) {
+            return Optional.of("BotMaker Studio is attached to the core (" + attached + " window"
+                    + (attached == 1 ? "" : "s") + "): close it first, or quit with force, after which Studio joins a "
+                    + "fresh core.");
+        }
+        return Optional.empty();
+    }
+
     /** Calls {@link Hooks#exit} once, on a thread of its own, so a request that asked for it gets its answer. */
     private void end() {
         if (!ending.compareAndSet(false, true)) return;
@@ -215,7 +254,7 @@ public final class CoreServer implements AutoCloseable {
     private final class QuitServlet extends HttpServlet {
         @Override
         protected void doPost(HttpServletRequest request, HttpServletResponse response) throws IOException {
-            if (!idle()) {
+            if (keepsRunning(false).isPresent()) {
                 response.sendError(HttpServletResponse.SC_CONFLICT, "The core is in use");
                 return;
             }

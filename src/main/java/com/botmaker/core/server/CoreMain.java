@@ -96,6 +96,7 @@ public final class CoreMain {
             throw new IOException(e.getMessage(), e);
         }
         tools.serveOn(server.mcp());
+        projects.servedBy(server);
         CoreFile file = new CoreFile(version, ProcessHandle.current().pid(), server.port());
         try {
             file.write(dir);

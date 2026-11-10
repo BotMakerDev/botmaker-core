@@ -288,7 +288,9 @@ public final class OpenProject implements AutoCloseable {
             libraries.bind(config, classpath);
             bound = true;
             return new OpenProject(config, state, lock, libraries, libraries.analyzer(classpath, state), resolution);
-        } catch (IOException | RuntimeException e) {
+        } catch (IOException | RuntimeException | LinkageError e) {
+            // A LinkageError too (a jar rebuilt under the core, a plugin built for another contract): the core lives
+            // on, so the lock and the bind go with the failed open.
             try {
                 if (bound) libraries.unbind();
             } finally {
@@ -300,6 +302,11 @@ public final class OpenProject implements AutoCloseable {
 
     public Path directory() {
         return config.projectPath();
+    }
+
+    /** The project's folders and pom, what a plugin's services are made over. */
+    public ProjectConfig config() {
+        return config;
     }
 
     /** On open, {@code params/} is fitted to {@code starting-params/}: a fresh copy gets its starting values (2026-11-04). */

@@ -13,6 +13,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   start and stop one, read its checks and run their fixes, list its apps, search Google Play for a game's package,
   install one (a file, or its Play page), launch, stop and restart it, read what is in front, take a screenshot, tap,
   swipe, press a key, and run a read-only adb shell command. Each action names its instance as `list` does.
+- A bot's plugins' MCP tools with no Studio: a project opened through the MCP serves its plugins' tools from the core,
+  by the names Studio gives them (`botmaker_setup`, …), until Studio attaches and serves its own. A tool that needs
+  Studio's screen answers that it does, with `start_studio`.
+- `core_status` (the core's version and process, whether Studio is attached, the open project, a running bot, and the
+  jars rebuilt since it started) and `quit_core` (ends the core so the next call starts a fresh one; refused while a
+  bot runs, and while Studio is attached unless `force`), served whether Studio is attached or not.
+
+### Fixed
+
+- Opening a project in a core whose jars were rebuilt under it (`NoClassDefFoundError`) answered nothing, so Studio
+  loaded forever; the open is now refused with why, the project's lock released, and its plugins unbound.
 
 ## [0.1.0] — 2026-11-10
 
