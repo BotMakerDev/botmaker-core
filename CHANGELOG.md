@@ -16,6 +16,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - A bot's plugins' MCP tools with no Studio: a project opened through the MCP serves its plugins' tools from the core,
   by the names Studio gives them (`botmaker_setup`, …), until Studio attaches and serves its own. A tool that needs
   Studio's screen answers that it does, with `start_studio`.
+- Plugin MCP tools with no bot open: the core binds every plugin the catalog lists from an admin or trusted publisher,
+  at its newest release this contract serves, checks each jar and pom against the catalog's sha256 (a jar that differs
+  is left out), and serves their tools until a project opens; they come back when it closes. A tool that needs a bot
+  says to `open_project`. A core run from a checkout takes a plugin's local `-SNAPSHOT` build first. `core_status`
+  lists what was bound and left out.
 - `core_status` (the core's version and process, whether Studio is attached, the open project, a running bot, and the
   jars rebuilt since it started) and `quit_core` (ends the core so the next call starts a fresh one; refused while a
   bot runs, and while Studio is attached unless `force`), served whether Studio is attached or not.

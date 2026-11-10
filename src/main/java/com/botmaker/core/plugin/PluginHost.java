@@ -298,7 +298,16 @@ public final class PluginHost {
         swap(opened, opened == null ? List.of() : opened.plugins());
         devBuilds = bound(released.dev());
         loadedJars = loadedJars();
-        serving = true;
+        // A bind with no project told nobody it opened, so nobody is owed its close.
+        serving = services != null;
+    }
+
+    /**
+     * Binds the plugins on {@code resolvedClasspath} with no project open: the core's home plugins, the catalog's
+     * (2026-11-10). No plugin is told a project opened; the next project's {@link #bind} replaces them.
+     */
+    public static void bindHome(List<String> resolvedClasspath, boolean devMode) {
+        bind(resolvedClasspath, null, devMode);
     }
 
     /** What each {@link #bind} checks against the catalog; none until Studio installs one ({@link #guard}). */

@@ -1,5 +1,6 @@
 package com.botmaker.core.assist;
 
+import com.botmaker.core.plugin.HomeServices;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -17,6 +18,13 @@ class PluginToolsTest {
         assertFalse(PluginTools.needsScreen(new IllegalStateException("C:/javafx-games/x.png is missing")),
                 "a message that only mentions javafx");
         assertTrue(PluginTools.needsStudio("botmaker_setup").startsWith("botmaker_setup needs BotMaker Studio open"));
+    }
+
+    @Test
+    void aToolThatReachesForABotWithNoneOpenSaysSo() {
+        RuntimeException wrapped = new RuntimeException("the tool failed", new HomeServices.NeedsBot());
+        assertTrue(PluginTools.needsBot(wrapped).orElseThrow().contains("open_project"));
+        assertTrue(PluginTools.needsBot(new IllegalStateException("other")).isEmpty());
     }
 
     @Test

@@ -6,7 +6,10 @@ import com.botmaker.core.assist.PluginTools;
 import com.botmaker.core.assist.RunLog;
 import com.botmaker.core.edit.EditResult;
 import com.botmaker.core.event.CoreEvent;
+import com.botmaker.core.plugin.HomePlugins;
+import com.botmaker.core.plugin.HomeServices;
 import com.botmaker.core.plugin.HostServices;
+import com.botmaker.core.plugin.PluginHost;
 import com.botmaker.core.plugin.UiPort;
 import com.botmaker.core.run.RunEntries;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -66,6 +69,14 @@ public final class Projects implements AutoCloseable, CoreHome.Host {
     private boolean held;
     /** {@link #open}'s last client left keeping its run going. On the opener's thread. */
     private boolean kept;
+    /** The catalog's plugins bound with no project open, resolved once; null until the server runs. On the opener's thread. */
+    private CompletableFuture<HomePlugins.Home> home;
+    /** Whether the core binds the catalog's plugins with no project open ({@link #serveHomePlugins}). */
+    private volatile boolean servesHome;
+    /** Whether {@link #home}'s plugins are the ones bound now. On the opener's thread. */
+    private boolean homeBound;
+    /** What {@link #home} bound and left out, for {@code core_status}. */
+    private volatile List<String> homeSaid = List.of();
 
     public Projects(OpenProject.Libraries libraries) {
         this(libraries, new ServedTools());
@@ -218,11 +229,19 @@ public final class Projects implements AutoCloseable, CoreHome.Host {
             closeOpen();
         }
         if (open != null) return Optional.empty();
+        // The home plugins go first: a project binds its own, and none of theirs may write into it.
+        if (homeBound) {
+            homeBound = false;
+            tools.plugins(List.of());
+            PluginHost.unbind();
+        }
         OpenProject project;
         try {
             project = OpenProject.open(dir, libraries);
         } catch (IOException | RuntimeException | LinkageError e) {
-            // A LinkageError too, answered, or the opener waits forever (2026-11-10).
+            // A LinkageError too, answered, or the opener waits forever (2026-11-10). The failed open unbound the
+            // home plugins: bound again.
+            serveHome();
             return Optional.of(said(e));
         }
         open = project;
@@ -292,6 +311,36 @@ public final class Projects implements AutoCloseable, CoreHome.Host {
         tools.own(null);
         tools.plugins(List.of());
         if (project != null) closeQuietly(project);
+        serveHome();
+    }
+
+    /**
+     * With no project open, the catalog's admin and trusted plugins bound and their tools served (2026-11-10): resolved
+     * once on a thread of its own, since it may download them, and again while that found none (offline at start);
+     * bound on the opener's, unless a project opened meanwhile. Only once {@link #serveHomePlugins} asked. On the
+     * opener's thread.
+     */
+    private void serveHome() {
+        if (!servesHome || open != null || homeBound || opener.isShutdown()) return;
+        if (home == null || home.isDone() && home.join().classpath().isEmpty()) {
+            home = CompletableFuture.supplyAsync(HomePlugins::resolve, task -> {
+                Thread thread = new Thread(task, "core-home-plugins");
+                thread.setDaemon(true);
+                thread.start();
+            });
+        }
+        home.thenAccept(found -> inTurn(() -> {
+            if (open != null || homeBound) return;
+            try {
+                HomePlugins.bind(found);
+                homeBound = true;
+                homeSaid = found.said().isEmpty() ? List.of("none.") : found.said();
+            } catch (RuntimeException | LinkageError e) {
+                homeSaid = List.of("The catalog's plugins could not be bound: " + said(e));
+                return;
+            }
+            tools.plugins(PluginTools.headless(JSON, HomeServices::new));
+        }));
     }
 
     private static void closeQuietly(OpenProject project) {
@@ -415,6 +464,17 @@ public final class Projects implements AutoCloseable, CoreHome.Host {
         this.server = server;
     }
 
+    /**
+     * From now on, with no project open, the catalog's plugins are bound and their tools served (2026-11-10): the
+     * core's own process only, which {@link CoreMain} says; Studio's in-process core has Studio's plugins.
+     */
+    void serveHomePlugins() {
+        inTurn(() -> {
+            servesHome = true;
+            serveHome();
+        });
+    }
+
     @Override
     public String coreStatus() {
         CoreServer serving = server;
@@ -429,6 +489,11 @@ public final class Projects implements AutoCloseable, CoreHome.Host {
         OpenProject project = open;
         lines.add(project == null ? "No project is open." : project.directory().getFileName() + " is open"
                 + (busy() ? ", and its bot runs." : "."));
+        if (project == null && servesHome) {
+            List<String> said = homeSaid;
+            lines.add(said.isEmpty() ? "It is still getting the catalog's plugins."
+                    : "With no project open, the catalog's plugins:\n  " + String.join("\n  ", said));
+        }
         List<String> rebuilt = CoreJars.changed();
         lines.add(rebuilt.isEmpty() ? "Its jars are the ones it started on."
                 : "Rebuilt since it started, so it may fail to load their classes: " + String.join(", ", rebuilt)
@@ -453,6 +518,11 @@ public final class Projects implements AutoCloseable, CoreHome.Host {
         opener.shutdownNow();
         attached.clear();
         closeOpen();
+        // The home plugins' jars stay open while bound, which on Windows keeps them from being replaced.
+        if (homeBound) {
+            homeBound = false;
+            PluginHost.unbind();
+        }
         log.close();
     }
 }

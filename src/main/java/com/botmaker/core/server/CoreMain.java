@@ -49,11 +49,13 @@ public final class CoreMain {
     private static Running serveOnMcpPort(Path dir, Runnable ended) throws Exception {
         int port = McpConfig.read(dir.resolve(CoreLauncher.TOKEN_FILE)).port();
         try {
-            return serve(dir, port, AppVersion.label(), CoreServer.Idle.DEFAULT, OpenProject.Libraries.MAVEN, ended);
+            return serve(dir, port, AppVersion.label(), CoreServer.Idle.DEFAULT, OpenProject.Libraries.MAVEN, true,
+                    ended);
         } catch (IOException taken) {
             System.err.println("Port " + port + " is taken, so MCP clients set up for it will not reach the core: "
                     + taken.getMessage());
-            return serve(dir, AppVersion.label(), CoreServer.Idle.DEFAULT, ended);
+            return serve(dir, 0, AppVersion.label(), CoreServer.Idle.DEFAULT, OpenProject.Libraries.MAVEN, true,
+                    ended);
         }
     }
 
@@ -74,6 +76,15 @@ public final class CoreMain {
     /** As {@link #serve(Path, String, CoreServer.Idle, OpenProject.Libraries, Runnable)}, on {@code port}. */
     static Running serve(Path dir, int port, String version, CoreServer.Idle idle, OpenProject.Libraries libraries,
                          Runnable ended) throws Exception {
+        return serve(dir, port, version, idle, libraries, false, ended);
+    }
+
+    /**
+     * As {@link #serve(Path, int, String, CoreServer.Idle, OpenProject.Libraries, Runnable)}, binding the catalog's
+     * plugins with no project open when {@code home}: the user's core, never a test's, which would download them.
+     */
+    private static Running serve(Path dir, int port, String version, CoreServer.Idle idle,
+                                 OpenProject.Libraries libraries, boolean home, Runnable ended) throws Exception {
         String token = CoreLauncher.token(dir);
         Running[] self = new Running[1];
         CountDownLatch started = new CountDownLatch(1);
@@ -97,6 +108,7 @@ public final class CoreMain {
         }
         tools.serveOn(server.mcp());
         projects.servedBy(server);
+        if (home) projects.serveHomePlugins();
         CoreFile file = new CoreFile(version, ProcessHandle.current().pid(), server.port());
         try {
             file.write(dir);

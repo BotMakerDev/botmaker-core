@@ -1,5 +1,6 @@
 package com.botmaker.core.assist;
 
+import com.botmaker.core.plugin.HomeServices;
 import com.botmaker.core.plugin.PluginHost;
 import com.botmaker.core.plugin.ToolCalls;
 import com.botmaker.plugin.api.StudioServices;
@@ -69,6 +70,8 @@ public final class PluginTools {
                     AgentContext context = screenless(services.get());
                     reply = ToolCalls.once(() -> live.get().tool().invoke(McpTools.arguments(request), context));
                 } catch (RuntimeException | LinkageError e) {
+                    Optional<String> needsBot = needsBot(e);
+                    if (needsBot.isPresent()) return McpTools.result(owned.name() + ": " + needsBot.get(), true);
                     return McpTools.result(needsScreen(e) ? needsStudio(owned.name())
                             : owned.name() + " could not start: " + e.getMessage(), true);
                 }
@@ -81,6 +84,14 @@ public final class PluginTools {
     /** What a tool that reached for Studio's screen answers with none. */
     static String needsStudio(String tool) {
         return tool + " needs BotMaker Studio open, for its screen: start_studio, then call it again.";
+    }
+
+    /** What a home plugin's tool met when it reached for a bot none is open for ({@link HomeServices.NeedsBot}). */
+    static Optional<String> needsBot(Throwable failure) {
+        for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
+            if (cause instanceof HomeServices.NeedsBot needs) return Optional.of(needs.getMessage());
+        }
+        return Optional.empty();
     }
 
     /** Whether {@code failure} came from JavaFX or the overlay, which only Studio's process has running. */
