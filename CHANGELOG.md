@@ -5,6 +5,15 @@ All notable changes to `botmaker-core`.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this module uses
 [semantic versioning](https://semver.org/). `release.sh` refuses to cut a version with no section here.
 
+## [Unreleased]
+
+### Added
+
+- The MCP tool `device`, served by the core with no Studio and no project open: list the emulators on this computer,
+  start and stop one, read its checks and run their fixes, list its apps, search Google Play for a game's package,
+  install one (a file, or its Play page), launch, stop and restart it, read what is in front, take a screenshot, tap,
+  swipe, press a key, and run a read-only adb shell command. Each action names its instance as `list` does.
+
 ## [0.1.0] — 2026-11-10
 
 ### Added

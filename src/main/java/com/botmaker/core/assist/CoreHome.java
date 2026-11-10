@@ -15,7 +15,8 @@ import static com.botmaker.core.assist.McpTools.said;
 
 /**
  * The tools the core serves itself while no client with a screen serves its own (plan phase 11): the user's projects,
- * opening one, and its runs. A client's tool of the same name wins, so with Studio attached these are Studio's.
+ * opening one, and its runs; and {@code device}, the emulators on this computer with no project (2026-11-10). A
+ * client's tool of the same name wins, so with Studio attached these are Studio's.
  */
 public final class CoreHome {
 
@@ -44,6 +45,7 @@ public final class CoreHome {
                 + "then act on it. Studio, when it opens, shows the same project.", Open.class,
                 call -> host.open(HomeTools.projectAt(call.path()))));
         tools.addAll(RunTools.headless(host, log));
+        tools.add(DeviceTools.tool());
         return tools.stream().map(tool -> McpTools.served(json, tool)).toList();
     }
 
