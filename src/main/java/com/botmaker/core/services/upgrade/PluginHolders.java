@@ -32,6 +32,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.stream.Stream;
 
@@ -45,7 +46,7 @@ import java.util.stream.Stream;
  * only when the user ticks it: a line elsewhere that names the class would stop compiling, so each is listed
  * first, and {@link #delete} drops the imports and marks the function each use is in rather than rewriting it.
  *
- * @param files      each holder file, with its class's qualified name, in source order
+ * @param files      each holder file, with its class's qualified name, by path
  * @param references one {@code "Base.java:12"} per code line outside {@link #files} that names one of the
  *                   classes — imports and comments excepted, since the first go by themselves
  */
@@ -73,7 +74,8 @@ public record PluginHolders(Map<Path, String> files, List<String> references) {
     /** The files {@code holders} name in the bot, and the lines that name their classes. */
     public static PluginHolders of(ProjectConfig config, ProjectState state, List<PluginFiles.Holder> holders) {
         if (config == null || holders.isEmpty()) return NONE;
-        Map<Path, String> files = new LinkedHashMap<>();
+        // By path: the order a directory lists its files in is the file system's, not the same everywhere.
+        Map<Path, String> files = new TreeMap<>();
         BotSources.scan(config, state, (file, source) -> PluginFiles.owner(file, source, holders).ifPresent(holder -> {
             String pkg = packageOf(source);
             files.put(file, pkg.isEmpty() ? holder.className() : pkg + "." + holder.className());
@@ -136,7 +138,7 @@ public record PluginHolders(Map<Path, String> files, List<String> references) {
         return files.isEmpty();
     }
 
-    /** {@code "Sdk.java, Pictures.java"} — what the question names. */
+    /** {@code "Pictures.java, Sdk.java"} — what the question names. */
     public String fileNames() {
         return String.join(", ", files.keySet().stream().map(f -> f.getFileName().toString()).toList());
     }
