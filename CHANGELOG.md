@@ -15,6 +15,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   in memory (the images of the last 50), and a client that asks hears them first. The calls are told on a thread of
   their own, so a slow client never holds up a tool's answer. A plugin's tool names its plugin in its `_meta`
   (`botmaker/plugin`).
+- What a call did to a device is told under it: `ToolCallStep` (the device, the ADB command, frame grab, install, push
+  or window input, whether it worked, what came back, how long) and `ToolCallProgress` (an install's upload, in bytes,
+  each second). `ToolCallEnded.elsewhere` counts the steps that ran meanwhile on a thread without any call's scope.
+  The first 200 steps of a call are kept for a client that asks later.
 - The MCP tool `device`, served by the core with no Studio and no project open: list the emulators on this computer,
   start and stop one, read its checks and run their fixes, list its apps, search Google Play for a game's package,
   install one (a file, or its Play page), launch, stop and restart it, read what is in front, take a screenshot, tap,

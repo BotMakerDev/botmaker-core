@@ -6,7 +6,10 @@ import com.botmaker.core.event.CoreEvent;
 import com.botmaker.core.event.CoreEvent.ToolCallEnded;
 import com.botmaker.core.event.CoreEvent.ToolCallEnded.Outcome;
 import com.botmaker.core.event.CoreEvent.ToolCallEnded.Part;
+import com.botmaker.core.event.CoreEvent.ToolCallProgress;
 import com.botmaker.core.event.CoreEvent.ToolCallStarted;
+import com.botmaker.core.event.CoreEvent.ToolCallStep;
+import com.botmaker.shared.steps.DeviceSteps;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.modelcontextprotocol.json.jackson2.JacksonMcpJsonMapper;
 import io.modelcontextprotocol.server.McpServerFeatures.SyncToolSpecification;
@@ -34,6 +37,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ToolCallLogTest {
 
@@ -203,6 +207,54 @@ class ToolCallLogTest {
             String told = CoreJson.write(new Reply.Told(event));
             assertEquals(event, ((Reply.Told) CoreJson.read(told, Reply.class)).event());
         }
+    }
+
+    @Test
+    void aCallsDeviceStepsAreToldUnderItAndKept() {
+        SyncToolSpecification tool = log.logged(tool("device", "", request -> {
+            DeviceSteps.step("127.0.0.1:5555", "input tap 450 1520", () -> null);
+            return text(false, "ok");
+        }));
+        call(tool, Map.of());
+
+        log.watch(heard::add);
+        settle();
+
+        ToolCallStep step = assertInstanceOf(ToolCallStep.class, heard.get(1));
+        assertEquals(((ToolCallStarted) heard.get(0)).call(), step.call());
+        assertEquals("127.0.0.1:5555", step.device());
+        assertEquals("input tap 450 1520", step.command());
+        assertInstanceOf(ToolCallEnded.class, heard.get(2));
+    }
+
+    @Test
+    void aStepOnAThreadWithoutTheScopeIsCountedElsewhere() {
+        call(log.logged(tool("device", "", request -> {
+            Thread other = Thread.ofPlatform().start(() -> DeviceSteps.step("d", "input tap 1 2", () -> null));
+            try {
+                other.join();
+            } catch (InterruptedException e) {
+                throw new IllegalStateException(e);
+            }
+            return text(false, "ok");
+        })), Map.of());
+
+        List<CoreEvent> kept = log.kept();
+        assertEquals(2, kept.size());
+        assertTrue(((ToolCallEnded) kept.get(1)).elsewhere() >= 1);
+    }
+
+    @Test
+    void aStepsProgressReachesAWatcherLiveOnly() {
+        log.watch(heard::add);
+        call(log.logged(tool("device", "", request -> {
+            DeviceSteps.progress("d", "install a.apk").report(5, 10);
+            return text(false, "ok");
+        })), Map.of());
+        settle();
+
+        assertEquals(new ToolCallProgress(1, "d", "install a.apk", 5, 10), heard.get(1));
+        assertEquals(2, log.kept().size());
     }
 
     @Test

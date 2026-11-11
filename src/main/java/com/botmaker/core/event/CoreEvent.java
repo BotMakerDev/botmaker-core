@@ -38,6 +38,8 @@ import java.util.OptionalInt;
         @JsonSubTypes.Type(value = CoreEvent.LibrariesResolved.class, name = "librariesResolved"),
         @JsonSubTypes.Type(value = CoreEvent.Refusal.class, name = "refusal"),
         @JsonSubTypes.Type(value = CoreEvent.ToolCallStarted.class, name = "toolCallStarted"),
+        @JsonSubTypes.Type(value = CoreEvent.ToolCallStep.class, name = "toolCallStep"),
+        @JsonSubTypes.Type(value = CoreEvent.ToolCallProgress.class, name = "toolCallProgress"),
         @JsonSubTypes.Type(value = CoreEvent.ToolCallEnded.class, name = "toolCallEnded")})
 public sealed interface CoreEvent {
 
@@ -285,8 +287,34 @@ public sealed interface CoreEvent {
         }
     }
 
-    /** The call {@code call} answered, after {@code millis}: its outcome and its reply, part by part. */
-    record ToolCallEnded(long call, Outcome outcome, List<Part> reply, long millis) implements CoreEvent {
+    /**
+     * One thing the call {@code call} did to a device (shared's {@code DeviceSteps}): an ADB command, a frame grab, an
+     * install, a window's input. {@code device} is its endpoint, or "window"; {@code result} the start of what came back
+     * or why it failed; {@code atMillis} when it began, in epoch milliseconds.
+     */
+    record ToolCallStep(long call, String device, String command, boolean ok, String result, long atMillis,
+                        long millis) implements CoreEvent {
+        public ToolCallStep {
+            device = device == null ? "" : device;
+            command = command == null ? "" : command;
+            result = result == null ? "" : result;
+        }
+    }
+
+    /** A running step of the call {@code call} is at {@code done} of {@code total} (an install's upload, in bytes). */
+    record ToolCallProgress(long call, String device, String command, long done, long total) implements CoreEvent {
+        public ToolCallProgress {
+            device = device == null ? "" : device;
+            command = command == null ? "" : command;
+        }
+    }
+
+    /**
+     * The call {@code call} answered, after {@code millis}: its outcome and its reply, part by part. {@code elsewhere}
+     * counts the device steps that ran meanwhile on a thread not carrying any call's scope (a plugin's own executor, a
+     * bot's capture): perhaps this call's, never listed under it.
+     */
+    record ToolCallEnded(long call, Outcome outcome, List<Part> reply, long millis, long elsewhere) implements CoreEvent {
         public ToolCallEnded {
             if (outcome == null) throw new IllegalArgumentException("a tool call's end has an outcome");
             reply = reply == null ? List.of() : List.copyOf(reply);

@@ -60,9 +60,12 @@ class CoreEventJsonTest {
             new CoreEvent.Refusal(FILE, "Pictures.ORE is not a number."),
             new CoreEvent.ToolCallStarted(7, "botmaker_sdk_click", "BotMaker SDK", "{\"x\":450,\"y\":1520}",
                     Instant.parse("2026-11-11T20:41:12Z").toEpochMilli()),
+            new CoreEvent.ToolCallStep(7, "127.0.0.1:5555", "input tap 450 1520", true, "",
+                    Instant.parse("2026-11-11T20:41:12Z").toEpochMilli(), 38),
+            new CoreEvent.ToolCallProgress(7, "127.0.0.1:5555", "install base.apk", 1_000, 3_000_000_000L),
             new CoreEvent.ToolCallEnded(7, CoreEvent.ToolCallEnded.Outcome.OK, List.of(
                     new CoreEvent.ToolCallEnded.Part(CoreEvent.ToolCallEnded.Part.Kind.TEXT, "The Notice closed."),
-                    new CoreEvent.ToolCallEnded.Part(CoreEvent.ToolCallEnded.Part.Kind.IMAGE, "/9j/4AAQ")), 412));
+                    new CoreEvent.ToolCallEnded.Part(CoreEvent.ToolCallEnded.Part.Kind.IMAGE, "/9j/4AAQ")), 412, 2));
 
     @Test
     void everyEventRoundTrips() {

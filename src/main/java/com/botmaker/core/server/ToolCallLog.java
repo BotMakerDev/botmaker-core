@@ -5,7 +5,10 @@ import com.botmaker.core.event.CoreEvent;
 import com.botmaker.core.event.CoreEvent.ToolCallEnded;
 import com.botmaker.core.event.CoreEvent.ToolCallEnded.Outcome;
 import com.botmaker.core.event.CoreEvent.ToolCallEnded.Part;
+import com.botmaker.core.event.CoreEvent.ToolCallProgress;
 import com.botmaker.core.event.CoreEvent.ToolCallStarted;
+import com.botmaker.core.event.CoreEvent.ToolCallStep;
+import com.botmaker.shared.steps.DeviceSteps;
 import io.modelcontextprotocol.json.McpJsonMapper;
 import io.modelcontextprotocol.server.McpServerFeatures.SyncToolSpecification;
 import io.modelcontextprotocol.spec.McpSchema;
@@ -50,6 +53,8 @@ final class ToolCallLog {
     /** An image's long side in a reply part; the full image stays the tool's answer only. */
     static final int THUMBNAIL_SIDE = 960;
     static final String IMAGE_GONE = "[an image no longer kept]";
+    /** A call's device steps kept for a later watcher; a live one hears every step. */
+    static final int STEPS_KEPT = 200;
 
     private final McpJsonMapper json;
     private final Clock clock;
@@ -60,7 +65,11 @@ final class ToolCallLog {
     private final Map<Long, Kept> kept = new LinkedHashMap<>();
     private final List<Consumer<CoreEvent>> watchers = new ArrayList<>();
 
-    private record Kept(ToolCallStarted started, ToolCallEnded ended) {
+    /** A kept call: its start, its first {@link #STEPS_KEPT} device steps, and its end once it has one. */
+    private record Kept(ToolCallStarted started, List<ToolCallStep> steps, ToolCallEnded ended) {
+        Kept ended(ToolCallEnded end) {
+            return new Kept(started, steps, end);
+        }
     }
 
     ToolCallLog(McpJsonMapper json, Clock clock) {
@@ -87,23 +96,42 @@ final class ToolCallLog {
             ToolCallStarted started = new ToolCallStarted(call, name, plugin, arguments(request.arguments()),
                     clock.millis());
             told.execute(() -> record(started));
+            long unscoped = DeviceSteps.unscoped();
             CallToolResult result;
             try {
-                result = tool.callHandler().apply(exchange, request);
+                result = DeviceSteps.recording(steps(call), () -> tool.callHandler().apply(exchange, request));
             } catch (RuntimeException | Error e) {
                 long millis = millisSince(began);
+                long elsewhere = DeviceSteps.unscoped() - unscoped;
                 String why = e.getMessage() == null ? e.toString() : e.getMessage();
                 told.execute(() -> record(new ToolCallEnded(call, Outcome.ERROR, List.of(new Part(Part.Kind.TEXT, why)),
-                        millis)));
+                        millis, elsewhere)));
                 throw e;
             }
             long millis = millisSince(began);
-            told.execute(() -> record(new ToolCallEnded(call, outcome(result), parts(result), millis)));
+            long elsewhere = DeviceSteps.unscoped() - unscoped;
+            told.execute(() -> record(new ToolCallEnded(call, outcome(result), parts(result), millis, elsewhere)));
             return result;
         }).build();
     }
 
-    /** The kept calls, oldest first, each its start then its end when it has one, once every call so far is kept. */
+    /** Where the call {@code call}'s device steps go: told in turn, its progress lines live only. */
+    private DeviceSteps.Recorder steps(long call) {
+        return new DeviceSteps.Recorder() {
+            @Override
+            public void step(DeviceSteps.Step step) {
+                told.execute(() -> record(new ToolCallStep(call, step.device(), step.command(), step.ok(),
+                        step.result(), step.atMillis(), step.millis())));
+            }
+
+            @Override
+            public void progress(String device, String command, long done, long total) {
+                told.execute(() -> tellWatchers(new ToolCallProgress(call, device, command, done, total)));
+            }
+        };
+    }
+
+    /** The kept calls, oldest first, each its start, steps and end when it has them, once every call so far is kept. */
     List<CoreEvent> kept() {
         try {
             return told.submit(this::events).get();
@@ -119,6 +147,7 @@ final class ToolCallLog {
         List<CoreEvent> out = new ArrayList<>();
         for (Kept call : kept.values()) {
             out.add(call.started());
+            out.addAll(call.steps());
             if (call.ended() != null) out.add(call.ended());
         }
         return out;
@@ -127,15 +156,23 @@ final class ToolCallLog {
     private void record(CoreEvent event) {
         switch (event) {
             case ToolCallStarted started -> {
-                kept.put(started.call(), new Kept(started, null));
+                kept.put(started.call(), new Kept(started, new ArrayList<>(), null));
                 while (kept.size() > KEPT) kept.remove(kept.keySet().iterator().next());
             }
+            case ToolCallStep step -> {
+                Kept call = kept.get(step.call());
+                if (call != null && call.steps().size() < STEPS_KEPT) call.steps().add(step);
+            }
             case ToolCallEnded ended -> {
-                kept.computeIfPresent(ended.call(), (id, call) -> new Kept(call.started(), ended));
+                kept.computeIfPresent(ended.call(), (id, call) -> call.ended(ended));
                 forgetOldImages();
             }
-            default -> throw new IllegalArgumentException("not a tool call's event: " + event);
+            default -> throw new IllegalArgumentException("not a tool call's kept event: " + event);
         }
+        tellWatchers(event);
+    }
+
+    private void tellWatchers(CoreEvent event) {
         for (Consumer<CoreEvent> watcher : watchers) deliver(watcher, event);
     }
 
@@ -148,8 +185,8 @@ final class ToolCallLog {
             if (ended == null || ended.reply().stream().noneMatch(part -> part.kind() == Part.Kind.IMAGE)) continue;
             List<Part> reply = ended.reply().stream().map(part -> part.kind() == Part.Kind.IMAGE
                     ? new Part(Part.Kind.TEXT, IMAGE_GONE) : part).toList();
-            call.setValue(new Kept(call.getValue().started(),
-                    new ToolCallEnded(ended.call(), ended.outcome(), reply, ended.millis())));
+            call.setValue(call.getValue().ended(
+                    new ToolCallEnded(ended.call(), ended.outcome(), reply, ended.millis(), ended.elsewhere())));
         }
     }
 
