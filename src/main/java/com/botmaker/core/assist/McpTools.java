@@ -48,7 +48,9 @@ public final class McpTools {
 
     /** What the server tells every client at connect: how to work through these tools. */
     public static final String INSTRUCTIONS = """
-            You build a bot in BotMaker Studio, a block editor over Java. You work only through the tools.
+            You build a BotMaker bot: Java that BotMaker's block editor reads and writes, whether or not
+            BotMaker Studio is open. You change it only through these tools; read its files freely, never
+            edit one yourself. open_project opens a bot when none is open.
 
             Build the bot the way its plugins lay one out: plugin_guide says, for each plugin, where each
             kind of work goes and how to name it. Follow it before you add a method or a picture.
@@ -118,7 +120,7 @@ public final class McpTools {
         return out.toString();
     }
 
-    static final String NO_PROJECT = "No project is open in BotMaker Studio. Open one and try again.";
+    static final String NO_PROJECT = "No project is open. Open one (open_project) and try again.";
     private static final ObjectMapper JSON = new ObjectMapper();
 
     /**
