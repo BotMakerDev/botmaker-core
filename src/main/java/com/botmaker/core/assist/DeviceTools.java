@@ -9,6 +9,7 @@ import com.botmaker.shared.emulator.EmulatorInstance;
 import com.botmaker.shared.emulator.EmulatorInstances;
 import com.botmaker.shared.emulator.EmulatorLauncher;
 import com.botmaker.shared.emulator.EmulatorLiveness;
+import com.botmaker.shared.emulator.EmulatorOwnApps;
 import com.botmaker.shared.emulator.EmulatorReadiness;
 import com.botmaker.shared.emulator.Platforms;
 import com.botmaker.shared.emulator.PlayStoreSearch;
@@ -99,7 +100,7 @@ final class DeviceTools {
         record RestartApp(@Describe(INSTANCE) String instance, @Describe(PACKAGE) String pkg) implements Device {
         }
 
-        @Describe("what is in front: the focused app's package, the resumed activity, and any system dialog")
+        @Describe("what is in front: the focused app's package (marked when it is the emulator's own launcher, store or ad, which a run puts behind the game), the resumed activity, the home app, and any system dialog")
         record Focus(@Describe(INSTANCE) String instance) implements Device {
         }
 
@@ -267,9 +268,13 @@ final class DeviceTools {
                     EmulatorAppLauncher.restart(pkg(restart.pkg()), instance(restart.instance()).reference()));
             case Device.Focus focus -> withDevice(focus.instance(), device -> {
                 List<String> lines = new ArrayList<>();
-                lines.add("focused: " + device.focusedPackage().orElse("(none)"));
+                Optional<String> focused = device.focusedPackage();
+                Optional<String> home = device.homePackage();
+                lines.add("focused: " + focused.orElse("(none)") + (focused.filter(app ->
+                        EmulatorOwnApps.covers(app, home)).isPresent() ? " (the emulator's own app)" : ""));
                 String current = device.currentApp();
                 lines.add("resumed: " + (current == null || current.isBlank() ? "(none)" : current.strip()));
+                lines.add("home: " + home.orElse("(unknown)"));
                 device.systemDialog().ifPresent(shown -> lines.add("dialog: " + shown.dialog().said()
                         + (shown.theApps() ? " (about the app in front)" : "")));
                 return String.join("\n", lines);

@@ -9,6 +9,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- `device`'s `focus` names the home app and marks an app in front that is the emulator's own (its launcher, store or
+  ad), and reads the resumed activity when no window has the focus.
 - `device`'s `checks` and `fix` cover BlueStacks, LDPlayer, MuMu, MEmu and GameLoop (shared's
   `WindowsEmulatorChecks`); `fix` with `undo` puts back the last Fix of the check it names.
 - `CoreClient.watchCalls()` asks for every MCP call (`Request.WatchCalls`), as Studio's Assistant window does.
