@@ -46,6 +46,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   jars rebuilt since it started) and `quit_core` (ends the core so the next call starts a fresh one; refused while a
   bot runs, and while Studio is attached unless `force`), served whether Studio is attached or not.
 
+### Changed
+
+- The MCP server's instructions speak of a BotMaker bot, Studio open or not, so a client the core serves alone
+  (`botmaker ai`, `mcp-bridge`) is not told it works in Studio.
+- `McpConfig` writes Studio's endpoint as the cli's `AiTool.Connection.Http`.
+
+### Removed
+
+- `assist.AiTool` and `assist.BotGuard`: they are the cli's now (`com.botmaker.cli.ai`), with a stdio connection beside
+  the endpoint, a guard in a bot's folder for every client, and `botmaker ai` to start one without Studio.
+
 ### Fixed
 
 - Opening a project in a core whose jars were rebuilt under it (`NoClassDefFoundError`) answered nothing, so Studio
