@@ -15,8 +15,9 @@ import static com.botmaker.core.assist.McpTools.said;
 
 /**
  * The tools the core serves itself while no client with a screen serves its own (plan phase 11): the user's projects,
- * opening one, and its runs; and {@code device}, the emulators on this computer with no project (2026-11-10). A
- * client's tool of the same name wins, so with Studio attached these are Studio's.
+ * opening one, and its runs. A client's tool of the same name wins, so with Studio attached these are Studio's. And,
+ * with or without a client, the core itself ({@link #lasting}) and {@code device} ({@link #device}), the emulators on
+ * this computer (2026-11-10; served with Studio attached since 2026-11-11).
  */
 public final class CoreHome {
 
@@ -59,8 +60,15 @@ public final class CoreHome {
                 + "then act on it. Studio, when it opens, shows the same project.", Open.class,
                 call -> host.open(HomeTools.projectAt(call.path()))));
         tools.addAll(RunTools.headless(host, log));
-        tools.add(DeviceTools.tool());
         return tools.stream().map(tool -> McpTools.served(json, tool)).toList();
+    }
+
+    /**
+     * {@code device}, which no client serves: served with Studio attached too, and admitted by it as the core's own
+     * tools are, since it acts on an emulator (a client's tool of the same name still wins).
+     */
+    public static List<SyncToolSpecification> device(McpJsonMapper json) {
+        return List.of(McpTools.served(json, DeviceTools.tool()));
     }
 
     /** {@code core_status} and {@code quit_core}: the core itself, served with Studio attached too. */

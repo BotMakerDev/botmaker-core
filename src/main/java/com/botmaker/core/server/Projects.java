@@ -87,6 +87,7 @@ public final class Projects implements AutoCloseable, CoreHome.Host {
         this.libraries = libraries;
         this.tools = tools;
         tools.fallback(CoreHome.served(JSON, this, log));
+        tools.held(CoreHome.device(JSON));
         tools.lasting(CoreHome.lasting(JSON, this));
     }
 

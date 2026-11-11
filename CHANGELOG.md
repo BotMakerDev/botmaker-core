@@ -24,7 +24,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   touched (`botmaker/tap` in the reply's `_meta`) and the methods an `edit_code` changed, by file, class and method
   (`botmaker/changed`). An image part carries the image's own width and height, so a point drawn on its thumbnail
   lands where it was touched.
-- The MCP tool `device`, served by the core with no Studio and no project open: list the emulators on this computer,
+- The MCP tool `device`, served by the core with or without Studio and a project open (with Studio attached too
+  since 2026-11-11, when the Assistant window's session was found to have none): list the emulators on this computer,
   start and stop one, read its checks and run their fixes, list its apps, search Google Play for a game's package,
   install one (a file, or its Play page), launch, stop and restart it, read what is in front, take a screenshot, tap,
   swipe, press a key, and run a read-only adb shell command. Each action names its instance as `list` does.

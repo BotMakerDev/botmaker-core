@@ -56,6 +56,8 @@ public final class ServedTools {
     private List<SyncToolSpecification> fallback = List.of();
     /** The bound plugins' tools with no screen, served like {@link #fallback}, before it. */
     private List<SyncToolSpecification> plugins = List.of();
+    /** The core's tools no client stands in for that act ({@link #held}), served with or without a client. */
+    private List<SyncToolSpecification> held = List.of();
     /** The core's tools about itself, served with or without a client, after every other. */
     private List<SyncToolSpecification> lasting = List.of();
     /** Every tool served now by name, so a change removes and adds exactly what changed. */
@@ -97,6 +99,15 @@ public final class ServedTools {
     /** The core's tools about itself ({@code core_status}, {@code quit_core}), served whoever is attached. */
     synchronized void lasting(List<SyncToolSpecification> tools) {
         lasting = List.copyOf(tools);
+        refresh();
+    }
+
+    /**
+     * The core's tools no client serves that act on something ({@code device}): served whoever is attached, before
+     * {@link #lasting}, and admitted by the client with a screen as the core's own are.
+     */
+    synchronized void held(List<SyncToolSpecification> tools) {
+        held = tools.stream().map(this::admitted).toList();
         refresh();
     }
 
@@ -213,16 +224,7 @@ public final class ServedTools {
      */
     private void refresh() {
         if (mcp == null) return;
-        Map<String, SyncToolSpecification> now = new LinkedHashMap<>();
-        boolean ours = admitting != null || theirs.isEmpty();
-        if (ours) own.forEach(tool -> now.putIfAbsent(tool.tool().name(), tool));
-        theirs.values().forEach(specs -> specs.forEach(now::putIfAbsent));
-        // The core's home and run tools stand in for a client's only while none is registered.
-        if (theirs.isEmpty()) {
-            plugins.forEach(tool -> now.putIfAbsent(tool.tool().name(), tool));
-            fallback.forEach(tool -> now.putIfAbsent(tool.tool().name(), tool));
-        }
-        lasting.forEach(tool -> now.putIfAbsent(tool.tool().name(), tool));
+        Map<String, SyncToolSpecification> now = chosen();
         try {
             for (Map.Entry<String, SyncToolSpecification> was : List.copyOf(served.entrySet())) {
                 if (now.get(was.getKey()) == was.getValue()) continue;
@@ -239,5 +241,21 @@ public final class ServedTools {
             // A client that is not told lists the tools again on its next start.
             System.err.println("Warning: the core's tools could not be served anew: " + e.getMessage());
         }
+    }
+
+    /** What {@link #refresh} serves, by name, in the order a name is first taken. */
+    synchronized Map<String, SyncToolSpecification> chosen() {
+        Map<String, SyncToolSpecification> now = new LinkedHashMap<>();
+        boolean ours = admitting != null || theirs.isEmpty();
+        if (ours) own.forEach(tool -> now.putIfAbsent(tool.tool().name(), tool));
+        theirs.values().forEach(specs -> specs.forEach(now::putIfAbsent));
+        // The core's home and run tools stand in for a client's only while none is registered.
+        if (theirs.isEmpty()) {
+            plugins.forEach(tool -> now.putIfAbsent(tool.tool().name(), tool));
+            fallback.forEach(tool -> now.putIfAbsent(tool.tool().name(), tool));
+        }
+        held.forEach(tool -> now.putIfAbsent(tool.tool().name(), tool));
+        lasting.forEach(tool -> now.putIfAbsent(tool.tool().name(), tool));
+        return now;
     }
 }
