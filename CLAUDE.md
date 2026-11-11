@@ -19,7 +19,9 @@ per user.
   request one file's.
 - `event`: what the core tells every client. `CoreEvent` is sealed: `MethodsChanged` (the methods whose source or
   id changed, and the ids removed), `Diagnostics` (a run's check tells them), `RunState`, `RunOutput`, `RunLogged`, `RunTraced`, `RunFrame`, `RunProcess`, `DebugSession`,
-  `DebugPaused`, `DebugFollowed`, `SourcesChanged`, `InputAsked`, `Status`, `LibrariesResolved`, `Refusal`.
+  `DebugPaused`, `DebugFollowed`, `SourcesChanged`, `InputAsked`, `Status`, `LibrariesResolved`, `Refusal`, and
+  `ToolCallStarted`/`ToolCallEnded`, every MCP call `ServedTools` serves (`server.ToolCallLog`, on its own thread, its
+  last 500 told first), only to a channel that sent `Request.WatchCalls` (2026-11-11).
 - `CoreJson`: the one mapper every protocol record is read and written with, strict on reading (a missing component
   or trailing text is refused); phase 10's channel carries exactly this.
 - The rest came from Studio (phase 6a, 2026-11-05), each in the package it had there: `project` (the open project,

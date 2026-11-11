@@ -128,6 +128,11 @@ public final class Projects implements AutoCloseable, CoreHome.Host {
                 }
                 answer(channel, registered.id(), result);
             }
+            case Request.WatchCalls watch -> {
+                // Every MCP call, the kept ones first, whatever the channel has open (the Assistant window's Calls).
+                channel.onClose(tools.watch(event -> channel.send(CoreJson.write(new Reply.Told(event)))));
+                answer(channel, watch.id(), new EditResult.Accepted(List.of()));
+            }
             case Request.Called called -> {
                 tools.called(channel, called);
                 answer(channel, called.id(), new EditResult.Accepted(List.of()));

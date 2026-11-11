@@ -50,7 +50,8 @@ class RequestJsonTest {
                 new Request.Answer(17, 3, "Iron"),
                 new Request.Debugging(18, Request.Debugging.Step.CONTINUE),
                 new Request.Close(7, false),
-                new Request.Close(8, true));
+                new Request.Close(8, true),
+                new Request.WatchCalls(9));
         for (Request request : requests) {
             assertEquals(request, CoreJson.read(CoreJson.write(request), Request.class));
         }

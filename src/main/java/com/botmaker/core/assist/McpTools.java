@@ -341,8 +341,9 @@ public final class McpTools {
     private static List<SyncToolSpecification> pluginTools(McpJsonMapper json, StudioDriver driver) {
         List<SyncToolSpecification> out = new ArrayList<>();
         for (StudioDriver.PluginTool owned : driver.pluginTools()) {
-            String description = owned.tool().description() + " (from " + owned.pluginName() + ")";
-            out.add(spec(json, owned.name(), description, schemaOf(owned.tool().schema()), request -> {
+            String description = PluginTools.described(owned.tool().description(), owned.pluginName());
+            out.add(spec(json, owned.name(), description, schemaOf(owned.tool().schema()),
+                    PluginTools.meta(owned.pluginName()), request -> {
                 // The tool the plugins hold now, not the one served: a plugin reloaded, or another project opened,
                 // closes the loader the served one came from, and it failed on its first class not yet loaded
                 // (NoClassDefFoundError ToolTiming$Phase, 2026-11-01).
@@ -458,7 +459,13 @@ public final class McpTools {
 
     static SyncToolSpecification spec(McpJsonMapper json, String name, String description, String schema,
                                               Function<CallToolRequest, CallToolResult> handler) {
-        Tool tool = Tool.builder().name(name).description(description).inputSchema(json, schema).build();
+        return spec(json, name, description, schema, null, handler);
+    }
+
+    /** {@link #spec(McpJsonMapper, String, String, String, Function)} with the tool's {@code _meta}, null for none. */
+    static SyncToolSpecification spec(McpJsonMapper json, String name, String description, String schema,
+                                      Map<String, Object> meta, Function<CallToolRequest, CallToolResult> handler) {
+        Tool tool = Tool.builder().name(name).description(description).inputSchema(json, schema).meta(meta).build();
         return SyncToolSpecification.builder().tool(tool)
                 .callHandler((exchange, request) -> handler.apply(request))
                 .build();

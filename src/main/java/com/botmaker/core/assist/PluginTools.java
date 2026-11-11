@@ -9,12 +9,14 @@ import com.botmaker.plugin.api.assist.AgentReply;
 import com.botmaker.plugin.api.overlay.Area;
 import io.modelcontextprotocol.json.McpJsonMapper;
 import io.modelcontextprotocol.server.McpServerFeatures.SyncToolSpecification;
+import io.modelcontextprotocol.spec.McpSchema;
 
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Supplier;
@@ -26,7 +28,25 @@ import java.util.function.Supplier;
  */
 public final class PluginTools {
 
+    /** The key of a plugin tool's {@code _meta} that names its plugin; it crosses a client's registration whole. */
+    static final String PLUGIN_META = "botmaker/plugin";
+
     private PluginTools() {}
+
+    /** A plugin tool's MCP description: its own, then the plugin it comes from. */
+    public static String described(String description, String pluginName) {
+        return description + " (from " + pluginName + ")";
+    }
+
+    /** The {@code _meta} of a tool {@code pluginName} serves, which {@link #pluginOf} reads back. */
+    public static Map<String, Object> meta(String pluginName) {
+        return Map.of(PLUGIN_META, pluginName);
+    }
+
+    /** The plugin that serves {@code tool}, by its {@link #meta}; empty for the core's own and a client's own. */
+    public static String pluginOf(McpSchema.Tool tool) {
+        return tool.meta() != null && tool.meta().get(PLUGIN_META) instanceof String plugin ? plugin : "";
+    }
 
     /** Every bound plugin's tool as {@code <artifactId>_<name>}; two plugins with one artifactId keep the first's. */
     public static List<StudioDriver.PluginTool> named() {
@@ -56,8 +76,9 @@ public final class PluginTools {
     public static List<SyncToolSpecification> headless(McpJsonMapper json, Supplier<StudioServices> services) {
         List<SyncToolSpecification> out = new ArrayList<>();
         for (StudioDriver.PluginTool owned : named()) {
-            String description = owned.tool().description() + " (from " + owned.pluginName() + ")";
-            out.add(McpTools.spec(json, owned.name(), description, McpTools.schemaOf(owned.tool().schema()), request -> {
+            String description = described(owned.tool().description(), owned.pluginName());
+            out.add(McpTools.spec(json, owned.name(), description, McpTools.schemaOf(owned.tool().schema()),
+                    meta(owned.pluginName()), request -> {
                 // The tool bound now: a rebind closes the loader the served one came from.
                 Optional<StudioDriver.PluginTool> live = named(false).stream()
                         .filter(t -> t.name().equals(owned.name())).findFirst();

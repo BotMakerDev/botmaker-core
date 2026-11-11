@@ -36,7 +36,9 @@ import java.util.OptionalInt;
         @JsonSubTypes.Type(value = CoreEvent.Status.class, name = "status"),
         @JsonSubTypes.Type(value = CoreEvent.Opened.class, name = "opened"),
         @JsonSubTypes.Type(value = CoreEvent.LibrariesResolved.class, name = "librariesResolved"),
-        @JsonSubTypes.Type(value = CoreEvent.Refusal.class, name = "refusal")})
+        @JsonSubTypes.Type(value = CoreEvent.Refusal.class, name = "refusal"),
+        @JsonSubTypes.Type(value = CoreEvent.ToolCallStarted.class, name = "toolCallStarted"),
+        @JsonSubTypes.Type(value = CoreEvent.ToolCallEnded.class, name = "toolCallEnded")})
 public sealed interface CoreEvent {
 
     /**
@@ -266,6 +268,41 @@ public sealed interface CoreEvent {
         public Refusal {
             requireFile(file);
             if (reason == null || reason.isBlank()) throw new IllegalArgumentException("a refusal says why");
+        }
+    }
+
+    /**
+     * An MCP call of a tool the core serves began, whoever serves it: the core, a bound plugin, or a client it is
+     * forwarded to (spec {@code 2026-11-11-assistant-window-design.md}). Told to every attached client, with or without
+     * a project open. {@code plugin} is the serving plugin's name, empty for the core's or Studio's own tools;
+     * {@code arguments} the call's arguments as JSON; {@code atMillis} when it began, in epoch milliseconds.
+     */
+    record ToolCallStarted(long call, String tool, String plugin, String arguments, long atMillis) implements CoreEvent {
+        public ToolCallStarted {
+            if (tool == null || tool.isBlank()) throw new IllegalArgumentException("a tool call names its tool");
+            plugin = plugin == null ? "" : plugin;
+            arguments = arguments == null || arguments.isBlank() ? "{}" : arguments;
+        }
+    }
+
+    /** The call {@code call} answered, after {@code millis}: its outcome and its reply, part by part. */
+    record ToolCallEnded(long call, Outcome outcome, List<Part> reply, long millis) implements CoreEvent {
+        public ToolCallEnded {
+            if (outcome == null) throw new IllegalArgumentException("a tool call's end has an outcome");
+            reply = reply == null ? List.of() : List.copyOf(reply);
+        }
+
+        /** Answered; refused ({@code REFUSED: why}, its tool's own no); or failed. */
+        public enum Outcome { OK, REFUSED, ERROR }
+
+        /** One part of a reply: a text, or an image as a JPEG thumbnail in base64. */
+        public record Part(Kind kind, String value) {
+            public Part {
+                if (kind == null) throw new IllegalArgumentException("a reply part has a kind");
+                value = value == null ? "" : value;
+            }
+
+            public enum Kind { TEXT, IMAGE }
         }
     }
 

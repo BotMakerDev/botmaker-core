@@ -3,6 +3,7 @@ package com.botmaker.core.server;
 import com.botmaker.core.CoreJson;
 import com.botmaker.core.assist.LiveBot;
 import com.botmaker.core.assist.McpTools;
+import com.botmaker.core.event.CoreEvent;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.modelcontextprotocol.json.McpJsonMapper;
 import io.modelcontextprotocol.json.jackson2.JacksonMcpJsonMapper;
@@ -13,6 +14,7 @@ import io.modelcontextprotocol.spec.McpSchema.CallToolRequest;
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
 
 import java.io.IOException;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -24,6 +26,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
 
 /**
  * The tools the core's MCP serves (plan phase 10d): its own, over the open project's files while a project is open,
@@ -57,10 +60,20 @@ public final class ServedTools {
     private List<SyncToolSpecification> lasting = List.of();
     /** Every tool served now by name, so a change removes and adds exactly what changed. */
     private final Map<String, SyncToolSpecification> served = new LinkedHashMap<>();
+    /** Every call of a served tool, told to the clients ({@link #watch}). */
+    private final ToolCallLog log = new ToolCallLog(json, Clock.systemUTC());
     private McpSyncServer mcp;
 
     /** A call sent to a client, answered by its {@link Request.Called}. */
     private record Pending(Channel channel, CompletableFuture<String> answer) {
+    }
+
+    /**
+     * {@code told} hears the calls kept so far, then every call of a served tool as it begins and ends, until the
+     * returned stop: a client's channel, with or without a project open.
+     */
+    Runnable watch(Consumer<CoreEvent> told) {
+        return log.watch(told);
     }
 
     /** Serves on {@code server} from now on what was registered before. */
@@ -218,7 +231,7 @@ public final class ServedTools {
             }
             for (SyncToolSpecification tool : now.values()) {
                 if (served.containsKey(tool.tool().name())) continue;
-                mcp.addTool(tool);
+                mcp.addTool(log.logged(tool));
                 served.put(tool.tool().name(), tool);
             }
             mcp.notifyToolsListChanged();

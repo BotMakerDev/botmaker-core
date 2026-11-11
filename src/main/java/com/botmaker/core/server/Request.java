@@ -39,7 +39,8 @@ import java.util.Set;
         @JsonSubTypes.Type(value = Request.Stop.class, name = "stop"),
         @JsonSubTypes.Type(value = Request.Answer.class, name = "answer"),
         @JsonSubTypes.Type(value = Request.Debugging.class, name = "debugging"),
-        @JsonSubTypes.Type(value = Request.Close.class, name = "close")})
+        @JsonSubTypes.Type(value = Request.Close.class, name = "close"),
+        @JsonSubTypes.Type(value = Request.WatchCalls.class, name = "watchCalls")})
 public sealed interface Request {
 
     /** Which ask this is; the answer carries it back. */
@@ -202,5 +203,13 @@ public sealed interface Request {
      * client to leave ends it.
      */
     record Close(long id, boolean keepRun) implements Request {
+    }
+
+    /**
+     * Tells this client every MCP call the core serves from now on, the kept ones first, as
+     * {@code CoreEvent.ToolCallStarted} and {@code ToolCallEnded} (the Assistant window, 2026-11-11), until its channel
+     * ends. Answered at once; needs no open project.
+     */
+    record WatchCalls(long id) implements Request {
     }
 }

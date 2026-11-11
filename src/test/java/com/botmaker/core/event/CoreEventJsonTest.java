@@ -6,6 +6,7 @@ import com.botmaker.core.run.debug.DebugSnapshot;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -56,7 +57,12 @@ class CoreEventJsonTest {
             new CoreEvent.Opened(List.of("Restored 1 missing project file: pom.xml")),
             new CoreEvent.LibrariesResolved(List.of("/m2/sdk.jar"),
                     List.of("com.github.BotMakerDev:botmaker-sdk:9.9.9 — not found")),
-            new CoreEvent.Refusal(FILE, "Pictures.ORE is not a number."));
+            new CoreEvent.Refusal(FILE, "Pictures.ORE is not a number."),
+            new CoreEvent.ToolCallStarted(7, "botmaker_sdk_click", "BotMaker SDK", "{\"x\":450,\"y\":1520}",
+                    Instant.parse("2026-11-11T20:41:12Z").toEpochMilli()),
+            new CoreEvent.ToolCallEnded(7, CoreEvent.ToolCallEnded.Outcome.OK, List.of(
+                    new CoreEvent.ToolCallEnded.Part(CoreEvent.ToolCallEnded.Part.Kind.TEXT, "The Notice closed."),
+                    new CoreEvent.ToolCallEnded.Part(CoreEvent.ToolCallEnded.Part.Kind.IMAGE, "/9j/4AAQ")), 412));
 
     @Test
     void everyEventRoundTrips() {

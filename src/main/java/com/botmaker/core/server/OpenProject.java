@@ -500,7 +500,7 @@ public final class OpenProject implements AutoCloseable {
             case Request.Control steer -> steer(steer);
             case Request.Open open -> new EditResult.Refused("The project is open already.");
             case Request.Close close -> new EditResult.Refused("A close is the core's to handle.");
-            case Request.Tools _, Request.Called _ -> new EditResult.Refused("A client's tools are the core's to handle.");
+            case Request.Tools _, Request.Called _, Request.WatchCalls _ -> new EditResult.Refused("A client's tools are the core's to handle.");
         };
     }
 
