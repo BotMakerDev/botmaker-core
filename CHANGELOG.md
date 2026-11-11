@@ -23,6 +23,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   start and stop one, read its checks and run their fixes, list its apps, search Google Play for a game's package,
   install one (a file, or its Play page), launch, stop and restart it, read what is in front, take a screenshot, tap,
   swipe, press a key, and run a read-only adb shell command. Each action names its instance as `list` does.
+- `device` covers raw adb too: `logcat` (the last lines, of one running app, from a level up, holding a text), `processes` (pid,
+  memory, name, filtered by name), `crash` (an app's main process, by its pid, to test what follows), `push` (a file
+  from this computer, only under `/sdcard`, `/storage` or `/data/local/tmp`, never a hidden file or BotMaker's
+  settings) and `pull` (into BotMaker's `pulls` cache folder only, numbered past a file already there). A push's and
+  a pull's bytes go out as the call's `ToolCallProgress`.
 - A bot's plugins' MCP tools with no Studio: a project opened through the MCP serves its plugins' tools from the core,
   by the names Studio gives them (`botmaker_setup`, …), until Studio attaches and serves its own. A tool that needs
   Studio's screen answers that it does, with `start_studio`.

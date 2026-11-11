@@ -17,13 +17,16 @@ import com.botmaker.shared.emulator.checks.CheckResult;
 import com.botmaker.shared.emulator.checks.EmulatorChecks;
 import com.botmaker.shared.emulator.checks.Fixes;
 import com.botmaker.shared.launch.EmulatorAppLauncher;
+import com.botmaker.shared.tools.UserDirs;
 
 import java.awt.image.BufferedImage;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.function.Function;
 import java.util.regex.Pattern;
@@ -32,7 +35,8 @@ import java.util.regex.Pattern;
  * {@code device}: the Android emulators and phones on this computer, with no project open (2026-11-10). It is the
  * core's own, built on shared's emulator layer alone, so it serves with no Studio and no bot: list the instances,
  * start and stop one, read its checks and run their fixes, find and install a game, start and stop it, look at the
- * screen and touch it. A bot's {@code setup} and {@code launch_game} act on the bot's own target; this one names
+ * screen and touch it, read its log and processes, crash an app to test what follows, copy files either way
+ * (2026-11-11; a copy's bytes go out as the call's progress). A bot's {@code setup} and {@code launch_game} act on the bot's own target; this one names
  * its instance each call, as {@code list} gives it.
  */
 final class DeviceTools {
@@ -124,7 +128,52 @@ final class DeviceTools {
         record Shell(@Describe(INSTANCE) String instance, @Describe("the command") String command)
                 implements Device {
         }
+
+        @Describe("the log's last lines, oldest first: all of it, or one running app's")
+        record Logcat(@Describe(INSTANCE) String instance,
+                      @Describe(value = PACKAGE + "; only its lines while it runs", optional = true) String pkg,
+                      @Describe(value = "the lowest level shown: V, D, I, W, E or F", optional = true) String level,
+                      @Describe(value = "only lines holding this text, any case", optional = true) String text,
+                      @Describe(value = "how many lines, " + LOG_LINES + " when not given, at most " + LOG_MOST,
+                              optional = true) Integer lines)
+                implements Device {
+        }
+
+        @Describe("the running processes, a line each: pid, memory in kB, name")
+        record Processes(@Describe(INSTANCE) String instance,
+                         @Describe(value = "only those whose name holds this, like a package", optional = true)
+                         String name)
+                implements Device {
+        }
+
+        @Describe("crash the running app's main process, as a test of what follows: Android's crash dialog, a bot's "
+                + "recovery; focus and processes say what it did")
+        record Crash(@Describe(INSTANCE) String instance, @Describe(PACKAGE) String pkg) implements Device {
+        }
+
+        @Describe("copy a file from this computer to the instance, its folders made; to " + WRITABLE)
+        record Push(@Describe(INSTANCE) String instance,
+                    @Describe("the file on this computer, absolute; not a hidden one, nor BotMaker's settings")
+                    String file,
+                    @Describe("where on the instance, absolute") String to)
+                implements Device {
+        }
+
+        @Describe("copy a file from the instance into BotMaker's pulls folder on this computer, under a name no other "
+                + "file there has; the answer says where")
+        record Pull(@Describe(INSTANCE) String instance, @Describe("the file on the instance, absolute") String path)
+                implements Device {
+        }
     }
+
+    private static final int LOG_LINES = 200;
+    private static final int LOG_MOST = 2000;
+    private static final String WRITABLE = "/sdcard, /storage or /data/local/tmp";
+    /** The folders {@code push} writes under: shared storage and adb's own scratch, nothing an app or Android runs. */
+    static final List<String> PUSH_ROOTS = List.of("/sdcard/", "/storage/", "/data/local/tmp/");
+    /** A device path {@code push} and {@code pull} take: absolute, plain characters, no {@code ..}. */
+    private static final Pattern DEVICE_PATH = Pattern.compile("/[\\w./+@-]*");
+    private static final Pattern LOG_LEVEL = Pattern.compile("[VDIWEF]");
 
     /** The commands {@code shell} runs, each a word or two that only read. */
     static final List<String> SHELL_READS = List.of("dumpsys", "getprop", "pm list", "wm size",
@@ -142,7 +191,8 @@ final class DeviceTools {
     static AssistantTool<AssistantTool.OneOf<Device>> tool() {
         return AssistantTool.named("device").describedAs("The Android emulators and phones on this computer, with "
                 + "or without a project: list, start, stop, checks, fix, apps, search_store, install, launch_app, "
-                + "stop_app, restart_app, focus, screenshot, tap, swipe, key, shell. Name an instance as list does.")
+                + "stop_app, restart_app, focus, screenshot, tap, swipe, key, shell, logcat, processes, crash, push, "
+                + "pull. Name an instance as list does.")
                 .takesOneOf(Device.class).handledBy((action, context) -> reply(action));
     }
 
@@ -249,7 +299,182 @@ final class DeviceTools {
                     return out == null || out.isBlank() ? "(no output)" : out.strip();
                 });
             }
+            case Device.Logcat logcat -> {
+                String level = logLevel(logcat.level());
+                int lines = logcat.lines() == null ? LOG_LINES : Math.clamp(logcat.lines(), 1, LOG_MOST);
+                String pkg = logcat.pkg() == null || logcat.pkg().isBlank() ? null : pkg(logcat.pkg());
+                String text = logcat.text() == null || logcat.text().isBlank() ? null : logcat.text().strip();
+                yield withDevice(logcat.instance(), device -> {
+                    String pid = pkg == null ? null : mainPid(device, pkg);
+                    String out = text == null ? device.shell(logcatCommand(lines, pid, level))
+                            : lastHolding(device.shell(logcatCommand(0, pid, level)), text, lines);
+                    return out == null || out.isBlank() ? "(no line" + (text == null ? ")" : " holds \"" + text + "\")")
+                            : out.strip();
+                });
+            }
+            case Device.Processes processes -> withDevice(processes.instance(), device -> {
+                String filter = processes.name() == null ? "" : processes.name().strip();
+                List<String> rows = processRows(device.shell(PS), filter);
+                return rows.isEmpty() ? "No process" + (filter.isEmpty() ? "" : " holds \"" + filter + "\"") + "."
+                        : String.join("\n", rows);
+            });
+            case Device.Crash crash -> {
+                String pkg = pkg(crash.pkg());
+                yield withDevice(crash.instance(), device -> {
+                    // By pid: `am crash <package>` hit LDPlayer's WebView renderer, a process of the same package.
+                    String pid = mainPid(device, pkg);
+                    String said = device.shell("am crash " + pid);
+                    return "Sent a crash to " + pkg + " (pid " + pid + ")" + (said == null || said.isBlank() ? "."
+                            : ": " + said.strip());
+                });
+            }
+            case Device.Push push -> {
+                String to = devicePath(push.to());
+                if (PUSH_ROOTS.stream().noneMatch(to::startsWith)) {
+                    throw new IllegalArgumentException("push writes only under " + WRITABLE + ".");
+                }
+                Path file = pushable(push.file(), UserDirs.config());
+                String size = size(file.toFile().length());
+                yield withDevice(push.instance(), device -> {
+                    try {
+                        device.pushData(file.toFile(), to);
+                    } catch (IOException e) {
+                        throw new UncheckedIOException(e);
+                    }
+                    return "Copied " + file.getFileName() + " (" + size + ") to " + to + ".";
+                });
+            }
+            case Device.Pull pull -> {
+                String path = devicePath(pull.path());
+                Path pulls = UserDirs.cache().resolve("pulls");
+                yield withDevice(pull.instance(), device -> {
+                    try {
+                        Files.createDirectories(pulls);
+                        Path to = pulledTo(pulls, path);
+                        device.pull(path, to.toFile());
+                        return "Copied " + path + " to " + to + " (" + size(Files.size(to)) + ").";
+                    } catch (IOException e) {
+                        throw new UncheckedIOException(e);
+                    }
+                });
+            }
         };
+    }
+
+    /** Android's {@code ps}, a line per process: pid, resident memory in kB, name. */
+    static final String PS = "ps -A -o PID,RSS,NAME";
+
+    /** {@code ps}'s rows whose name, the last column, holds {@code filter} (all of them for a blank one), no header. */
+    static List<String> processRows(String ps, String filter) {
+        if (ps == null) return List.of();
+        return ps.lines().skip(1).map(String::strip).filter(row -> !row.isEmpty())
+                .filter(row -> filter.isEmpty() || row.substring(row.lastIndexOf(' ') + 1).contains(filter)).toList();
+    }
+
+    /**
+     * {@code logcat}'s command: dumped, of one process when {@code pid} is set, its last {@code lines} cut after the
+     * level's filter, since {@code -t} cuts before it (MuMu, 2026-11-11: {@code -t 5 '*:W'} printed nothing).
+     */
+    static String logcatCommand(int lines, String pid, String level) {
+        return "logcat -d" + (pid == null ? "" : " --pid=" + pid) + (level == null ? "" : " '*:" + level + "'")
+                + (lines > 0 ? " | tail -n " + lines : "");
+    }
+
+    /**
+     * The last {@code lines} of {@code log} that hold {@code text}, in any case: matched here, as plain text, so no
+     * pattern reaches the device's shell.
+     */
+    static String lastHolding(String log, String text, int lines) {
+        if (log == null) return "";
+        String wanted = text.toLowerCase(Locale.ROOT);
+        List<String> held = log.lines().filter(line -> line.toLowerCase(Locale.ROOT).contains(wanted)).toList();
+        return String.join("\n", held.subList(Math.max(0, held.size() - lines), held.size()));
+    }
+
+    /** {@code bytes} as people read a file's size. */
+    static String size(long bytes) {
+        if (bytes < 1024) return bytes + " bytes";
+        if (bytes < 1024 * 1024) return bytes / 1024 + " kB";
+        return String.format(Locale.ROOT, "%.1f MB", bytes / (1024.0 * 1024));
+    }
+
+    /** {@code level} as logcat's letter, or null when not given. */
+    static String logLevel(String level) {
+        if (level == null || level.isBlank()) return null;
+        String said = level.strip().substring(0, 1).toUpperCase(Locale.ROOT);
+        if (!LOG_LEVEL.matcher(said).matches()) {
+            throw new IllegalArgumentException("\"" + level + "\" is no log level: V, D, I, W, E or F.");
+        }
+        return said;
+    }
+
+    /**
+     * The pid of the process named {@code pkg}, its main one; the app's others are named {@code pkg:…}. Several of that
+     * very name are refused rather than guessed between.
+     */
+    private static String mainPid(AdbDevice device, String pkg) {
+        String said = device.shell("pidof " + pkg);
+        List<String> pids = said == null || said.isBlank() ? List.of() : List.of(said.strip().split("\\s+"));
+        if (pids.isEmpty() || !pids.getFirst().matches("\\d+")) {
+            throw new IllegalArgumentException(pkg + " is not running.");
+        }
+        if (pids.size() > 1) {
+            throw new IllegalArgumentException("Several processes are called " + pkg + " (" + String.join(", ", pids)
+                    + "); processes tells them apart.");
+        }
+        return pids.getFirst();
+    }
+
+    /** {@code path} when it is an absolute device path of plain characters with no {@code ..}. */
+    static String devicePath(String path) {
+        String said = path == null ? "" : path.strip();
+        if (!DEVICE_PATH.matcher(said).matches() || said.contains("..")) {
+            throw new IllegalArgumentException("\"" + path + "\" is no absolute path on the instance (letters, "
+                    + "digits and . / _ - + @ only).");
+        }
+        return said;
+    }
+
+    /**
+     * {@code file} when it is an existing file on this computer, given absolute, that holds nothing private: not under
+     * {@code settings} (BotMaker's, its credentials among them) and nothing hidden on its way ({@code .ssh}, {@code .git}).
+     */
+    static Path pushable(String file, Path settings) {
+        Path path = file == null || file.isBlank() ? null : Path.of(file.strip());
+        if (path == null || !path.isAbsolute() || !Files.isRegularFile(path)) {
+            throw new IllegalArgumentException(file + " is no file on this computer; give its absolute path.");
+        }
+        Path real;
+        Path kept;
+        try {
+            real = path.toRealPath();
+            kept = Files.exists(settings) ? settings.toRealPath() : settings.toAbsolutePath().normalize();
+        } catch (IOException e) {
+            throw new IllegalArgumentException(file + " cannot be read: " + e.getMessage());
+        }
+        boolean hidden = false;
+        for (Path part : real) hidden |= part.toString().startsWith(".");
+        if (hidden || real.startsWith(kept)) {
+            throw new IllegalArgumentException("push copies no hidden file and nothing of BotMaker's settings.");
+        }
+        return real;
+    }
+
+    /** Where a pull of {@code devicePath} lands in {@code pulls}: its name, numbered past any file already there. */
+    static Path pulledTo(Path pulls, String devicePath) {
+        String name = devicePath.substring(devicePath.lastIndexOf('/') + 1);
+        if (name.isEmpty() || name.equals(".")) {
+            throw new IllegalArgumentException("pull copies a file, not " + devicePath + ".");
+        }
+        int dot = name.lastIndexOf('.');
+        String stem = dot > 0 ? name.substring(0, dot) : name;
+        String extension = dot > 0 ? name.substring(dot) : "";
+        Path landing = pulls.resolve(name);
+        for (int n = 2; Files.exists(landing) || Files.exists(landing.resolveSibling(landing.getFileName() + ".part"));
+             n++) {
+            landing = pulls.resolve(stem + "-" + n + extension);
+        }
+        return landing;
     }
 
     /** The products' status lines, then one line per instance: its reference, product, state and adb address. */
