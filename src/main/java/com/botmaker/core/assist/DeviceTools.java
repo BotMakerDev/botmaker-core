@@ -275,11 +275,14 @@ final class DeviceTools {
             });
             case Device.Tap tap -> withDevice(tap.instance(), device -> {
                 device.tap(tap.x(), tap.y());
+                ReplyMeta.put(ReplyMeta.TAP, ReplyMeta.point(tap.x(), tap.y()));
                 return "Tapped " + tap.x() + "," + tap.y() + ".";
             });
             case Device.Swipe swipe -> withDevice(swipe.instance(), device -> {
                 long ms = swipe.ms() == null ? 300 : Math.clamp(swipe.ms(), 1, 10_000);
                 device.swipe(swipe.x1(), swipe.y1(), swipe.x2(), swipe.y2(), ms);
+                ReplyMeta.put(ReplyMeta.TAP, ReplyMeta.path(List.of(ReplyMeta.point(swipe.x1(), swipe.y1()),
+                        ReplyMeta.point(swipe.x2(), swipe.y2()))));
                 return "Swiped " + swipe.x1() + "," + swipe.y1() + " → " + swipe.x2() + "," + swipe.y2() + " in "
                         + ms + " ms.";
             });

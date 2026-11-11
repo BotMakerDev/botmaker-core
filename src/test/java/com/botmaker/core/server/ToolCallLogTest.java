@@ -2,10 +2,14 @@ package com.botmaker.core.server;
 
 import com.botmaker.core.CoreJson;
 import com.botmaker.core.assist.PluginTools;
+import com.botmaker.core.assist.ReplyMeta;
 import com.botmaker.core.event.CoreEvent;
 import com.botmaker.core.event.CoreEvent.ToolCallEnded;
+import com.botmaker.core.event.CoreEvent.ToolCallEnded.Changed;
+import com.botmaker.core.event.CoreEvent.ToolCallEnded.Extras;
 import com.botmaker.core.event.CoreEvent.ToolCallEnded.Outcome;
 import com.botmaker.core.event.CoreEvent.ToolCallEnded.Part;
+import com.botmaker.core.event.CoreEvent.ToolCallEnded.Point;
 import com.botmaker.core.event.CoreEvent.ToolCallProgress;
 import com.botmaker.core.event.CoreEvent.ToolCallStarted;
 import com.botmaker.core.event.CoreEvent.ToolCallStep;
@@ -173,6 +177,26 @@ class ToolCallLogTest {
         BufferedImage thumbnail = ImageIO.read(new ByteArrayInputStream(Base64.getDecoder().decode(part.value())));
         assertEquals(ToolCallLog.THUMBNAIL_SIDE, thumbnail.getWidth());
         assertEquals(540, thumbnail.getHeight());
+        assertEquals(1920, part.width(), "the image's own size, which a tap's point is in");
+        assertEquals(1080, part.height());
+    }
+
+    @Test
+    void aRepliesMetaToldAsItsExtras() {
+        log.watch(heard::add);
+        Map<String, Object> meta = Map.of(
+                ReplyMeta.TAP, Map.of("path", List.of(Map.of("x", 1, "y", 2), Map.of("x", 30, "y", 40))),
+                ReplyMeta.CHANGED, List.of(Map.of("file", "/bot/Main.java", "class", "Main", "method", "run"),
+                        Map.of("file", "/bot/Main.java", "method", "no class, left out")),
+                "other/key", "ignored");
+        call(log.logged(tool("device", "", request -> CallToolResult.builder().addTextContent("Swiped.")
+                .meta(meta).build())), Map.of());
+        settle();
+
+        ToolCallEnded ended = (ToolCallEnded) heard.get(1);
+        assertEquals(List.of(new Point(1, 2), new Point(30, 40)), ended.extras().tap());
+        assertEquals(List.of(new Changed("/bot/Main.java", "Main", "run")), ended.extras().changed());
+        assertEquals(Extras.NONE, ToolCallLog.extras(Map.of(ReplyMeta.TAP, Map.of("x", "not a number", "y", 2))));
     }
 
     @Test

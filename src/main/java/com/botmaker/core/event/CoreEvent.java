@@ -312,25 +312,66 @@ public sealed interface CoreEvent {
     /**
      * The call {@code call} answered, after {@code millis}: its outcome and its reply, part by part. {@code elsewhere}
      * counts the device steps that ran meanwhile on a thread not carrying any call's scope (a plugin's own executor, a
-     * bot's capture): perhaps this call's, never listed under it.
+     * bot's capture): perhaps this call's, never listed under it. {@code extras} are what the reply's {@code _meta}
+     * said for a watcher to draw ({@code assist.ReplyMeta}).
      */
-    record ToolCallEnded(long call, Outcome outcome, List<Part> reply, long millis, long elsewhere) implements CoreEvent {
+    record ToolCallEnded(long call, Outcome outcome, List<Part> reply, long millis, long elsewhere, Extras extras)
+            implements CoreEvent {
         public ToolCallEnded {
             if (outcome == null) throw new IllegalArgumentException("a tool call's end has an outcome");
             reply = reply == null ? List.of() : List.copyOf(reply);
+            extras = extras == null ? Extras.NONE : extras;
+        }
+
+        /** An end whose reply said no extras. */
+        public ToolCallEnded(long call, Outcome outcome, List<Part> reply, long millis, long elsewhere) {
+            this(call, outcome, reply, millis, elsewhere, Extras.NONE);
         }
 
         /** Answered; refused ({@code REFUSED: why}, its tool's own no); or failed. */
         public enum Outcome { OK, REFUSED, ERROR }
 
-        /** One part of a reply: a text, or an image as a JPEG thumbnail in base64. */
-        public record Part(Kind kind, String value) {
+        /**
+         * One part of a reply: a text, or an image as a JPEG thumbnail in base64, {@code width} by {@code height} the
+         * image's own size before it was cut down (0 for a text).
+         */
+        public record Part(Kind kind, String value, int width, int height) {
             public Part {
                 if (kind == null) throw new IllegalArgumentException("a reply part has a kind");
                 value = value == null ? "" : value;
             }
 
+            /** A part whose own size is not said: a text. */
+            public Part(Kind kind, String value) {
+                this(kind, value, 0, 0);
+            }
+
             public enum Kind { TEXT, IMAGE }
+        }
+
+        /**
+         * Where the call touched the screen (one point for a tap, a path for a swipe), in the pixels of the screen it
+         * touched; and the methods its edit changed.
+         */
+        public record Extras(List<Point> tap, List<Changed> changed) {
+            public static final Extras NONE = new Extras(List.of(), List.of());
+
+            public Extras {
+                tap = tap == null ? List.of() : List.copyOf(tap);
+                changed = changed == null ? List.of() : List.copyOf(changed);
+            }
+        }
+
+        /** A point on a screen, in its pixels. */
+        public record Point(int x, int y) {}
+
+        /** A method an edit changed: its file (absolute), its class and its name. */
+        public record Changed(String file, String className, String method) {
+            public Changed {
+                file = file == null ? "" : file;
+                className = className == null ? "" : className;
+                method = method == null ? "" : method;
+            }
         }
     }
 

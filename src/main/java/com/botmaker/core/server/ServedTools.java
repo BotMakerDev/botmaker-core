@@ -167,7 +167,7 @@ public final class ServedTools {
             if (admitted.content() == null || admitted.content().isEmpty()) return answer;
             List<McpSchema.Content> content = new ArrayList<>(answer.content() == null ? List.of() : answer.content());
             content.addAll(admitted.content());
-            return CallToolResult.builder().content(content).isError(answer.isError()).build();
+            return CallToolResult.builder().content(content).isError(answer.isError()).meta(answer.meta()).build();
         }).build();
     }
 

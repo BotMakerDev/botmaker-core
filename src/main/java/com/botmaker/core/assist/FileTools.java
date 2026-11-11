@@ -5,8 +5,10 @@ import com.botmaker.plugin.api.assist.AssistantTool;
 import com.botmaker.plugin.api.assist.Describe;
 import com.botmaker.plugin.api.assist.Key;
 
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.function.BiFunction;
 import java.util.function.Function;
@@ -231,6 +233,10 @@ final class FileTools {
         if (!edits) return AgentReply.text(answer);
         if (turn.get().acceptedEdits() == 0) return AgentReply.refused(answer);
         String reshaped = tools.reshaped(before);
+        Path edited = turn.get().file();
+        List<Map<String, Object>> changed = edited == null ? List.of() : tools.changed(before).stream()
+                .map(m -> ReplyMeta.changed(edited.toAbsolutePath().toString(), m.owner(), m.name())).toList();
+        if (!changed.isEmpty()) ReplyMeta.put(ReplyMeta.CHANGED, changed);
         return AgentReply.text(answer + "\n" + bot.commit(turn.get(), "the assistant's change (MCP)")
                 + (reshaped.isEmpty() ? "" : "\nThe methods it reshaped, ids as they are now: " + reshaped));
     }

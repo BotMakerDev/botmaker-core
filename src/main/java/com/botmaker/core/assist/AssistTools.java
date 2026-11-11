@@ -204,6 +204,29 @@ public final class AssistTools {
         return out.toString();
     }
 
+    /**
+     * The methods whose statements differ from every method of their owner and name in {@code before}, or are new:
+     * what an edit changed. By what each says, not by its ids: a method inserted above another moves the other's
+     * structural ids, and an overload removed moves the next one's place, and neither changed it.
+     */
+    synchronized List<BlockView.Method> changed(List<BlockView.Method> before) {
+        Map<String, List<String>> was = new HashMap<>();
+        for (BlockView.Method m : before) was.computeIfAbsent(m.owner() + "." + m.name(), k -> new ArrayList<>()).add(said(m.body()));
+        return current().tree().stream()
+                .filter(m -> !was.getOrDefault(m.owner() + "." + m.name(), List.of()).contains(said(m.body())))
+                .toList();
+    }
+
+    /** {@code body}'s statements and their bodies, by their words alone. */
+    private static String said(BlockView.Body body) {
+        StringBuilder out = new StringBuilder("{");
+        for (BlockView.Statement s : body.statements()) {
+            out.append(s.text()).append(';');
+            s.bodies().forEach(b -> out.append(said(b)));
+        }
+        return out.append('}').toString();
+    }
+
     /** Past this, a statement's words in an outline are cut. */
     private static final int OUTLINE_WORDS = 60;
 

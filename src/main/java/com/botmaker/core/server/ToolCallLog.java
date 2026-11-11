@@ -1,10 +1,14 @@
 package com.botmaker.core.server;
 
 import com.botmaker.core.assist.PluginTools;
+import com.botmaker.core.assist.ReplyMeta;
 import com.botmaker.core.event.CoreEvent;
 import com.botmaker.core.event.CoreEvent.ToolCallEnded;
+import com.botmaker.core.event.CoreEvent.ToolCallEnded.Changed;
+import com.botmaker.core.event.CoreEvent.ToolCallEnded.Extras;
 import com.botmaker.core.event.CoreEvent.ToolCallEnded.Outcome;
 import com.botmaker.core.event.CoreEvent.ToolCallEnded.Part;
+import com.botmaker.core.event.CoreEvent.ToolCallEnded.Point;
 import com.botmaker.core.event.CoreEvent.ToolCallProgress;
 import com.botmaker.core.event.CoreEvent.ToolCallStarted;
 import com.botmaker.core.event.CoreEvent.ToolCallStep;
@@ -110,7 +114,8 @@ final class ToolCallLog {
             }
             long millis = millisSince(began);
             long elsewhere = DeviceSteps.unscoped() - unscoped;
-            told.execute(() -> record(new ToolCallEnded(call, outcome(result), parts(result), millis, elsewhere)));
+            told.execute(() -> record(new ToolCallEnded(call, outcome(result), parts(result), millis, elsewhere,
+                    extras(result.meta()))));
             return result;
         }).build();
     }
@@ -186,7 +191,8 @@ final class ToolCallLog {
             List<Part> reply = ended.reply().stream().map(part -> part.kind() == Part.Kind.IMAGE
                     ? new Part(Part.Kind.TEXT, IMAGE_GONE) : part).toList();
             call.setValue(call.getValue().ended(
-                    new ToolCallEnded(ended.call(), ended.outcome(), reply, ended.millis(), ended.elsewhere())));
+                    new ToolCallEnded(ended.call(), ended.outcome(), reply, ended.millis(), ended.elsewhere(),
+                            ended.extras())));
         }
     }
 
@@ -215,13 +221,42 @@ final class ToolCallLog {
         return refused ? Outcome.REFUSED : Outcome.ERROR;
     }
 
+    /**
+     * What the reply's {@code _meta} said for a watcher ({@link ReplyMeta}'s keys); a key of another shape, or another
+     * tool's own key, is left out.
+     */
+    static Extras extras(Map<String, Object> meta) {
+        if (meta == null || meta.isEmpty()) return Extras.NONE;
+        List<Point> tap = new ArrayList<>();
+        if (meta.get(ReplyMeta.TAP) instanceof Map<?, ?> touched) {
+            point(touched).ifPresent(tap::add);
+            if (touched.get("path") instanceof List<?> path) {
+                for (Object each : path) if (each instanceof Map<?, ?> p) point(p).ifPresent(tap::add);
+            }
+        }
+        List<Changed> changed = new ArrayList<>();
+        if (meta.get(ReplyMeta.CHANGED) instanceof List<?> methods) {
+            for (Object each : methods) {
+                if (each instanceof Map<?, ?> m && m.get("file") instanceof String file
+                        && m.get("class") instanceof String className && m.get("method") instanceof String method) {
+                    changed.add(new Changed(file, className, method));
+                }
+            }
+        }
+        return tap.isEmpty() && changed.isEmpty() ? Extras.NONE : new Extras(tap, changed);
+    }
+
+    private static Optional<Point> point(Map<?, ?> at) {
+        return at.get("x") instanceof Number x && at.get("y") instanceof Number y
+                ? Optional.of(new Point(x.intValue(), y.intValue())) : Optional.empty();
+    }
+
     static List<Part> parts(CallToolResult result) {
         List<Part> out = new ArrayList<>();
         for (McpSchema.Content content : result.content() == null ? List.<McpSchema.Content>of() : result.content()) {
             switch (content) {
                 case McpSchema.TextContent text -> out.add(new Part(Part.Kind.TEXT, text.text()));
                 case McpSchema.ImageContent image -> out.add(thumbnail(image.data())
-                        .map(jpeg -> new Part(Part.Kind.IMAGE, jpeg))
                         .orElseGet(() -> new Part(Part.Kind.TEXT, "[an image that could not be read]")));
                 default -> out.add(new Part(Part.Kind.TEXT, "[" + content.type() + "]"));
             }
@@ -233,7 +268,7 @@ final class ToolCallLog {
      * {@code base64}'s image as a JPEG whose long side is at most {@link #THUMBNAIL_SIDE}, in base64; what is
      * transparent shows white, as a viewer draws it.
      */
-    static Optional<String> thumbnail(String base64) {
+    static Optional<Part> thumbnail(String base64) {
         try {
             BufferedImage read = ImageIO.read(new ByteArrayInputStream(Base64.getDecoder().decode(base64)));
             if (read == null) return Optional.empty();
@@ -252,7 +287,8 @@ final class ToolCallLog {
             }
             ByteArrayOutputStream bytes = new ByteArrayOutputStream();
             if (!ImageIO.write(out, "jpg", bytes)) return Optional.empty();
-            return Optional.of(Base64.getEncoder().encodeToString(bytes.toByteArray()));
+            return Optional.of(new Part(Part.Kind.IMAGE, Base64.getEncoder().encodeToString(bytes.toByteArray()),
+                    read.getWidth(), read.getHeight()));
         } catch (IOException | IllegalArgumentException e) {
             return Optional.empty();
         }

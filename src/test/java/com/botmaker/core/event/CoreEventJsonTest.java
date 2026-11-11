@@ -65,7 +65,9 @@ class CoreEventJsonTest {
             new CoreEvent.ToolCallProgress(7, "127.0.0.1:5555", "install base.apk", 1_000, 3_000_000_000L),
             new CoreEvent.ToolCallEnded(7, CoreEvent.ToolCallEnded.Outcome.OK, List.of(
                     new CoreEvent.ToolCallEnded.Part(CoreEvent.ToolCallEnded.Part.Kind.TEXT, "The Notice closed."),
-                    new CoreEvent.ToolCallEnded.Part(CoreEvent.ToolCallEnded.Part.Kind.IMAGE, "/9j/4AAQ")), 412, 2));
+                    new CoreEvent.ToolCallEnded.Part(CoreEvent.ToolCallEnded.Part.Kind.IMAGE, "/9j/4AAQ", 1080, 1920)),
+                    412, 2, new CoreEvent.ToolCallEnded.Extras(List.of(new CoreEvent.ToolCallEnded.Point(450, 1520)),
+                    List.of(new CoreEvent.ToolCallEnded.Changed("/bot/src/Main.java", "Main", "run")))));
 
     @Test
     void everyEventRoundTrips() {

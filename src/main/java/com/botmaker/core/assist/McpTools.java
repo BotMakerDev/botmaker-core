@@ -214,7 +214,8 @@ public final class McpTools {
         if (news.isEmpty()) return answer;
         List<McpSchema.Content> content = new ArrayList<>(answer.content() == null ? List.of() : answer.content());
         content.add(new McpSchema.TextContent(String.join("\n", news)));
-        return CallToolResult.builder().content(content).isError(answer.isError()).build();
+        // The meta stays: it is what the call told the Assistant window (ReplyMeta).
+        return CallToolResult.builder().content(content).isError(answer.isError()).meta(answer.meta()).build();
     }
 
     /** {@code tool} with {@link #withNews}: the home's tools, which nothing else wraps. */
@@ -331,10 +332,13 @@ public final class McpTools {
      */
     static SyncToolSpecification served(McpJsonMapper json, AssistantTool<?> tool) {
         return spec(json, tool.name(), tool.description(), schemaOf(tool.schema()), request -> {
-            AgentReply reply = tool.invoke(arguments(request), null);
+            ReplyMeta.Collected<AgentReply> ran = ReplyMeta.collecting(() -> tool.invoke(arguments(request), null));
+            AgentReply reply = ran.answer();
             String said = reply.parts().isEmpty() ? "" : reply.parts().getFirst().text();
-            return reply(reply.isRefused() && said.startsWith(tool.name() + ": ")
+            CallToolResult result = reply(reply.isRefused() && said.startsWith(tool.name() + ": ")
                     ? AgentReply.refused("REFUSED: " + said) : reply);
+            return ran.meta().isEmpty() ? result
+                    : CallToolResult.builder().content(result.content()).isError(result.isError()).meta(ran.meta()).build();
         });
     }
 
