@@ -1,5 +1,7 @@
 package com.botmaker.core.assist;
 
+import com.botmaker.cli.ai.AiTool;
+import com.botmaker.cli.ai.BotGuard;
 import com.botmaker.shared.config.CacheDirs;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -78,9 +80,12 @@ public record McpConfig(boolean enabled, int port, String token) {
      * process listing. Other clients take the same URL and header in their own config format.
      */
     public String claudeCodeCommand(Path configFile) throws IOException {
-        Path config = AiTool.writeClaudeConfig(configFile, "http://127.0.0.1:" + port + McpEndpoint.PATH, token);
+        Path file = configFile.toAbsolutePath();
+        AiTool.Connection endpoint = new AiTool.Connection.Http(
+                "http://127.0.0.1:" + port + McpEndpoint.PATH, token, file.getParent());
+        Path config = AiTool.writeClaudeConfig(file, endpoint);
         StringBuilder command = new StringBuilder("claude");
-        for (String arg : AiTool.claudeArguments(config, BotGuard.SHELL)) {
+        for (String arg : AiTool.claudeArguments(config, endpoint, BotGuard.SHELL)) {
             command.append(' ').append(arg.matches("[A-Za-z0-9_./:=-]+") ? arg : '"' + arg + '"');
         }
         return command.toString();
