@@ -9,6 +9,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- `device`'s `checks` and `fix` cover BlueStacks, LDPlayer, MuMu, MEmu and GameLoop (shared's
+  `WindowsEmulatorChecks`); `fix` with `undo` puts back the last Fix of the check it names.
 - `CoreClient.watchCalls()` asks for every MCP call (`Request.WatchCalls`), as Studio's Assistant window does.
 - Every MCP call the core serves is told to each client that asks (`Request.WatchCalls`), with or without a project
   open: the `CoreEvent`s `ToolCallStarted` (tool, plugin, arguments, when) and `ToolCallEnded` (OK, refused or error,

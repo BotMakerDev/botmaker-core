@@ -244,7 +244,8 @@ final class DeviceTools {
                 Fixes.Context context = fixes(instance);
                 List<CheckResult> results = EmulatorChecks.run(instance, null);
                 CheckAnswers.Said said = CheckAnswers.fix(fix.check(), Boolean.TRUE.equals(fix.undo()), results,
-                        result -> Fixes.of(result, context), Fixes::undo, CheckAnswers.runnerOf(instance),
+                        result -> Fixes.of(result, context), named -> Fixes.undo(context, named),
+                        CheckAnswers.runnerOf(instance),
                         CHECKS_CALL);
                 if (said.refused()) throw new IllegalArgumentException(said.text());
                 yield said.text();
