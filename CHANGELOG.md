@@ -9,6 +9,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- `CoreClient.watchCalls()` asks for every MCP call (`Request.WatchCalls`), as Studio's Assistant window does.
 - Every MCP call the core serves is told to each client that asks (`Request.WatchCalls`), with or without a project
   open: the `CoreEvent`s `ToolCallStarted` (tool, plugin, arguments, when) and `ToolCallEnded` (OK, refused or error,
   the reply, how long), each image in the reply as a JPEG thumbnail at most 960 px across. The last 500 calls are kept

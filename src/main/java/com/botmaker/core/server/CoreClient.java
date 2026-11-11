@@ -103,6 +103,11 @@ public final class CoreClient implements AutoCloseable {
         return ask(new Request.Tools(ids.incrementAndGet(), tools, admits), ANSWER_TIMEOUT);
     }
 
+    /** Every MCP call the core serves told to this client from now on, the kept ones first; see {@link Request.WatchCalls}. */
+    public EditResult watchCalls() throws IOException {
+        return ask(new Request.WatchCalls(ids.incrementAndGet()), ANSWER_TIMEOUT);
+    }
+
     /** This client's answer, an MCP result as its JSON, to the core's call {@code call}; see {@link Reply.Call}. */
     public EditResult called(long call, String result) throws IOException {
         return ask(new Request.Called(ids.incrementAndGet(), call, result), ANSWER_TIMEOUT);
