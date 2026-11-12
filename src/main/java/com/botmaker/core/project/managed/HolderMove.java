@@ -63,24 +63,40 @@ public final class HolderMove {
     public static Optional<Refactor.Outcome> plan(BotIndex index, ProjectConfig config, List<PluginFiles.Holder> holders) {
         List<Moved> moved = moves(index, config, holders);
         if (moved.isEmpty()) return Optional.empty();
+        List<Moved> stale = new ArrayList<>();
         for (Moved each : moved) {
-            if (index.sources().containsKey(each.to()) || Files.exists(each.to())) {
-                return Optional.of(new Refactor.Refused(relative(config, each.to()) + " exists already, so "
-                        + relative(config, each.from()) + " was not moved."));
+            if (!index.sources().containsKey(each.to()) && !Files.exists(each.to())) continue;
+            // A committed copy of a parameter group the bot has in params/ already (2026-11-12: SwordXStaff's Game
+            // and Running in plugins/): params/ is the bot's own, fitted from starting-params/, so the copy goes.
+            if (ManagedHolders.groupSegmentOf(each.to()) != null && index.sources().containsKey(each.to())) {
+                stale.add(each);
+                continue;
             }
+            return Optional.of(new Refactor.Refused(relative(config, each.to()) + " exists already, so "
+                    + relative(config, each.from()) + " was not moved."));
         }
         Map<Path, String> rewrites;
         try {
-            rewrites = rewrites(index, moved);
+            rewrites = new LinkedHashMap<>(rewrites(index, moved));
         } catch (AstRewriteHelper.RewriteFailed failed) {
             return Optional.of(new Refactor.Refused(failed.getMessage()));
         }
+        // The copy "moves" onto params/'s file carrying that file's own text: the copy is gone, params/ unchanged.
+        stale.forEach(each -> rewrites.put(each.from(),
+                rewrites.getOrDefault(each.to(), index.sources().get(each.to()))));
         Map<Path, Path> moves = new LinkedHashMap<>();
         moved.forEach(each -> moves.put(each.from(), each.to()));
         Set<String> folders = new LinkedHashSet<>();
-        moved.forEach(each -> folders.add(relative(config, each.to().getParent()) + "/"));
-        Refactor.Planned plan = new Refactor.Planned("Moved " + moved.size() + (moved.size() == 1 ? " file" : " files")
-                + " to " + String.join(", ", folders), rewrites, moves);
+        moved.stream().filter(each -> !stale.contains(each))
+                .forEach(each -> folders.add(relative(config, each.to().getParent()) + "/"));
+        List<String> parts = new ArrayList<>();
+        int count = moved.size() - stale.size();
+        if (count > 0) parts.add("Moved " + count + (count == 1 ? " file" : " files") + " to " + String.join(", ", folders));
+        if (!stale.isEmpty()) {
+            parts.add("Removed " + String.join(", ", stale.stream().map(each -> relative(config, each.from())).toList())
+                    + ", " + (stale.size() == 1 ? "a copy" : "copies") + " of what params/ holds");
+        }
+        Refactor.Planned plan = new Refactor.Planned(String.join("; ", parts), rewrites, moves);
         return Optional.of(Refactor.checked(index, plan, "Moving the plugin files"));
     }
 
@@ -117,8 +133,13 @@ public final class HolderMove {
             to.add(relative(config, now.getParent()) + "/");
         });
         int count = plan.moves().size();
-        return (count == 1 ? "A plugin file is" : count + " plugin files are") + " in " + String.join(", ", from)
-                + ", not where Studio writes them now (" + String.join(", ", to) + "). They work where they are.";
+        long copies = plan.moves().values().stream().filter(Files::exists).count();
+        String where = (count == 1 ? "A plugin file is" : count + " plugin files are") + " in " + String.join(", ", from)
+                + ", not where Studio writes them now (" + String.join(", ", to) + ").";
+        return where + (copies == 0 ? " They work where they are."
+                : " " + (copies == 1 ? "One is a committed copy" : copies + " are committed copies")
+                + " of a parameter group the bot keeps there, privately; Move removes "
+                + (copies == 1 ? "it" : "them") + ".");
     }
 
     /** The holders to move, each outside its plugin's folder. */

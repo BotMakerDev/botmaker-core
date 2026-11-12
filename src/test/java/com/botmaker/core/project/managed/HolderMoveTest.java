@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.File;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -208,6 +209,45 @@ class HolderMoveTest {
         assertEquals(Map.of(from, java("params/com_github_botmakerdev/botmaker_sdk/Values.java")), plan.moves());
         assertTrue(plan.rewrites().get(from).startsWith("package com.bot.params.com_github_botmakerdev.botmaker_sdk;"),
                 plan.rewrites().get(from));
+    }
+
+    /**
+     * A committed copy in plugins/ of a group params/ has already (2026-11-12, SwordXStaff): the copy goes, params/
+     * keeps its own text, and a use of the copy follows to params/.
+     */
+    @Test
+    void aCopyOfAParameterGroupInParamsIsRemoved() throws Exception {
+        Path copy = java("plugins/com_github_botmakerdev/botmaker_sdk/Values.java");
+        Path own = java("params/com_github_botmakerdev/botmaker_sdk/Values.java");
+        String copyText = group("com.bot.plugins.com_github_botmakerdev.botmaker_sdk", "Values", "DO_SETUP", "doSetup");
+        String ownText = group("com.bot.params.com_github_botmakerdev.botmaker_sdk", "Values", "DO_SETUP", "doSetup")
+                .replace("return true;", "return false;");
+        Path user = java("Main.java");
+        String userText = """
+                package com.bot;
+
+                import com.bot.plugins.com_github_botmakerdev.botmaker_sdk.Values;
+
+                public final class Main {
+                    static Class<?> group() {
+                        return Values.class;
+                    }
+                }
+                """;
+        Map<Path, String> sources = Map.of(copy, copyText, own, ownText, user, userText);
+
+        assertTrue(HolderMove.anyOutside(sources, WITH_GROUPS));
+        Refactor.Planned plan = assertInstanceOf(Refactor.Planned.class,
+                HolderMove.plan(index(sources), config(), WITH_GROUPS).orElseThrow());
+
+        assertEquals(Map.of(copy, own), plan.moves());
+        assertEquals(ownText, plan.rewrites().get(copy), "params/'s own text, not the copy's");
+        assertTrue(plan.rewrites().get(user).contains("import com.bot.params.com_github_botmakerdev.botmaker_sdk.Values;"),
+                plan.rewrites().get(user));
+        assertTrue(plan.summary().startsWith("Removed "), plan.summary());
+        Files.createDirectories(own.getParent());
+        Files.writeString(own, ownText);
+        assertTrue(HolderMove.offer(config(), plan).contains("committed copy"), HolderMove.offer(config(), plan));
     }
 
     private static boolean setup() {

@@ -65,6 +65,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Opening a project in a core whose jars were rebuilt under it (`NoClassDefFoundError`) answered nothing, so Studio
   loaded forever; the open is now refused with why, the project's lock released, and its plugins unbound.
+- A plugin's parameter group committed in `plugins/` while `params/` has its own (an older Studio's move) was never
+  offered back, since `params/` held the file already: `HolderMove` now plans removing the copy, `params/` kept as
+  it is and every use of the copy following it, and the banner says it is a committed copy.
 
 ### Changed
 
