@@ -16,6 +16,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   than its release). Method values only so far. A write locks the folder across processes (`.lock`).
 - `StudioServices.hostValues()` is served, with or without a bot open (`plugin.HostFolders`): the newest version of a
   plugin bound in this process serves its values of this PC, and a project pinning an older one gets that copy.
+- A newer plugin version repairs its host folder before its first read or write (`plugin.HostUpgrade`), as a bot's
+  values are on that plugin's upgrade: its `@Migrate` rules when the older jar is on this PC, then a gone id removed and
+  a value that no longer compiles reset and marked `@Refactor`; each class's copy kept in `.history/`, the version
+  recorded only once the repair succeeded.
 - A bot's values never hold a value of this PC: a bind plans no host holder, and `pluginValues()` neither reads,
   opens nor creates one.
 - `device`'s `focus` names the home app and marks an app in front that is the emulator's own (its launcher, store or

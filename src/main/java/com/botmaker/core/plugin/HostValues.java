@@ -5,6 +5,7 @@ import com.botmaker.core.project.managed.JavaManagedSource;
 import com.botmaker.core.project.managed.ManagedHolders;
 import com.botmaker.core.project.managed.ManagedIds;
 import com.botmaker.core.project.managed.ManagedMethod;
+import com.botmaker.core.project.managed.ManagedRepairs;
 import com.botmaker.core.project.params.BotRecords;
 import com.botmaker.java.grammar.JavaValue;
 import com.botmaker.java.grammar.ShortNames;
@@ -37,6 +38,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -66,7 +68,8 @@ import java.util.stream.Stream;
  *
  * <p><b>Only a newer plugin moves the folder on</b> (the user's call, 2026-11-12: the newest version on this PC serves
  * host data alone). {@code host.properties} records the version that last wrote; an older one reads and is refused
- * every write.
+ * every write. A newer one, before its first read or write, repairs the folder as a bot's values are on that plugin's
+ * upgrade ({@link HostUpgrade}) and records itself.
  *
  * <p>Method values only so far: an open set of this PC is refused with words.
  */
@@ -99,6 +102,15 @@ public final class HostValues implements PluginValues {
     private final ValueGrammar grammar;
     private final StudioServices services;
     private final Supplier<List<Path>> classpath;
+
+    /** Whether this version has checked the folder against the one recorded ({@link #upToDate}). */
+    private volatile boolean checked;
+
+    /**
+     * Whether this version's repair of the folder failed: it then never records itself, so the next instance (the
+     * next bind, the next start) repairs again rather than taking the folder as repaired.
+     */
+    private volatile boolean unrepaired;
 
     /**
      * @param root      the host's config root, under which {@code plugins/} lies
@@ -144,6 +156,7 @@ public final class HostValues implements PluginValues {
 
     @Override
     public List<String> ids() {
+        upToDate();
         return values().stream().map(ManagedMethod::id).toList();
     }
 
@@ -185,6 +198,7 @@ public final class HostValues implements PluginValues {
     @Override
     public Optional<ValueContext> open(ManagedValue<?> value) {
         if (value == null || !value.onHost()) return Optional.empty();
+        upToDate();
         Optional<ManagedMethod> found = find(value.id());
         if (found.isEmpty() || !found.get().editable()) return Optional.empty();
         ManagedMethod method = found.get();
@@ -206,6 +220,7 @@ public final class HostValues implements PluginValues {
             return Optional.of(ManagedIds.spelled(value.id(), List.of(value)) + " is an open set; this PC keeps "
                     + "method values only so far.");
         }
+        upToDate();
         return locked(() -> created(value, method));
     }
 
@@ -238,7 +253,94 @@ public final class HostValues implements PluginValues {
 
     /** {@code method}'s expression replaced by {@code expression}: empty when written, else why not. */
     private Optional<String> set(ManagedMethod method, JavaValue expression) {
+        upToDate();
         return locked(() -> setLocked(method, expression));
+    }
+
+    // ── upgrade ────────────────────────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Repairs the folder once when this version is newer than the one recorded ({@link HostUpgrade}), then records
+     * it. Called before any read or write, outside {@link #locked}, which it takes itself.
+     */
+    private void upToDate() {
+        if (checked) return;
+        String recorded = recorded();
+        if (recorded.isEmpty() || version.isEmpty() || compare(recorded, version) >= 0) {
+            checked = true;
+            return;
+        }
+        Optional<String> failed = locked(this::upgradeLocked);
+        // Tried once per instance whatever happens: a repair that fails is said once, not on every read.
+        checked = true;
+        if (failed.isPresent()) {
+            unrepaired = true;
+            warn(failed.get());
+        }
+    }
+
+    /** {@link #upToDate}'s repair, under the folder's lock; empty when done, else why not. */
+    private Optional<String> upgradeLocked() {
+        String from = recorded();
+        // Another instance or process moved the folder on while this one waited for the lock.
+        if (compare(from, version) >= 0) return Optional.empty();
+        Map<Path, String> sources = new LinkedHashMap<>();
+        for (Path file : sources()) {
+            try {
+                sources.put(file, Files.readString(file));
+            } catch (IOException | UncheckedIOException unreadable) {
+                return Optional.of("Could not read " + file + ", so this PC's values of " + plugin.artifactId()
+                        + " were not repaired for " + version + ": " + unreadable.getMessage());
+            }
+        }
+        ManagedRepairs.Planned planned;
+        try {
+            planned = HostUpgrade.plan(folder, sources, declared, grammar, classpath.get(), plugin, from, version);
+        } catch (RuntimeException e) {
+            return Optional.of("This PC's values of " + plugin.artifactId() + " could not be repaired for " + version
+                    + ", so they are left as written: " + e);
+        }
+        // Each class's copy is kept before it changes; a copy that cannot be kept is said and the repair goes on, as a
+        // write's does, so the folder is never left half repaired for the want of a backup.
+        List<String> failed = new ArrayList<>();
+        for (Map.Entry<Path, String> each : planned.rewrites().entrySet()) {
+            keepQuietly(each.getKey(), sources.get(each.getKey()));
+            try {
+                Files.writeString(each.getKey(), each.getValue());
+            } catch (IOException | UncheckedIOException e) {
+                failed.add(each.getKey().getFileName() + ": " + e.getMessage());
+            }
+        }
+        for (Path gone : planned.deleted()) {
+            keepQuietly(gone, sources.get(gone));
+            try {
+                Files.deleteIfExists(gone);
+            } catch (IOException e) {
+                failed.add(gone.getFileName() + ": " + e.getMessage());
+            }
+        }
+        String moving = "This PC's values of " + plugin.artifactId() + ", " + from + " to " + version + ": ";
+        planned.repaired().forEach(each -> info(moving + each));
+        planned.left().forEach(each -> warn(moving + each));
+        if (!failed.isEmpty()) {
+            return Optional.of("Could not repair this PC's values of " + plugin.artifactId() + " for " + version
+                    + ": " + String.join("; ", failed));
+        }
+        // What the repair kept as written may not compile: said now, since every write is refused until it does.
+        compiles().ifPresent(broken -> warn(moving + "the folder does not compile after the repair, so each write is"
+                + " refused until " + folder + " is fixed by hand. " + broken));
+        record();
+        return Optional.empty();
+    }
+
+    /** {@link #keep}, a copy that cannot be kept said rather than thrown. */
+    private void keepQuietly(Path file, String previous) {
+        if (previous == null) return;
+        try {
+            keep(file, previous);
+        } catch (IOException | UncheckedIOException e) {
+            warn("Could not keep the replaced " + file.getFileName() + " in " + HISTORY + ": " + e.getMessage());
+        }
     }
 
     private Optional<String> setLocked(ManagedMethod method, JavaValue expression) {
@@ -414,7 +516,7 @@ public final class HostValues implements PluginValues {
 
     /** Records this version after a write, unless a newer one is recorded. */
     private void record() {
-        if (version.isEmpty() || compare(recorded(), version) >= 0) return;
+        if (unrepaired || version.isEmpty() || compare(recorded(), version) >= 0) return;
         Properties properties = new Properties();
         properties.setProperty("plugin", plugin.toString());
         properties.setProperty("version", version);
@@ -464,6 +566,11 @@ public final class HostValues implements PluginValues {
 
     private void warn(String message) {
         if (services != null) services.log().warn(message);
+        else System.err.println("[host values] " + message);
+    }
+
+    private void info(String message) {
+        if (services != null) services.log().info(message);
         else System.err.println("[host values] " + message);
     }
 }
