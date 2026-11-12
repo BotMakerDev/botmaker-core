@@ -329,6 +329,7 @@ public final class HostPluginValues implements PluginValues {
             declared = declared.stream().filter(java.util.Objects::nonNull).toList();
             for (ManagedValue<?> value : declared) {
                 if (!id.equals(value.id())) continue;
+                if (value.onHost()) return Optional.of(HostValues.notTheBots(value));
                 // A method value its holder lacks, or a parameter (2026-10-12: a conditional one, now that its
                 // condition holds), is written into the holder the bot has.
                 java.util.Map<Path, List<ManagedValue<?>>> kept = value instanceof ManagedOpenSet<?>
@@ -622,7 +623,8 @@ public final class HostPluginValues implements PluginValues {
      */
     @Override
     public Optional<ValueContext> open(ManagedValue<?> value) {
-        return value == null ? Optional.empty() : open(value.id());
+        // A value of this PC is never the bot's: StudioServices.hostValues() opens it.
+        return value == null || value.onHost() ? Optional.empty() : open(value.id());
     }
 
     /** The bot's managed constants as they stand now, which a value of one of them is read and written as. */
@@ -632,6 +634,7 @@ public final class HostPluginValues implements PluginValues {
 
     @Override
     public Optional<String> create(ManagedValue<?> value) {
+        if (value != null && value.onHost()) return Optional.of(HostValues.notTheBots(value));
         // A parameter the bot already declares is there to open, or written by hand and left alone; only a missing
         // one is written. create(String) finds methods only.
         if (value instanceof ManagedParam<?>) {

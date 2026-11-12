@@ -118,7 +118,27 @@ public final class ManagedHolders {
             return new Plan.Write(config.parametersPackageDir().resolve(folder).resolve(holder + ".java"),
                     "params/" + folder + "/" + holder + ".java", unit(ast, pkg, imports, group));
         }
-        String pkg = config.mainPackage() + ".plugins." + segment;
+        // A sibling of this PC shares no file of the bot's, even under the same class name.
+        List<ManagedValue<?>> bots = declared.stream().filter(v -> v != null && !v.onHost()).toList();
+        return planIn(config.mainPackageDir().resolve("plugins").resolve(folder), "plugins/" + folder + "/",
+                config.mainPackage() + ".plugins." + segment, plugin, value, bots, grammar);
+    }
+
+    /**
+     * The holder for {@code value}, a method value or an open set, as the class {@code <holder>.java} in {@code dir}
+     * and the package {@code pkg}: a bot's ({@link #plan}) or this PC's host folder's ({@code HostValues}).
+     *
+     * @param relative what {@code dir} is called to the user, ending in {@code /}
+     */
+    public static Plan planIn(Path dir, String relative, String pkg, PluginCoordinate plugin, ManagedValue<?> value,
+                              List<ManagedValue<?>> declared, ValueGrammar grammar) {
+        String holder = value.holder();
+        if (holder == null || !SourceVersion.isName(holder) || holder.contains(".")) {
+            return new Plan.Refused(ManagedIds.spelled(value.id(), List.of(value))
+                                    + " is not a value BotMaker can be given a file for.");
+        }
+        AST ast = JavaLevel.LATEST.newAst();
+        TreeSet<String> imports = new TreeSet<>();
         AbstractTypeDeclaration written;
         try {
             written = value instanceof ManagedOpenSet.OneEnum<?> ? enumHolder(ast, plugin, value, imports)
@@ -130,9 +150,8 @@ public final class ManagedHolders {
             return new Plan.Refused("BotMaker cannot write " + holder + ": no plugin in this project declares"
                     + " what it holds.");
         }
-        String relative = "plugins/" + folder + "/" + holder + ".java";
-        return new Plan.Write(config.mainPackageDir().resolve("plugins").resolve(folder).resolve(holder + ".java"),
-                relative, unit(ast, pkg, imports, written));
+        return new Plan.Write(dir.resolve(holder + ".java"), relative + holder + ".java",
+                unit(ast, pkg, imports, written));
     }
 
     /**
@@ -363,10 +382,12 @@ public final class ManagedHolders {
                                      ValueGrammar grammar) {
         List<Plan> out = new ArrayList<>();
         java.util.Set<HolderFiles.Key> planned = new java.util.HashSet<>(present);
-        byPlugin.forEach((plugin, declared) -> {
+        byPlugin.forEach((plugin, all) -> {
+            // A value of this PC lives in the plugin's host folder: never planned, nor written beside a bot's.
+            List<ManagedValue<?>> declared = all.stream().filter(v -> v != null && !v.onHost()).toList();
             java.util.Set<String> holders = new java.util.LinkedHashSet<>();
             for (ManagedValue<?> value : declared) {
-                if (value != null && value.holder() != null) holders.add(value.holder());
+                if (value.holder() != null) holders.add(value.holder());
             }
             for (String holder : holders) {
                 List<ManagedValue<?>> held = declared.stream()
@@ -599,7 +620,8 @@ public final class ManagedHolders {
         java.util.Map<Path, List<ManagedValue<?>>> kept = new java.util.LinkedHashMap<>();
         byPlugin.forEach((plugin, declared) -> {
             for (ManagedValue<?> value : declared) {
-                if (value == null) continue;
+                // A value of this PC lives in its host folder, never in the bot (HostValues).
+                if (value == null || value.onHost()) continue;
                 Path file;
                 if (value instanceof ManagedParam<?>) {
                     Path group = groupFile(config, plugin, value.holder());

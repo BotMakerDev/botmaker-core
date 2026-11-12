@@ -9,6 +9,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- `plugin.HostValues`: a plugin's values of this PC (`HostHolder`) kept as Java in
+  `<config>/plugins/<group>/<artifact>/`, read and written as a bot's are. Each write is compiled against the plugin's
+  classpath and refused with javac's sentence when it would not compile, the replaced class kept in `.history/` (the
+  last 20), and `host.properties` refuses a write from a version older than the last writer (a `-SNAPSHOT` is older
+  than its release). Method values only so far; not served yet.
+- A bot's values never hold a value of this PC: a bind plans no host holder, and `pluginValues()` neither reads,
+  opens nor creates one.
 - `device`'s `focus` names the home app and marks an app in front that is the emulator's own (its launcher, store or
   ad), and reads the resumed activity when no window has the focus.
 - `device`'s `checks` and `fix` cover BlueStacks, LDPlayer, MuMu, MEmu and GameLoop (shared's

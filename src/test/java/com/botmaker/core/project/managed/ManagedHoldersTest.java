@@ -3,6 +3,7 @@ package com.botmaker.core.project.managed;
 import com.botmaker.plugin.api.params.Param;
 import com.botmaker.plugin.api.source.ManagedValue;
 import com.botmaker.plugin.host.PluginCoordinate;
+import com.botmaker.core.plugin.HostValuesTest;
 import com.botmaker.core.project.ProjectConfig;
 import com.botmaker.core.project.ProjectWrites;
 import com.botmaker.core.project.params.BotRecords;
@@ -158,6 +159,18 @@ class ManagedHoldersTest {
                 java.util.Set.of(), java.util.Set.of(), TestValues.GRAMMAR);
         assertEquals(List.of("plugins/com_github_botmakerdev/botmaker_sdk/Sdk.java", "plugins/com_github_botmakerdev/botmaker_sdk/Pictures.java"), plans.stream()
                 .map(p -> ((ManagedHolders.Plan.Write) p).relative()).toList());
+    }
+
+    /** A value of this PC is kept in the plugin's host folder: a bind never writes its holder into the bot. */
+    @Test
+    void onBindAHostHolderIsNeverPlanned() {
+        ProjectConfig config = ProjectConfig.forDirectory(dir.resolve("bot"));
+        List<ManagedValue<?>> withHost = new java.util.ArrayList<>(DECLARED);
+        withHost.add(HostValuesTest.GREETING);
+        List<ManagedHolders.Plan> plans = ManagedHolders.missing(config, java.util.Map.of(SDK, withHost),
+                java.util.Set.of(), java.util.Set.of(), TestValues.GRAMMAR);
+        assertTrue(plans.stream().noneMatch(p -> ((ManagedHolders.Plan.Write) p).relative().endsWith("Emulators.java")),
+                plans.toString());
     }
 
     @Test

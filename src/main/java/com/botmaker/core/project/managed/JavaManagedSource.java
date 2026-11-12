@@ -1,6 +1,7 @@
 package com.botmaker.core.project.managed;
 
 import com.botmaker.core.plugin.PluginHost;
+import com.botmaker.plugin.api.source.ManagedValue;
 import com.botmaker.java.grammar.SourceNode;
 import com.botmaker.java.grammar.ValueGrammar;
 import com.botmaker.java.grammar.ValueTypes;
@@ -22,6 +23,7 @@ import org.eclipse.jdt.core.dom.TypeDeclaration;
 import java.lang.reflect.Type;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 
 /**
@@ -68,13 +70,24 @@ public final class JavaManagedSource {
     /** The same over {@code unit}, already parsed from {@code source} — one of a {@code BotIndex}'s. */
     public static List<ManagedMethod> read(Path file, String source, CompilationUnit unit, ValueGrammar grammar,
                                            BotRecords records) {
+        // A value of this PC is never the bot's, even when a bot file carries its mark: HostValues reads it.
+        return read(file, source, unit, grammar, records,
+                PluginHost.managedValues().stream().filter(value -> !value.onHost()).toList());
+    }
+
+    /**
+     * The same, a mark matched against {@code known} rather than the bound plugins' values: one plugin's values of
+     * this PC, read out of its host folder ({@code HostValues}).
+     */
+    public static List<ManagedMethod> read(Path file, String source, CompilationUnit unit, ValueGrammar grammar,
+                                           BotRecords records, Collection<ManagedValue<?>> known) {
         List<ManagedMethod> out = new ArrayList<>();
         unit.accept(new ASTVisitor() {
             @Override
             public boolean visit(MethodDeclaration method) {
-                Annotation annotation = managedAnnotation(method);
+                Annotation annotation = ManagedIds.on(method, known);
                 if (annotation == null) return false;
-                String id = idOf(annotation);
+                String id = ManagedIds.idOf(annotation, known);
                 if (id.isEmpty()) return false;
                 String className = JavaParameterSource.enclosingTypeName(method);
                 if (className == null) return false;
