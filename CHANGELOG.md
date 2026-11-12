@@ -9,6 +9,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- `device` gets `accounts`: the Google accounts signed in on a running instance, by email (the user's call,
+  2026-11-12), read only. While BotMaker signs an instance in to Google or out of it, every action that shows,
+  touches or changes it is refused (`screenshot`, `shell`, `logcat`, the taps, the app and install actions, `stop`,
+  `push`, `pull`; shared's `SignInsRunning`): a password is typed there. Its reads stay open. Nothing in the tool
+  signs in, applies a configuration or manages instances.
 - `plugin.HostValues`: a plugin's values of this PC (`HostHolder`) kept as Java in
   `<config>/plugins/<group>/<artifact>/`, read and written as a bot's are. Each write is compiled against the plugin's
   classpath and refused with javac's sentence when it would not compile, the replaced class kept in `.history/` (the

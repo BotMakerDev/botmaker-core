@@ -7,16 +7,22 @@ import com.botmaker.shared.emulator.EmulatorInstance;
 import com.botmaker.shared.emulator.EmulatorState;
 import com.botmaker.shared.emulator.PlatformId;
 import com.botmaker.shared.emulator.Platforms;
+import com.botmaker.shared.emulator.google.SignInsRunning;
+import com.botmaker.shared.tools.UserDirs;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -28,7 +34,7 @@ class DeviceToolsTest {
         assertEquals("device", tool.name());
         String schema = McpTools.schemaOf(tool.schema());
         for (String action : List.of("list", "start", "stop", "checks", "fix", "apps", "search_store", "install",
-                "launch_app", "stop_app", "restart_app", "focus", "screenshot", "tap", "swipe", "key", "shell",
+                "launch_app", "stop_app", "restart_app", "focus", "accounts", "screenshot", "tap", "swipe", "key", "shell",
                 "logcat", "processes", "crash", "push", "pull")) {
             assertTrue(schema.contains("\"" + action + "\""), action + " in " + schema);
         }
@@ -127,6 +133,44 @@ class DeviceToolsTest {
                     refused.toString());
         }
         assertThrows(IllegalArgumentException.class, () -> DeviceTools.pushable("shot.png", settings));
+    }
+
+    @Test
+    void theAccountsAreSaidByEmailAndNoListIsNotNoAccount() {
+        assertEquals("Android did not list its accounts.", DeviceTools.accounts(null));
+        assertEquals("No Google account is signed in.", DeviceTools.accounts(Set.of()));
+        assertEquals("1 Google account signed in:\nuser@example.com", DeviceTools.accounts(Set.of("user@example.com")));
+        Set<String> two = new LinkedHashSet<>(List.of("user@example.com", "other@example.com"));
+        assertEquals("2 Google accounts signed in:\nuser@example.com\nother@example.com", DeviceTools.accounts(two));
+    }
+
+    @Test
+    void anInstanceBeingSignedInIsClosedToTheScreenShellAndLog(@TempDir Path cache) {
+        String before = System.getProperty(UserDirs.CACHE_PROPERTY);
+        System.setProperty(UserDirs.CACHE_PROPERTY, cache.toString());
+        try {
+            EmulatorInstance farm = new EmulatorInstance(PlatformId.LDPLAYER, "Farm", "127.0.0.1", 5555);
+            EmulatorInstance other = new EmulatorInstance(PlatformId.MUMU, "MuMu-0", "127.0.0.1", 16384);
+            assertSame(farm, DeviceTools.unwatched(farm));
+            try (SignInsRunning.Hold ignored = SignInsRunning.hold(farm)) {
+                IllegalArgumentException refused = assertThrows(IllegalArgumentException.class,
+                        () -> DeviceTools.unwatched(farm));
+                assertTrue(refused.getMessage().startsWith("BotMaker is signing Farm in to Google"),
+                        refused.getMessage());
+                assertSame(other, DeviceTools.unwatched(other), "another instance stays open");
+            }
+            assertSame(farm, DeviceTools.unwatched(farm), "open again once the sign-in ends");
+            assertEquals("Farm", DeviceTools.closedDuringSignIn(new DeviceTools.Device.Screenshot("Farm")));
+            assertEquals("Farm", DeviceTools.closedDuringSignIn(new DeviceTools.Device.Shell("Farm", "getprop")));
+            assertEquals("Farm", DeviceTools.closedDuringSignIn(new DeviceTools.Device.Tap("Farm", 1, 1)));
+            assertEquals("Farm", DeviceTools.closedDuringSignIn(new DeviceTools.Device.LaunchApp("Farm", "a.b")));
+            assertEquals("Farm", DeviceTools.closedDuringSignIn(new DeviceTools.Device.Stop("Farm")));
+            assertNull(DeviceTools.closedDuringSignIn(new DeviceTools.Device.Accounts("Farm")));
+            assertNull(DeviceTools.closedDuringSignIn(new DeviceTools.Device.Focus("Farm")));
+        } finally {
+            if (before == null) System.clearProperty(UserDirs.CACHE_PROPERTY);
+            else System.setProperty(UserDirs.CACHE_PROPERTY, before);
+        }
     }
 
     @Test

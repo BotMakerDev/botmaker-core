@@ -17,6 +17,8 @@ import com.botmaker.shared.emulator.checks.CheckAnswers;
 import com.botmaker.shared.emulator.checks.CheckResult;
 import com.botmaker.shared.emulator.checks.EmulatorChecks;
 import com.botmaker.shared.emulator.checks.Fixes;
+import com.botmaker.shared.emulator.config.InstanceFacts;
+import com.botmaker.shared.emulator.google.SignInsRunning;
 import com.botmaker.shared.launch.EmulatorAppLauncher;
 import com.botmaker.shared.tools.UserDirs;
 
@@ -29,6 +31,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.regex.Pattern;
 
@@ -102,6 +105,10 @@ final class DeviceTools {
 
         @Describe("what is in front: the focused app's package (marked when it is the emulator's own launcher, store or ad, which a run puts behind the game), the resumed activity, the home app, and any system dialog")
         record Focus(@Describe(INSTANCE) String instance) implements Device {
+        }
+
+        @Describe("the Google accounts signed in on a running instance, by email")
+        record Accounts(@Describe(INSTANCE) String instance) implements Device {
         }
 
         @Describe("the instance's screen, at its own size")
@@ -192,13 +199,16 @@ final class DeviceTools {
     static AssistantTool<AssistantTool.OneOf<Device>> tool() {
         return AssistantTool.named("device").describedAs("The Android emulators and phones on this computer, with "
                 + "or without a project: list, start, stop, checks, fix, apps, search_store, install, launch_app, "
-                + "stop_app, restart_app, focus, screenshot, tap, swipe, key, shell, logcat, processes, crash, push, "
-                + "pull. Name an instance as list does.")
+                + "stop_app, restart_app, focus, accounts, screenshot, tap, swipe, key, shell, logcat, processes, crash, "
+                + "push, pull. Name an instance as list does.")
                 .takesOneOf(Device.class).handledBy((action, context) -> reply(action));
     }
 
     private static AgentReply reply(Device action) {
         try {
+            String closed = closedDuringSignIn(action);
+            // finding the instance scans this PC: only when some sign-in may be running
+            if (closed != null && SignInsRunning.any()) unwatched(instance(closed));
             if (action instanceof Device.Screenshot shot) {
                 return withDevice(shot.instance(), device -> {
                     BufferedImage image = device.screencap();
@@ -279,6 +289,8 @@ final class DeviceTools {
                         + (shown.theApps() ? " (about the app in front)" : "")));
                 return String.join("\n", lines);
             });
+            case Device.Accounts accounts -> withDevice(accounts.instance(),
+                    device -> accounts(InstanceFacts.googleAccounts(device)));
             case Device.Tap tap -> withDevice(tap.instance(), device -> {
                 device.tap(tap.x(), tap.y());
                 ReplyMeta.put(ReplyMeta.TAP, ReplyMeta.point(tap.x(), tap.y()));
@@ -585,6 +597,57 @@ final class DeviceTools {
         try (AdbDevice device = AdbDevice.connect(instance.adb())) {
             return use.apply(device);
         }
+    }
+
+    /**
+     * The instance {@code action} shows, touches or changes, which is closed to it while BotMaker signs that instance
+     * in to Google or out of it (a password is typed there, and anything that moves the screen breaks the sign-in);
+     * null for an action that only reads what holds no password. Each new action says which it is.
+     */
+    static String closedDuringSignIn(Device action) {
+        return switch (action) {
+            case Device.List ignored -> null;
+            case Device.SearchStore ignored -> null;
+            case Device.Start ignored -> null;
+            case Device.Checks ignored -> null;
+            case Device.Apps ignored -> null;
+            case Device.Focus ignored -> null;
+            case Device.Accounts ignored -> null;
+            case Device.Processes ignored -> null;
+            case Device.Stop stop -> stop.instance();
+            case Device.Fix fix -> fix.instance();
+            case Device.Install install -> install.instance();
+            case Device.LaunchApp launch -> launch.instance();
+            case Device.StopApp stop -> stop.instance();
+            case Device.RestartApp restart -> restart.instance();
+            case Device.Screenshot shot -> shot.instance();
+            case Device.Tap tap -> tap.instance();
+            case Device.Swipe swipe -> swipe.instance();
+            case Device.Key key -> key.instance();
+            case Device.Shell shell -> shell.instance();
+            case Device.Logcat logcat -> logcat.instance();
+            case Device.Crash crash -> crash.instance();
+            case Device.Push push -> push.instance();
+            case Device.Pull pull -> pull.instance();
+        };
+    }
+
+    /** {@code instance} when no sign-in runs on it. */
+    static EmulatorInstance unwatched(EmulatorInstance instance) {
+        if (SignInsRunning.on(instance)) {
+            throw new IllegalArgumentException("BotMaker is signing " + instance.name() + " in to Google or out of "
+                    + "it: device only reads it (focus, apps, accounts, processes, checks) until that ends. Ask again "
+                    + "in a minute.");
+        }
+        return instance;
+    }
+
+    /** {@code emails} as the accounts action says them; null when Android did not list them. */
+    static String accounts(Set<String> emails) {
+        if (emails == null) return "Android did not list its accounts.";
+        if (emails.isEmpty()) return "No Google account is signed in.";
+        return emails.size() + " Google account" + (emails.size() == 1 ? "" : "s") + " signed in:\n"
+                + String.join("\n", emails);
     }
 
     /** What a fix needs here: no bot, so no size to hold the screen to, and a start that brings the instance up. */
