@@ -5,6 +5,13 @@ All notable changes to `botmaker-core`.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this module uses
 [semantic versioning](https://semver.org/). `release.sh` refuses to cut a version with no section here.
 
+## [Unreleased]
+
+### Changed
+
+- Built against botmaker-cli 0.12.1, whose catalog check fills a bot's `params/` from `starting-params/` before it
+  compiles the tag.
+
 ## [0.1.0] — 2026-11-10
 
 ### Added
