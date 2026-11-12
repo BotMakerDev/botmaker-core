@@ -29,7 +29,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   opens nor creates one.
 - `device`'s `focus` names the home app and marks an app in front that is the emulator's own (its launcher, store or
   ad), and reads the resumed activity when no window has the focus.
-- `device`'s `checks` and `fix` cover BlueStacks, LDPlayer, MuMu, MEmu and GameLoop (shared's
+- `device` no longer lists or starts GameLoop (2026-11-12, dropped with shared's support for it).
+- `device`'s `checks` and `fix` cover BlueStacks, LDPlayer, MuMu and MEmu (shared's
   `WindowsEmulatorChecks`); `fix` with `undo` puts back the last Fix of the check it names.
 - `CoreClient.watchCalls()` asks for every MCP call (`Request.WatchCalls`), as Studio's Assistant window does.
 - Every MCP call the core serves is told to each client that asks (`Request.WatchCalls`), with or without a project
