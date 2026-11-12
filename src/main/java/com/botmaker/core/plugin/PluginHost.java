@@ -298,6 +298,8 @@ public final class PluginHost {
         swap(opened, opened == null ? List.of() : opened.plugins());
         devBuilds = bound(released.dev());
         loadedJars = loadedJars();
+        // After swap, so the grammar it keeps is the one these plugins compose.
+        HostFolders.bound(plugins, admitted.loadable());
         // A bind with no project told nobody it opened, so nobody is owed its close.
         serving = services != null;
     }

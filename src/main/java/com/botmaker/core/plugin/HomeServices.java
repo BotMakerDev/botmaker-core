@@ -27,7 +27,8 @@ public final class HomeServices implements StudioServices {
         }
     }
 
-    private static final StudioServices BARE = HostServices.forProject(null, UiPort.NONE);
+    /** Services bound to no bot and no screen: what a host facility with neither speaks through. */
+    static final StudioServices BARE =HostServices.forProject(null, UiPort.NONE);
 
     @Override
     public Path projectDir() {
@@ -67,6 +68,12 @@ public final class HomeServices implements StudioServices {
     @Override
     public PluginValues pluginValues() {
         return refusing(PluginValues.class);
+    }
+
+    /** The calling plugin's values of this PC: they need no bot ({@link HostFolders}). */
+    @Override
+    public PluginValues hostValues() {
+        return BARE.hostValues();
     }
 
     /** {@link History#NONE}, which the contract makes total: a batch of writes that needs no bot still runs. */

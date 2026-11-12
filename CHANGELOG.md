@@ -13,7 +13,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   `<config>/plugins/<group>/<artifact>/`, read and written as a bot's are. Each write is compiled against the plugin's
   classpath and refused with javac's sentence when it would not compile, the replaced class kept in `.history/` (the
   last 20), and `host.properties` refuses a write from a version older than the last writer (a `-SNAPSHOT` is older
-  than its release). Method values only so far; not served yet.
+  than its release). Method values only so far. A write locks the folder across processes (`.lock`).
+- `StudioServices.hostValues()` is served, with or without a bot open (`plugin.HostFolders`): the newest version of a
+  plugin bound in this process serves its values of this PC, and a project pinning an older one gets that copy.
 - A bot's values never hold a value of this PC: a bind plans no host holder, and `pluginValues()` neither reads,
   opens nor creates one.
 - `device`'s `focus` names the home app and marks an app in front that is the emulator's own (its launcher, store or

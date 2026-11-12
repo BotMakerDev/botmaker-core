@@ -28,6 +28,10 @@ import java.io.IOException;
 import java.io.Reader;
 import java.io.UncheckedIOException;
 import java.io.Writer;
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
+import java.nio.channels.OverlappingFileLockException;
+import java.nio.file.StandardOpenOption;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -78,6 +82,9 @@ public final class HostValues implements PluginValues {
     static final int KEPT = 20;
 
     private static final Pattern NUMBERS = Pattern.compile("(\\d+)");
+
+    /** The file the other process's writer waits on. */
+    static final String LOCK_FILE = ".lock";
 
     /** One lock per folder: every bot's {@code HostValues} of one plugin writes the same files. */
     private static final Map<Path, Object> LOCKS = new ConcurrentHashMap<>();
@@ -199,9 +206,7 @@ public final class HostValues implements PluginValues {
             return Optional.of(ManagedIds.spelled(value.id(), List.of(value)) + " is an open set; this PC keeps "
                     + "method values only so far.");
         }
-        synchronized (lock()) {
-            return created(value, method);
-        }
+        return locked(() -> created(value, method));
     }
 
     /** {@link #create}'s write, under the folder's lock. */
@@ -233,9 +238,7 @@ public final class HostValues implements PluginValues {
 
     /** {@code method}'s expression replaced by {@code expression}: empty when written, else why not. */
     private Optional<String> set(ManagedMethod method, JavaValue expression) {
-        synchronized (lock()) {
-            return setLocked(method, expression);
-        }
+        return locked(() -> setLocked(method, expression));
     }
 
     private Optional<String> setLocked(ManagedMethod method, JavaValue expression) {
@@ -255,14 +258,36 @@ public final class HostValues implements PluginValues {
         return write(method.file(), after);
     }
 
-    /** The lock every write to this folder takes, whichever instance makes it. */
-    private Object lock() {
-        return LOCKS.computeIfAbsent(folder.toAbsolutePath().normalize(), key -> new Object());
+    /**
+     * {@code work} under the folder's locks: one per folder in this process, whichever instance writes, and a file
+     * lock on {@code .lock} for the other process (Studio's copy of a plugin beside the core's).
+     */
+    private Optional<String> locked(Supplier<Optional<String>> work) {
+        Path real;
+        try {
+            // The real path, so two spellings of one folder (a short 8.3 name, a link) share one monitor.
+            real = Files.createDirectories(folder).toRealPath();
+        } catch (IOException e) {
+            return Optional.of("Could not make " + folder + ": " + e.getMessage());
+        }
+        synchronized (LOCKS.computeIfAbsent(real, key -> new Object())) {
+            try (FileChannel channel = FileChannel.open(real.resolve(LOCK_FILE),
+                    StandardOpenOption.CREATE, StandardOpenOption.WRITE);
+                 FileLock ignored = channel.lock()) {
+                return work.get();
+            } catch (IOException | OverlappingFileLockException e) {
+                return Optional.of("Could not lock " + folder + ": " + e.getMessage());
+            } catch (LinkageError e) {
+                // The serving version's loader closed under it (a project bound an older one): say so, never throw.
+                return Optional.of("This PC's values of " + plugin + " cannot be written now (" + e
+                        + "); reopening the bot binds the plugin again.");
+            }
+        }
     }
 
     /**
      * Writes {@code source} to {@code file}, then compiles the folder: when that fails, puts the old text back and
-     * answers javac's sentence; else keeps the old text in {@code .history/}. Under {@link #lock()}.
+     * answers javac's sentence; else keeps the old text in {@code .history/}. Under {@link #locked}.
      */
     private Optional<String> write(Path file, String source) {
         String previous;

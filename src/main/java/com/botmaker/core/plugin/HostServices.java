@@ -139,6 +139,15 @@ public final class HostServices implements StudioServices {
     }
 
     /**
+     * The calling plugin's values of this PC, served by the newest version of it this process bound
+     * ({@link HostFolders}), whether or not a project is open; {@link PluginValues#NONE} for a call of the host's own.
+     */
+    @Override
+    public PluginValues hostValues() {
+        return PluginHost.calling().map(HostFolders::of).orElse(PluginValues.NONE);
+    }
+
+    /**
      * The open project's undo history, or {@link History#NONE} between projects — read from {@link HostHistory}
      * each time, for the reason {@link #runs()} is.
      */
