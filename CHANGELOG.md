@@ -66,6 +66,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Opening a project in a core whose jars were rebuilt under it (`NoClassDefFoundError`) answered nothing, so Studio
   loaded forever; the open is now refused with why, the project's lock released, and its plugins unbound.
 
+### Changed
+
+- Built against botmaker-cli 0.12.1, whose catalog check fills a bot's `params/` from `starting-params/` before it
+  compiles the tag.
+
 ## [0.1.0] — 2026-11-10
 
 ### Added
