@@ -87,10 +87,11 @@ public class HostValuesTest {
         assertTrue(values.open(GREETING).isEmpty());
 
         assertEquals(Optional.empty(), values.create(GREETING));
-        Path file = values.folder().resolve("Emulators.java");
+        Path file = values.sourcesDir().resolve("Emulators.java");
         assertTrue(Files.isRegularFile(file), "the holder is written");
         assertTrue(text(file).startsWith("package com_github_example.my_plugin;"), text(file));
         assertEquals(root.resolve("plugins/com_github_example/my_plugin"), values.folder());
+        assertEquals(values.folder().resolve("src/main/java/com_github_example/my_plugin"), values.sourcesDir());
         assertTrue(values.ids().contains(GREETING.id()), values.ids().toString());
         assertEquals("1.0.0", values.recorded());
 
@@ -105,7 +106,7 @@ public class HostValuesTest {
     void aMissingMethodIsAddedToItsHolder() throws Exception {
         HostValues values = values("1.0.0");
         values.create(GREETING);
-        Path file = values.folder().resolve("Emulators.java");
+        Path file = values.sourcesDir().resolve("Emulators.java");
         if (values.ids().contains(SPEED.id())) {
             // The holder was written with every value it holds; drop one to see it come back.
             Files.writeString(file, text(file).replaceAll("(?s)\\s*@[\\w.]*PcValue\\([\\w.]*SPEED\\).*?}\\s*", "\n"));
@@ -135,10 +136,10 @@ public class HostValuesTest {
     void uncompilableRefused() throws Exception {
         HostValues values = values("1.0.0");
         values.create(GREETING);
-        Path file = values.folder().resolve("Emulators.java");
+        Path file = values.sourcesDir().resolve("Emulators.java");
         String before = text(file);
         // A helper class beside it that breaks once the folder is compiled with the next write.
-        Files.writeString(values.folder().resolve("Broken.java"),
+        Files.writeString(values.sourcesDir().resolve("Broken.java"),
                 "package com_github_example.my_plugin; class Broken { int x = \"no\"; }");
 
         ValueContext opened = values.open(GREETING).orElseThrow();
@@ -151,7 +152,7 @@ public class HostValuesTest {
     void olderVersionRefused() throws Exception {
         values("2.0.0").create(GREETING);
         HostValues older = values("1.9.9");
-        Path file = older.folder().resolve("Emulators.java");
+        Path file = older.sourcesDir().resolve("Emulators.java");
         String before = text(file);
 
         older.open(GREETING).orElseThrow().write("older");
@@ -173,7 +174,7 @@ public class HostValuesTest {
     void aDeletedHolderOpensEmptyAndIsWrittenAgain() throws Exception {
         HostValues values = values("1.0.0");
         values.create(GREETING);
-        Files.delete(values.folder().resolve("Emulators.java"));
+        Files.delete(values.sourcesDir().resolve("Emulators.java"));
 
         assertTrue(values.open(GREETING).isEmpty());
         assertEquals(Optional.empty(), values.create(GREETING));
@@ -188,7 +189,7 @@ public class HostValuesTest {
         try (Stream<Path> kept = Files.list(values.folder().resolve(HostValues.HISTORY))) {
             assertEquals(HostValues.KEPT, kept.count());
         }
-        assertTrue(text(values.folder().resolve("Emulators.java")).contains("\"v24\""));
+        assertTrue(text(values.sourcesDir().resolve("Emulators.java")).contains("\"v24\""));
     }
 
     @Test

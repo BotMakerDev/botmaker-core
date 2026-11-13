@@ -26,7 +26,6 @@ import javax.tools.StandardJavaFileManager;
 import javax.tools.ToolProvider;
 import java.io.File;
 import java.io.IOException;
-import java.io.Reader;
 import java.io.UncheckedIOException;
 import java.io.Writer;
 import java.nio.channels.FileChannel;
@@ -44,7 +43,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
@@ -54,29 +52,29 @@ import java.util.stream.Stream;
 
 /**
  * One plugin's values of this PC ({@link com.botmaker.plugin.api.managed.HostHolder}), read and written as Java in its
- * host folder, {@code <config>/plugins/<group>/<artifact>/}: what {@link StudioServices#hostValues()} answers.
+ * host folder, {@code <config>/plugins/<group>/<artifact>/}: what {@link StudioServices#hostValues()} answers. The folder
+ * is a project the plugin manages ({@link HostProject}): its classes in {@code src/main/java/<group>/<artifact>/}, its
+ * version in {@code pom.xml}, its history git; an older folder is moved into that layout before its first write.
  *
  * <p><b>The bot's reading and writing, over another folder.</b> A value is read by {@link JavaManagedSource}, its
  * expression replaced by {@link JavaManagedEdits}, a missing holder planned by {@link ManagedHolders#planIn} — the
  * same pieces {@link HostPluginValues} puts a bot's values through. What differs is what the folder is: one plugin's,
- * every bot's, in no version, publish or {@code .bmk}, and on no run's classpath. So it has no Project History; each
- * write keeps the class it replaced in {@code .history/} instead (the last {@value #KEPT}).
+ * every bot's, in no version, publish or {@code .bmk}, and on no run's classpath. Its history is its own git, not the
+ * bot's; until each write is a commit there, a write keeps the class it replaced in {@code .history/} (the last
+ * {@value #KEPT}), which git ignores.
  *
  * <p><b>Each write is compiled</b> with the folder's other classes against the plugin's classpath; one that would not
  * compile is put back and refused with javac's sentence. A host with no compiler, or no classpath for the plugin,
  * writes unchecked, and says so once. Every instance over one folder writes under one lock.
  *
  * <p><b>Only a newer plugin moves the folder on</b> (the user's call, 2026-11-12: the newest version on this PC serves
- * host data alone). {@code host.properties} records the version that last wrote; an older one reads and is refused
+ * host data alone). The pom records the version that last wrote; an older one reads and is refused
  * every write. A newer one, before its first read or write, repairs the folder as a bot's values are on that plugin's
  * upgrade ({@link HostUpgrade}) and records itself.
  *
  * <p>Method values only so far: an open set of this PC is refused with words.
  */
 public final class HostValues implements PluginValues {
-
-    /** The file naming the plugin version that last wrote the folder. */
-    public static final String PROPERTIES = "host.properties";
 
     /** The folder each replaced class is kept in. */
     public static final String HISTORY = ".history";
@@ -96,12 +94,16 @@ public final class HostValues implements PluginValues {
     private static final AtomicBoolean UNCHECKED = new AtomicBoolean();
 
     private final Path folder;
+    private final HostProject project;
     private final PluginCoordinate plugin;
     private final String version;
     private final List<ManagedValue<?>> declared;
     private final ValueGrammar grammar;
     private final StudioServices services;
     private final Supplier<List<Path>> classpath;
+
+    /** Whether this instance has made the folder a project, or tried to ({@link HostProject#ready}). */
+    private volatile boolean readied;
 
     /** Whether this version has checked the folder against the one recorded ({@link #upToDate}). */
     private volatile boolean checked;
@@ -114,13 +116,14 @@ public final class HostValues implements PluginValues {
 
     /**
      * @param root      the host's config root, under which {@code plugins/} lies
-     * @param version   the version of {@code plugin} asking, compared with {@code host.properties}
+     * @param version   the version of {@code plugin} asking, compared with the one the folder's pom names
      * @param declared  every value the plugin declares; its values of this PC are kept
      * @param classpath the plugin's jar and what it needs, which a write is compiled against
      */
     public HostValues(Path root, PluginCoordinate plugin, String version, List<ManagedValue<?>> declared,
                       ValueGrammar grammar, StudioServices services, Supplier<List<Path>> classpath) {
         this.folder = folder(root, plugin);
+        this.project = new HostProject(folder, plugin);
         this.plugin = plugin;
         this.version = version == null ? "" : version;
         this.declared = declared == null ? List.of()
@@ -147,9 +150,14 @@ public final class HostValues implements PluginValues {
                 + "StudioServices.hostValues() keeps it.";
     }
 
-    /** The folder this reads and writes. */
+    /** The folder this reads and writes, the project's root. */
     public Path folder() {
         return folder;
+    }
+
+    /** Where the holder classes are, {@code src/main/java/<group>/<artifact>/} under {@link #folder()}. */
+    public Path sourcesDir() {
+        return project.sources();
     }
 
     // ── reading ────────────────────────────────────────────────────────────────────────────────────────────
@@ -180,10 +188,11 @@ public final class HostValues implements PluginValues {
         return values().stream().filter(value -> value.id().equals(id)).findFirst();
     }
 
-    /** The folder's {@code .java} files, in name order; none when it does not exist. */
+    /** The project's holder classes, in name order; none before it is made. */
     private List<Path> sources() {
-        if (!Files.isDirectory(folder)) return List.of();
-        try (Stream<Path> files = Files.list(folder)) {
+        Path dir = project.classes();
+        if (!Files.isDirectory(dir)) return List.of();
+        try (Stream<Path> files = Files.list(dir)) {
             return files.filter(Files::isRegularFile).filter(file -> file.toString().endsWith(".java"))
                     .sorted().toList();
         } catch (IOException | UncheckedIOException unreadable) {
@@ -229,7 +238,8 @@ public final class HostValues implements PluginValues {
         if (find(value.id()).isPresent()) return Optional.empty();
         Optional<String> older = olderThanFolder();
         if (older.isPresent()) return older;
-        Path file = folder.resolve(value.holder() + ".java");
+        Path dir = project.classes();
+        Path file = dir.resolve(value.holder() + ".java");
         String source;
         if (Files.exists(file)) {
             try {
@@ -243,7 +253,7 @@ public final class HostValues implements PluginValues {
                 return Optional.of("Could not read " + file + ": " + e.getMessage());
             }
         } else {
-            ManagedHolders.Plan plan = ManagedHolders.planIn(folder, folder + File.separator, packageOf(plugin),
+            ManagedHolders.Plan plan = ManagedHolders.planIn(dir, dir + File.separator, packageOf(plugin),
                     plugin, value, declared, grammar);
             if (plan instanceof ManagedHolders.Plan.Refused refused) return Optional.of(refused.reason());
             source = ((ManagedHolders.Plan.Write) plan).source();
@@ -265,6 +275,8 @@ public final class HostValues implements PluginValues {
      */
     private void upToDate() {
         if (checked) return;
+        // An older folder is moved before it is read, so the first read already sees the project.
+        if (!readied && project.isLegacy()) locked(Optional::empty).ifPresent(this::warn);
         String recorded = recorded();
         if (recorded.isEmpty() || version.isEmpty() || compare(recorded, version) >= 0) {
             checked = true;
@@ -295,7 +307,7 @@ public final class HostValues implements PluginValues {
         }
         ManagedRepairs.Planned planned;
         try {
-            planned = HostUpgrade.plan(folder, sources, declared, grammar, classpath.get(), plugin, from, version);
+            planned = HostUpgrade.plan(project.classesRoot(), sources, declared, grammar, classpath.get(), plugin, from, version);
         } catch (RuntimeException e) {
             return Optional.of("This PC's values of " + plugin.artifactId() + " could not be repaired for " + version
                     + ", so they are left as written: " + e);
@@ -376,6 +388,13 @@ public final class HostValues implements PluginValues {
             try (FileChannel channel = FileChannel.open(real.resolve(LOCK_FILE),
                     StandardOpenOption.CREATE, StandardOpenOption.WRITE);
                  FileLock ignored = channel.lock()) {
+                // Made a project first, under the lock, so two writers never move or seed the folder twice; once per
+                // instance. History is not what a write needs: a project that cannot be made is said, and the write
+                // goes where the classes are (HostProject.classes).
+                if (!readied) {
+                    readied = true;
+                    project.ready(version).ifPresent(this::warn);
+                }
                 return work.get();
             } catch (IOException | OverlappingFileLockException e) {
                 return Optional.of("Could not lock " + folder + ": " + e.getMessage());
@@ -394,7 +413,7 @@ public final class HostValues implements PluginValues {
     private Optional<String> write(Path file, String source) {
         String previous;
         try {
-            Files.createDirectories(folder);
+            Files.createDirectories(file.getParent());
             previous = Files.exists(file) ? Files.readString(file) : null;
             Files.writeString(file, source);
         } catch (IOException | UncheckedIOException e) {
@@ -491,19 +510,11 @@ public final class HostValues implements PluginValues {
         }
     }
 
-    // ── host.properties ───────────────────────────────────────────────────────────────────────────────────
+    // ── the version ───────────────────────────────────────────────────────────────────────────────────────
 
-    /** The version that last wrote the folder, or empty. */
+    /** The version that last wrote the folder, as its pom names the plugin, or empty. */
     String recorded() {
-        Path file = folder.resolve(PROPERTIES);
-        if (!Files.isRegularFile(file)) return "";
-        Properties properties = new Properties();
-        try (Reader reader = Files.newBufferedReader(file)) {
-            properties.load(reader);
-        } catch (IOException | RuntimeException unreadable) {
-            return "";
-        }
-        return properties.getProperty("version", "");
+        return project.version();
     }
 
     /** Why this version may not write: a newer one wrote the folder last. */
@@ -517,13 +528,10 @@ public final class HostValues implements PluginValues {
     /** Records this version after a write, unless a newer one is recorded. */
     private void record() {
         if (unrepaired || version.isEmpty() || compare(recorded(), version) >= 0) return;
-        Properties properties = new Properties();
-        properties.setProperty("plugin", plugin.toString());
-        properties.setProperty("version", version);
-        try (Writer writer = Files.newBufferedWriter(folder.resolve(PROPERTIES))) {
-            properties.store(writer, "The plugin version that last wrote this folder");
-        } catch (IOException e) {
-            warn("Could not record " + version + " in " + folder.resolve(PROPERTIES) + ": " + e.getMessage());
+        try {
+            project.record(version);
+        } catch (IOException | RuntimeException e) {
+            warn("Could not record " + version + " in " + folder.resolve(HostProject.POM) + ": " + e.getMessage());
         }
     }
 

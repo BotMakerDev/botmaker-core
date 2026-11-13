@@ -76,7 +76,7 @@ public class HostUpgradeTest {
         for (ManagedMethod<?> each : List.of(GREETING, SPEED, RETIRED)) {
             assertEquals(Optional.empty(), first.create(each));
         }
-        Path file = first.folder().resolve("Emulators.java");
+        Path file = first.sourcesDir().resolve("Emulators.java");
         String text = Files.readString(file);
         assertTrue(text.contains("return 3;"), text);
         Files.writeString(file, text.replace("return 3;", "return GoneIn2.SPEED;"));

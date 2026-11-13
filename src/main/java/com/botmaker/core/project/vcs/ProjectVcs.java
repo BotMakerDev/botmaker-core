@@ -202,13 +202,17 @@ public final class ProjectVcs {
      * exists — call this on project creation, or lazily before any other VCS action for a pre-existing project.
      */
     public void init() throws IOException {
+        init(VersionOrigin.CREATE, "Initial commit");
+    }
+
+    /** {@link #init()}, its first commit {@code label} of {@code origin}: a plugin's folder of this PC moved in. */
+    public void init(VersionOrigin origin, String label) throws IOException {
         if (isRepo()) return;
         try (Git git = Git.init().setDirectory(projectDir.toFile()).call()) {
             writeGitignore();
             excludeStudioState();
             git.add().addFilepattern(".").call();
-            git.commit().setAuthor(now()).setCommitter(now())
-                    .setMessage(VersionOrigin.CREATE.stamp("Initial commit")).call();
+            git.commit().setAuthor(now()).setCommitter(now()).setMessage(origin.stamp(label)).call();
         } catch (Exception e) {
             throw new IOException("Failed to initialize project history: " + e.getMessage(), e);
         }
