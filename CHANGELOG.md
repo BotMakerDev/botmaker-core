@@ -5,6 +5,13 @@ All notable changes to `botmaker-core`.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this module uses
 [semantic versioning](https://semver.org/). `release.sh` refuses to cut a version with no section here.
 
+## [Unreleased]
+
+### Added
+
+- **`StudioProjectSettings.WorkspaceLayout.runChoice`** (2026-11-13): what Studio's Run split button last ran, kept
+  in `settings.json` beside the rest of the window's layout; `withPublishDivider` and `withOpenFiles` keep it.
+
 ## [0.1.1] — 2026-11-13
 
 ### Added

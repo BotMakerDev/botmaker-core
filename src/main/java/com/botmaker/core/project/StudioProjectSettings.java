@@ -129,9 +129,12 @@ public record StudioProjectSettings(List<String> knownWindowTitles, Map<String, 
      * @param bottomDivider   the vertical split's position, {@code 0..1}, or {@code null} if unusable
      * @param bottomTab       the open bottom tab's key, or {@code null}; an unknown key is ignored on restore
      * @param publishDivider  the Versions tab's history/Publish split, {@code 0..1}, or {@code null}
+     * @param runChoice       what the toolbar's Run split button last ran (2026-11-13), Studio's key, or
+     *                        {@code null}; an unknown key is Run
      */
     public record WorkspaceLayout(Double explorerDivider, Double bottomDivider, String bottomTab,
-                                  Double publishDivider, List<String> openFiles, String shownFile) {
+                                  Double publishDivider, List<String> openFiles, String shownFile,
+                                  String runChoice) {
 
         /** Dividers this close to an edge have hidden a pane, so they are treated as never saved. */
         private static final double EDGE = 0.02;
@@ -158,17 +161,30 @@ public record StudioProjectSettings(List<String> knownWindowTitles, Map<String, 
             this(explorerDivider, bottomDivider, bottomTab, publishDivider, null, null);
         }
 
+        public WorkspaceLayout(Double explorerDivider, Double bottomDivider, String bottomTab,
+                               Double publishDivider, List<String> openFiles, String shownFile) {
+            this(explorerDivider, bottomDivider, bottomTab, publishDivider, openFiles, shownFile, null);
+        }
+
         /**
          * The same layout with the Versions tab's history/publish divider at {@code position} (2026-09-26:
          * the Publish sheet is the right pane of a split, so it can be widened).
          */
         public WorkspaceLayout withPublishDivider(Double position) {
-            return new WorkspaceLayout(explorerDivider, bottomDivider, bottomTab, position, openFiles, shownFile);
+            return new WorkspaceLayout(explorerDivider, bottomDivider, bottomTab, position, openFiles, shownFile,
+                    runChoice);
         }
 
         /** The same layout with these files open in tabs, {@code shown} selected. */
         public WorkspaceLayout withOpenFiles(List<String> files, String shown) {
-            return new WorkspaceLayout(explorerDivider, bottomDivider, bottomTab, publishDivider, files, shown);
+            return new WorkspaceLayout(explorerDivider, bottomDivider, bottomTab, publishDivider, files, shown,
+                    runChoice);
+        }
+
+        /** The same layout with the Run split button's last choice, by its key. */
+        public WorkspaceLayout withRunChoice(String choice) {
+            return new WorkspaceLayout(explorerDivider, bottomDivider, bottomTab, publishDivider, openFiles,
+                    shownFile, choice);
         }
 
         public double publishDividerOr(double fallback) {

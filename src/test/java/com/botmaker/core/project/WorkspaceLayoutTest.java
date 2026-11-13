@@ -109,4 +109,15 @@ class WorkspaceLayoutTest {
         assertEquals(List.of(), StudioProjectSettings.read(dir).workspaceLayout().openFiles(),
                 "every tab closed is remembered as none, not as never saved");
     }
+
+    @Test
+    void theRunChoiceSurvivesARoundTripAndTheOtherWithersKeepIt(@TempDir Path dir) throws Exception {
+        StudioProjectSettings.empty()
+                .withWorkspaceLayout(new WorkspaceLayout(0.28, 0.75, null).withRunChoice("debug"))
+                .write(dir);
+        WorkspaceLayout read = StudioProjectSettings.read(dir).workspaceLayout();
+        assertEquals("debug", read.runChoice());
+        assertEquals("debug", read.withPublishDivider(0.4).withOpenFiles(List.of(), null).runChoice());
+        assertNull(new WorkspaceLayout(0.3, 0.6, null).runChoice(), "never chosen is null");
+    }
 }
