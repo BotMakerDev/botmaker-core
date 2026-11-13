@@ -9,6 +9,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- **A plugin's folder of this PC is never opened as a project** (`plugin.HostFolders.ownedByAPlugin`, 2026-11-13):
+  `Projects.opened`, the one way a project opens (`open_project`, Studio's argument, the last project reopened),
+  refuses a folder under `UserDirs.config()/plugins/`, saying the plugin's own windows show and change it; real paths
+  are compared, so a short name or a link is refused too. `ProjectPreferences` never records one as a recent or the
+  last project, and forgets one it remembered.
 - **A repair of this PC's values that fails serves them read-only** (`plugin.HostValues`, 2026-11-13): what it
   rewrote is put back, nothing is recorded or committed, and each write or undo is refused with the repair's reason
   until the plugin is loaded again. The commit "Before the upgrade to <version>" holds the values as the older
