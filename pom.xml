@@ -12,7 +12,7 @@
     -->
     <groupId>com.github.BotMakerDev</groupId>
     <artifactId>botmaker-core</artifactId>
-    <version>0.1.1</version>
+    <version>0.1.2-SNAPSHOT</version>
 
     <name>BotMaker Core</name>
     <description>
@@ -29,13 +29,13 @@
         <!-- The contract's, for compiling against its slot editors only. -->
         <javafx.version>27</javafx.version>
         <!-- Each upstream's main version; a release commit sets the released one (doc 43). -->
-        <botmaker.studioapi.version>v0.17.1</botmaker.studioapi.version>
-        <botmaker.java.version>v0.2.1</botmaker.java.version>
-        <botmaker.pluginhost.version>v0.12.1</botmaker.pluginhost.version>
-        <botmaker.runlog.version>v0.1.0</botmaker.runlog.version>
-        <botmaker.cli.version>v0.12.1</botmaker.cli.version>
-        <botmaker.shared.version>v0.8.1</botmaker.shared.version>
-        <botmaker.session.version>v0.7.1</botmaker.session.version>
+        <botmaker.studioapi.version>0.17.2-SNAPSHOT</botmaker.studioapi.version>
+        <botmaker.java.version>0.2.2-SNAPSHOT</botmaker.java.version>
+        <botmaker.pluginhost.version>0.12.2-SNAPSHOT</botmaker.pluginhost.version>
+        <botmaker.runlog.version>0.1.1-SNAPSHOT</botmaker.runlog.version>
+        <botmaker.cli.version>0.12.2-SNAPSHOT</botmaker.cli.version>
+        <botmaker.shared.version>0.8.2-SNAPSHOT</botmaker.shared.version>
+        <botmaker.session.version>0.7.2-SNAPSHOT</botmaker.session.version>
         <mcp.version>2.1.0</mcp.version>
         <jetty.version>12.1.14</jetty.version>
     </properties>
