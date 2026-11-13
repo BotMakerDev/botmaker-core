@@ -40,11 +40,13 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
@@ -105,10 +107,10 @@ public final class HostValues implements PluginValues {
     private volatile boolean checked;
 
     /**
-     * Whether this version's repair of the folder failed: it then never records itself, so the next instance (the
-     * next bind, the next start) repairs again rather than taking the folder as repaired.
+     * Why this version's repair of the folder failed, or null: it then serves the folder read-only and never records
+     * itself, so the next instance (the next bind, the next start) repairs again rather than taking it as repaired.
      */
-    private volatile boolean unrepaired;
+    private volatile String unrepaired;
 
     /**
      * @param root      the host's config root, under which {@code plugins/} lies
@@ -128,9 +130,8 @@ public final class HostValues implements PluginValues {
         this.services = services;
         this.classpath = classpath == null ? List::of : classpath;
         // A step is refused as a write is: by an older copy, and while this version's repair has failed.
-        this.history = new HostFolderHistory(folder, project, this::locked, this::upToDate,
-                () -> unrepaired ? Optional.of("This PC's values of " + plugin + " were not repaired for " + this.version
-                        + ", so they are not undone either.") : olderThanFolder(), this::warn);
+        this.history = new HostFolderHistory(folder, project, this::locked, this::upToDate, this::readOnly,
+                this::warn);
     }
 
     /** The undo of these values: ↶ and ↷ over the folder's commits, {@code StudioServices.hostHistory()}. */
@@ -247,7 +248,7 @@ public final class HostValues implements PluginValues {
     /** {@link #create}'s write, under the folder's lock. */
     private Optional<String> created(ManagedValue<?> value, com.botmaker.plugin.api.source.ManagedMethod<?> method) {
         if (find(value.id()).isPresent()) return Optional.empty();
-        Optional<String> older = olderThanFolder();
+        Optional<String> older = readOnly();
         if (older.isPresent()) return older;
         Path dir = project.classes();
         Path file = dir.resolve(value.holder() + ".java");
@@ -294,12 +295,11 @@ public final class HostValues implements PluginValues {
             return;
         }
         Optional<String> failed = locked(this::upgradeLocked);
-        // Tried once per instance whatever happens: a repair that fails is said once, not on every read.
+        // Tried once per instance whatever happens: a repair that fails is said once, not on every read. Read-only is
+        // set first, so no thread that sees the folder checked writes into it unrepaired.
+        failed.ifPresent(why -> unrepaired = why);
         checked = true;
-        if (failed.isPresent()) {
-            unrepaired = true;
-            warn(failed.get());
-        }
+        failed.ifPresent(why -> warn(why + " " + READ_ONLY));
     }
 
     /** {@link #upToDate}'s repair, under the folder's lock; empty when done, else why not. */
@@ -347,13 +347,15 @@ public final class HostValues implements PluginValues {
                 failed.add(gone.getFileName() + ": " + e.getMessage());
             }
         }
-        String moving = "This PC's values of " + plugin.artifactId() + ", " + from + " to " + version + ": ";
-        planned.repaired().forEach(each -> info(moving + each));
-        planned.left().forEach(each -> warn(moving + each));
         if (!failed.isEmpty()) {
+            // Half a repair is neither version's: the folder goes back to what the commit before it holds.
+            putBack(sources, planned).ifPresent(failed::add);
             return Optional.of("Could not repair this PC's values of " + plugin.artifactId() + " for " + version
                     + ": " + String.join("; ", failed));
         }
+        String moving = "This PC's values of " + plugin.artifactId() + ", " + from + " to " + version + ": ";
+        planned.repaired().forEach(each -> info(moving + each));
+        planned.left().forEach(each -> warn(moving + each));
         // What the repair kept as written may not compile: said now, since every write is refused until it does.
         compiles().ifPresent(broken -> warn(moving + "the folder does not compile after the repair, so each write is"
                 + " refused until " + folder + " is fixed by hand. " + broken));
@@ -363,7 +365,7 @@ public final class HostValues implements PluginValues {
     }
 
     private Optional<String> setLocked(ManagedMethod method, JavaValue expression) {
-        Optional<String> older = olderThanFolder();
+        Optional<String> older = readOnly();
         if (older.isPresent()) return older;
         String before;
         try {
@@ -504,6 +506,32 @@ public final class HostValues implements PluginValues {
         return project.version();
     }
 
+    private static final String READ_ONLY = "They are read-only until the plugin is loaded again.";
+
+    /** Why this version may neither write nor step: its repair failed, or a newer one wrote the folder last. */
+    private Optional<String> readOnly() {
+        String failed = unrepaired;
+        if (failed != null) return Optional.of(failed + " " + READ_ONLY);
+        return olderThanFolder();
+    }
+
+    /** Puts back each class a failed repair rewrote or deleted, as {@code sources} read it; empty, else what stayed. */
+    private static Optional<String> putBack(Map<Path, String> sources, ManagedRepairs.Planned planned) {
+        List<String> stayed = new ArrayList<>();
+        Set<Path> touched = new LinkedHashSet<>(planned.rewrites().keySet());
+        touched.addAll(planned.deleted());
+        for (Path file : touched) {
+            String before = sources.get(file);
+            try {
+                if (before == null) Files.deleteIfExists(file);
+                else if (!Files.exists(file) || !Files.readString(file).equals(before)) Files.writeString(file, before);
+            } catch (IOException | UncheckedIOException e) {
+                stayed.add(file.getFileName() + " could not be put back: " + e.getMessage());
+            }
+        }
+        return stayed.isEmpty() ? Optional.empty() : Optional.of(String.join("; ", stayed));
+    }
+
     /** Why this version may not write: a newer one wrote the folder last. */
     private Optional<String> olderThanFolder() {
         String recorded = recorded();
@@ -514,7 +542,7 @@ public final class HostValues implements PluginValues {
 
     /** Records this version after a write, unless a newer one is recorded. */
     private void record() {
-        if (unrepaired || version.isEmpty() || compare(recorded(), version) >= 0) return;
+        if (unrepaired != null || version.isEmpty() || compare(recorded(), version) >= 0) return;
         try {
             project.record(version);
         } catch (IOException | RuntimeException e) {

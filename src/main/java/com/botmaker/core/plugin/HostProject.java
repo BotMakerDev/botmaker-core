@@ -54,6 +54,12 @@ final class HostProject {
     static final String LEGACY_HISTORY = ".history";
 
     /**
+     * The repository's own attributes, versioned by nothing, so no restore takes them away: the folder is the host's,
+     * and a restore puts back the bytes it wrote whatever this PC's {@code core.autocrlf} says.
+     */
+    private static final String ATTRIBUTES = ".git/info/attributes";
+
+    /**
      * What git keeps out: the writers' lock, the plugin's window state ({@code state/}, JSON a window keeps beside its
      * values), and what an older folder leaves behind until the move deletes it.
      */
@@ -81,7 +87,8 @@ final class HostProject {
 
     /**
      * Where the holder classes are read and written now: {@link #sources}, or the folder itself while an older folder
-     * is not moved yet (its move failed), so its values stay seen and written where they are.
+     * is not moved yet (its move failed), so its values stay seen where they are, and written there unless a newer
+     * version needed to repair them, which it cannot do before the move (read-only, {@code HostValues.readOnly}).
      */
     Path classes() {
         return isLegacy() ? folder : sources();
@@ -189,7 +196,7 @@ final class HostProject {
      * half made finished. Empty when it is one, else why not, the folder then as it was.
      */
     Optional<String> ready(String version) {
-        if (isProject()) return Optional.empty();
+        if (isProject()) return keepBytes();
         if (isLegacy()) return move(version);
         Path git = folder.resolve(".git");
         boolean hadGit = Files.exists(git);
@@ -198,7 +205,7 @@ final class HostProject {
             if (!Files.isRegularFile(folder.resolve(POM))) record(version);
             writeIgnored();
             vcs().init();
-            return Optional.empty();
+            return keepBytes();
         } catch (IOException | UncheckedIOException e) {
             // A repository made without its first commit would pass for a project next time: taken back.
             if (!hadGit) deleteTree(git);
@@ -237,12 +244,13 @@ final class HostProject {
             return Optional.of("Could not move this PC's values of " + plugin.artifactId() + " into a project, so "
                     + folder + " is left as it was: " + e.getMessage());
         }
+        Optional<String> bytes = keepBytes();
         List<String> left = new ArrayList<>();
         for (Path each : rootClasses()) deleteOrSay(each, left);
         deleteOrSay(folder.resolve(LEGACY_HISTORY), left);
         deleteOrSay(folder.resolve(LEGACY_PROPERTIES), left);
         // Moved and committed: what could not be deleted is ignored by git and read by nothing, so it is only said.
-        return left.isEmpty() ? Optional.empty() : Optional.of("This PC's values of " + plugin.artifactId()
+        return left.isEmpty() ? bytes : Optional.of("This PC's values of " + plugin.artifactId()
                 + " were moved into a project, but these older files are left in " + folder + ": "
                 + String.join(", ", left));
     }
@@ -260,8 +268,20 @@ final class HostProject {
 
     private void writeIgnored() throws IOException {
         Path ignore = folder.resolve(".gitignore");
-        if (Files.exists(ignore)) return;
-        Files.writeString(ignore, String.join("\n", IGNORED) + "\n");
+        if (!Files.exists(ignore)) Files.writeString(ignore, String.join("\n", IGNORED) + "\n");
+    }
+
+    /** Writes {@link #ATTRIBUTES} into the repository when it lacks them: empty, else why not. */
+    private Optional<String> keepBytes() {
+        Path attributes = folder.resolve(ATTRIBUTES);
+        try {
+            if (Files.exists(attributes)) return Optional.empty();
+            Files.createDirectories(attributes.getParent());
+            Files.writeString(attributes, "* -text\n");
+            return Optional.empty();
+        } catch (IOException | UncheckedIOException e) {
+            return Optional.of("Could not write " + attributes + ", so an undo may change line endings: " + e.getMessage());
+        }
     }
 
     private static void deleteOrSay(Path path, List<String> left) {

@@ -9,6 +9,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- **A repair of this PC's values that fails serves them read-only** (`plugin.HostValues`, 2026-11-13): what it
+  rewrote is put back, nothing is recorded or committed, and each write or undo is refused with the repair's reason
+  until the plugin is loaded again. The commit "Before the upgrade to <version>" holds the values as the older
+  version left them. The folder's repository gets `* -text` in `.git/info/attributes`, unversioned, so a restore on a
+  PC with `core.autocrlf` puts back LF, not CRLF.
 - **Undo of this PC's values** (`plugin.HostFolderHistory`, `StudioServices.hostHistory()`, 2026-11-13): ↶ puts the
   tree of the commit before the current step back as a new commit, "Undo Set GREETING", and ↷ does the step again
   the same way, so nothing is rewritten. Steps go down to the newest upgrade or first commit, never past it. A write

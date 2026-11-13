@@ -25,6 +25,7 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /** A newer plugin version repairs its host folder as a bot's values are repaired on its upgrade (review item 5). */
 public class HostUpgradeTest {
@@ -36,7 +37,7 @@ public class HostUpgradeTest {
 
         Id value();
 
-        enum Id implements ManagedId<Holder> { GREETING, SPEED, RETIRED }
+        enum Id implements ManagedId<Holder> { GREETING, SPEED, RETIRED, ADDED }
 
         enum Holder implements HostHolder { EMULATORS }
     }
@@ -47,6 +48,8 @@ public class HostUpgradeTest {
             .in(PcSetting.Holder.EMULATORS).holds(Integer.class, 3).because("This PC's speed.");
     static final ManagedMethod<String> RETIRED = ManagedValue.method(PcSetting.Id.RETIRED)
             .in(PcSetting.Holder.EMULATORS).holds(String.class, "old").because("Gone in 2.0.0.");
+    static final ManagedMethod<String> ADDED = ManagedValue.method(PcSetting.Id.ADDED)
+            .in(PcSetting.Holder.EMULATORS).holds(String.class, "new").because("New in 2.0.0.");
 
     private static final PluginCoordinate PLUGIN = new PluginCoordinate("com.example", "upgraded");
 
@@ -90,6 +93,47 @@ public class HostUpgradeTest {
         assertEquals(List.of("Upgraded to 2.0.0", "Before the upgrade to 2.0.0"), titles.subList(0, 2),
                 "the class changed by hand is committed before the repair, and the repair is a commit: " + titles);
         assertTrue(vcs.status().isClean(), "nothing the repair changed is left out of its commit");
+    }
+
+    @Test
+    void theCommitBeforeTheUpgradeHoldsTheOldValues() throws Exception {
+        Path file = written();
+        String old = Files.readString(file);
+        HostValues next = at("2.0.0", GREETING, SPEED);
+        next.ids();
+        ProjectVcs vcs = new ProjectVcs(next.folder());
+        ProjectVcs.CommitInfo before = vcs.history().stream()
+                .filter(each -> each.title().equals("Before the upgrade to 2.0.0")).findFirst().orElseThrow();
+
+        vcs.restoreTo(before.sha());
+        assertEquals(old, Files.readString(file), "the retired id and the broken speed, as 1.0.0 left them");
+        assertEquals("1.0.0", next.recorded(), "and the pom names the version that wrote them");
+    }
+
+    @Test
+    void aRepairThatFailsPutsBackWhatItChangedAndServesReadOnly() throws Exception {
+        Path file = written();
+        String old = Files.readString(file);
+        assumeTrue(file.toFile().setWritable(false) && !Files.isWritable(file), "this file system cannot refuse a write");
+        try {
+            HostValues next = at("2.0.0", GREETING, SPEED, ADDED);
+            next.ids();
+            assertEquals(old, Files.readString(file), "a repair that fails changes nothing");
+            assertEquals("1.0.0", next.recorded(), "and records nothing, so the next load repairs again");
+
+            file.toFile().setWritable(true);
+            Optional<String> refused = next.create(ADDED);
+            assertTrue(refused.orElse("").contains("read-only"), "a new value is refused, saying why: " + refused);
+            next.open(GREETING).orElseThrow().write("after");
+            assertEquals(old, Files.readString(file), "nor is a write taken");
+            ProjectVcs vcs = new ProjectVcs(next.folder());
+            String head = vcs.head();
+            next.history().undo();
+            assertEquals(head, vcs.head(), "nor an undo");
+            assertEquals(old, Files.readString(file));
+        } finally {
+            file.toFile().setWritable(true);
+        }
     }
 
     @Test
