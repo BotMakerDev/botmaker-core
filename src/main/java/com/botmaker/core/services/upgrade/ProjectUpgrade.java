@@ -114,7 +114,7 @@ public final class ProjectUpgrade {
                 text.append(" ").append(leftForYou.size()).append(leftForYou.size() == 1 ? " thing was" : " things were")
                         .append(" left for you to finish: ").append(String.join(" ", leftForYou));
             }
-            return text + " The previous state is one restore away in the Versions tab.";
+            return text + " The previous state is one restore away in the Versions window.";
         }
     }
 

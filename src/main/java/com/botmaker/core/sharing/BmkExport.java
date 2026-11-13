@@ -44,7 +44,7 @@ public final class BmkExport {
         ProjectVcs vcs = new ProjectVcs(projectDir);
         Optional<String> commit = vcs.headCommit();
         if (commit.isEmpty() || !vcs.status().isClean()) {
-            throw new BotFile.Refused("Commit first: a .bmk is made from a commit. Save a version (Versions tab), "
+            throw new BotFile.Refused("Commit first: a .bmk is made from a commit. Save a version (⟲ Versions), "
                     + "then export.");
         }
         List<String> tags = vcs.tagsAtHead().stream().sorted().toList();

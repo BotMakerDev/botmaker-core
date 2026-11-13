@@ -14,9 +14,9 @@ public enum AssistedSetting {
             "bot, on or off — whether every run here prints and traces its debug lines; bot lets the bot's own "
                     + "setting decide"),
 
-    /** What the Trace tab hides, by writer. */
+    /** What the Run tab's Trace lines hide, by writer. */
     HIDDEN_TRACE("hidden_trace", "Hidden trace writers",
-            "the writers whose lines the Trace tab hides, comma-separated, each a class's binary name or "
+            "the writers whose lines the Run tab's Trace hides, comma-separated, each a class's binary name or "
                     + "class#method; empty for none"),
 
     /** *Plugins & Libraries*' Dev mode (2026-10-13): try a plugin's local build before its release. */

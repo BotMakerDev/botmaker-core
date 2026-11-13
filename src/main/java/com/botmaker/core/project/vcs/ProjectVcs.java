@@ -234,7 +234,7 @@ public final class ProjectVcs {
     public String checkpoint(VersionOrigin origin, String label) throws IOException {
         ensureInitialized();
         // Mid-update, "add everything" would record conflict markers as the user's decision.
-        if (merging()) throw new IOException("An update is in progress — finish or cancel it in the Versions tab.");
+        if (merging()) throw new IOException("An update is in progress — finish or cancel it in the Versions window.");
         try (Git git = open()) {
             // Status first, then only what it names: JGit's add of "." hashes every tracked file whatever its stat
             // says, 2.3 s a call on a bot with 70 MB of screens, and it ran twice before each plugin write (2026-10-19).

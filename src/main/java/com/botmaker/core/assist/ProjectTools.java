@@ -34,7 +34,7 @@ final class ProjectTools {
         }
 
         @Describe("save the bot as it is now as a named version, before a change you may want to undo whole; the "
-                + "user sees it in the Versions tab")
+                + "user sees it in the Versions window")
         record Checkpoint(@Describe("its name: Before the battle loop") String label) implements Versions {
         }
 

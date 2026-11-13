@@ -12,6 +12,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - **`StudioProjectSettings.WorkspaceLayout.runChoice`** (2026-11-13): what Studio's Run split button last ran, kept
   in `settings.json` beside the rest of the window's layout; `withPublishDivider` and `withOpenFiles` keep it.
 
+### Changed
+
+- **Words that named Studio's old tabs** (2026-11-13): a refused update, an upgrade's summary, a `.bmk` export refused
+  for want of a commit and the `checkpoint` tool's description now say the Versions window. The `hidden_trace`
+  setting says the Run tab's Trace.
+
 ## [0.1.1] — 2026-11-13
 
 ### Added
