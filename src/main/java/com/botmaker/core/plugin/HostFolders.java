@@ -1,5 +1,6 @@
 package com.botmaker.core.plugin;
 
+import com.botmaker.plugin.api.History;
 import com.botmaker.plugin.api.source.ManagedValue;
 import com.botmaker.plugin.api.source.PluginValues;
 import com.botmaker.plugin.host.LoadedPlugin;
@@ -61,6 +62,12 @@ public final class HostFolders {
     public static PluginValues of(LoadedPlugin plugin) {
         Served served = plugin == null ? null : SERVED.get(key(canonical(plugin.coordinate())));
         return served == null ? PluginValues.NONE : served.values();
+    }
+
+    /** The undo of {@code plugin}'s values of this PC, the serving copy's, or {@link History#NONE} when it keeps none. */
+    public static History historyOf(LoadedPlugin plugin) {
+        Served served = plugin == null ? null : SERVED.get(key(canonical(plugin.coordinate())));
+        return served == null ? History.NONE : served.values().history();
     }
 
     /** The version serving {@code coordinate}'s values of this PC, or empty for none. */

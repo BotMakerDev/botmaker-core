@@ -12,6 +12,7 @@ import com.botmaker.java.grammar.JavaValue;
 import com.botmaker.java.grammar.ShortNames;
 import com.botmaker.java.grammar.ValueGrammar;
 import com.botmaker.java.parse.BotParser;
+import com.botmaker.plugin.api.History;
 import com.botmaker.plugin.api.PluginState;
 import com.botmaker.plugin.api.StudioServices;
 import com.botmaker.plugin.api.slot.ValueContext;
@@ -95,6 +96,7 @@ public final class HostValues implements PluginValues {
     private final ValueGrammar grammar;
     private final StudioServices services;
     private final Supplier<List<Path>> classpath;
+    private final HostFolderHistory history;
 
     /** Whether this instance has made the folder a project, or tried to ({@link HostProject#ready}). */
     private volatile boolean readied;
@@ -125,6 +127,15 @@ public final class HostValues implements PluginValues {
         this.grammar = grammar == null ? ValueGrammar.empty() : grammar;
         this.services = services;
         this.classpath = classpath == null ? List::of : classpath;
+        // A step is refused as a write is: by an older copy, and while this version's repair has failed.
+        this.history = new HostFolderHistory(folder, project, this::locked, this::upToDate,
+                () -> unrepaired ? Optional.of("This PC's values of " + plugin + " were not repaired for " + this.version
+                        + ", so they are not undone either.") : olderThanFolder(), this::warn);
+    }
+
+    /** The undo of these values: ↶ and ↷ over the folder's commits, {@code StudioServices.hostHistory()}. */
+    public History history() {
+        return history;
     }
 
     /** {@code plugin}'s host folder under {@code root}: {@code plugins/<group>/<artifact>/}, each {@link PluginState#part}. */
@@ -224,7 +235,13 @@ public final class HostValues implements PluginValues {
                     + "method values only so far.");
         }
         upToDate();
-        return locked(() -> created(value, method));
+        return told(locked(() -> created(value, method)));
+    }
+
+    /** {@code written}, after telling the history's listeners of a write that passed: outside the lock, so one may undo. */
+    private Optional<String> told(Optional<String> written) {
+        if (written.isEmpty()) history.changed();
+        return written;
     }
 
     /** {@link #create}'s write, under the folder's lock. */
@@ -258,7 +275,7 @@ public final class HostValues implements PluginValues {
     /** {@code method}'s expression replaced by {@code expression}: empty when written, else why not. */
     private Optional<String> set(ManagedMethod method, JavaValue expression) {
         upToDate();
-        return locked(() -> setLocked(method, expression));
+        return told(locked(() -> setLocked(method, expression)));
     }
 
     // ── upgrade ────────────────────────────────────────────────────────────────────────────────────────────
@@ -421,8 +438,9 @@ public final class HostValues implements PluginValues {
             return refused;
         }
         record();
-        // Written and checked: history is not what the write needs, so a commit that fails is said, never refused.
-        project.commit(VersionOrigin.SAVE, label).ifPresent(this::warn);
+        // Written and checked: history is not what the write needs, so a commit that fails is said, never refused. A
+        // batch's writes are committed once, at its end.
+        if (!history.batching()) project.commit(VersionOrigin.SAVE, label).ifPresent(this::warn);
         return Optional.empty();
     }
 

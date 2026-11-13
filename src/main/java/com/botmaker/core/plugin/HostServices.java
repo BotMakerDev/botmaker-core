@@ -156,6 +156,12 @@ public final class HostServices implements StudioServices {
         return HostHistory.live();
     }
 
+    /** The undo of the calling plugin's values of this PC ({@link HostFolders}); never a step of {@link #history()}. */
+    @Override
+    public History hostHistory() {
+        return PluginHost.calling().map(HostFolders::historyOf).orElse(History.NONE);
+    }
+
     @Override
     public void status(String message) {
         HostRuns.status(message);

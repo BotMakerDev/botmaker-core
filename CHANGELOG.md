@@ -9,6 +9,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- **Undo of this PC's values** (`plugin.HostFolderHistory`, `StudioServices.hostHistory()`, 2026-11-13): ↶ puts the
+  tree of the commit before the current step back as a new commit, "Undo Set GREETING", and ↷ does the step again
+  the same way, so nothing is rewritten. Steps go down to the newest upgrade or first commit, never past it. A write
+  made since an undo drops what could be redone. A batch commits its writes once, under its own label.
+  `ProjectVcs.restoreTo` takes the new commit's origin and label.
+
 - `device` gets `accounts`: the Google accounts signed in on a running instance, by email (the user's call,
   2026-11-12), read only. While BotMaker signs an instance in to Google or out of it, every action that shows,
   touches or changes it is refused (`screenshot`, `shell`, `logcat`, the taps, the app and install actions, `stop`,

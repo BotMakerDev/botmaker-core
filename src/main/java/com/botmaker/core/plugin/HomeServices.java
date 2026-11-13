@@ -82,6 +82,12 @@ public final class HomeServices implements StudioServices {
         return History.NONE;
     }
 
+    /** The undo of the calling plugin's values of this PC: like them, it needs no bot. */
+    @Override
+    public History hostHistory() {
+        return BARE.hostHistory();
+    }
+
     @Override
     public void status(String message) {
         BARE.status(message);

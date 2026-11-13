@@ -261,6 +261,19 @@ public final class ProjectVcs {
         }
     }
 
+    /** The full SHA of the commit checked out, or empty with no repository or no commit: a cheap "did it move?". */
+    public String head() throws IOException {
+        if (!isRepo()) return "";
+        try (Git git = open()) {
+            ObjectId id = git.getRepository().resolve("HEAD");
+            return id == null ? "" : id.name();
+        } catch (IOException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IOException("Could not read the project's head: " + e.getMessage(), e);
+        }
+    }
+
     /** Newest-first commit history, each annotated with its name (if given one) and any tags pointing at it. */
     public List<CommitInfo> history() throws IOException {
         if (!isRepo()) return List.of();
@@ -447,6 +460,14 @@ public final class ProjectVcs {
      * exactly matches {@code sha}. Fully linear and reflog-safe.
      */
     public void restoreTo(String sha) throws IOException {
+        restoreTo(sha, VersionOrigin.RESTORE, null);
+    }
+
+    /**
+     * {@link #restoreTo(String)} with the new commit's origin and label ({@code null}: "Roll back to …"); the tip's
+     * full SHA afterwards, which is unchanged when the tree already matched {@code sha}.
+     */
+    public String restoreTo(String sha, VersionOrigin origin, String label) throws IOException {
         ensureInitialized();
         try (Git git = open()) {
             Repository repo = git.getRepository();
@@ -468,8 +489,9 @@ public final class ProjectVcs {
             git.reset().setMode(ResetType.SOFT).setRef(tip.name()).call();
             if (!git.status().call().isClean()) {
                 git.commit().setAuthor(now()).setCommitter(now())
-                        .setMessage(VersionOrigin.RESTORE.stamp("Roll back to " + shortTarget)).call();
+                        .setMessage(origin.stamp(label == null ? "Roll back to " + shortTarget : label)).call();
             }
+            return repo.resolve("HEAD").name();
         } catch (IOException e) {
             throw e;
         } catch (Exception e) {
