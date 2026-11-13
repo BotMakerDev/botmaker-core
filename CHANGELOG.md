@@ -5,7 +5,7 @@ All notable changes to `botmaker-core`.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this module uses
 [semantic versioning](https://semver.org/). `release.sh` refuses to cut a version with no section here.
 
-## [Unreleased]
+## [0.1.1] — 2026-11-13
 
 ### Added
 
@@ -94,6 +94,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - The MCP server's instructions speak of a BotMaker bot, Studio open or not, so a client the core serves alone
   (`botmaker ai`, `mcp-bridge`) is not told it works in Studio.
 - `McpConfig` writes Studio's endpoint as the cli's `AiTool.Connection.Http`.
+- Built against botmaker-sdk 1.10.1 (was 1.10.0).
+- Built against botmaker-shared 0.8.1 (was 0.8.0).
+- Built against botmaker-session 0.7.1 (was 0.7.0).
+- Built against botmaker-studio-api 0.17.1 (was 0.17.0).
+- Built against botmaker-plugin-host 0.12.1 (was 0.12.0).
+- Built against botmaker-cli 0.12.1 (was 0.12.0).
+- Built against botmaker-java 0.2.1 (was 0.2.0).
 
 ### Removed
 
