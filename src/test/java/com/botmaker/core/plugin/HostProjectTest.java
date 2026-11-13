@@ -45,7 +45,9 @@ class HostProjectTest {
         assertTrue(Files.readString(values.folder().resolve(HostProject.POM)).contains("<artifactId>my-plugin</artifactId>"));
         String ignored = Files.readString(values.folder().resolve(".gitignore"));
         assertTrue(ignored.contains("/state/") && ignored.contains("/.lock"), ignored);
-        assertEquals(1, project.vcs().history().size(), "the project starts with one commit");
+        assertEquals(List.of("Added GREETING", "Initial commit"),
+                project.vcs().history().stream().map(ProjectVcs.CommitInfo::title).toList(),
+                "the project starts with one commit, then the write's");
     }
 
     @Test

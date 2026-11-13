@@ -7,6 +7,7 @@ import com.botmaker.core.project.managed.ManagedIds;
 import com.botmaker.core.project.managed.ManagedMethod;
 import com.botmaker.core.project.managed.ManagedRepairs;
 import com.botmaker.core.project.params.BotRecords;
+import com.botmaker.core.project.vcs.VersionOrigin;
 import com.botmaker.java.grammar.JavaValue;
 import com.botmaker.java.grammar.ShortNames;
 import com.botmaker.java.grammar.ValueGrammar;
@@ -60,8 +61,7 @@ import java.util.stream.Stream;
  * expression replaced by {@link JavaManagedEdits}, a missing holder planned by {@link ManagedHolders#planIn} — the
  * same pieces {@link HostPluginValues} puts a bot's values through. What differs is what the folder is: one plugin's,
  * every bot's, in no version, publish or {@code .bmk}, and on no run's classpath. Its history is its own git, not the
- * bot's; until each write is a commit there, a write keeps the class it replaced in {@code .history/} (the last
- * {@value #KEPT}), which git ignores.
+ * bot's: each accepted write is one commit there, labelled with the value it wrote, and a refused one commits nothing.
  *
  * <p><b>Each write is compiled</b> with the folder's other classes against the plugin's classpath; one that would not
  * compile is put back and refused with javac's sentence. A host with no compiler, or no classpath for the plugin,
@@ -75,12 +75,6 @@ import java.util.stream.Stream;
  * <p>Method values only so far: an open set of this PC is refused with words.
  */
 public final class HostValues implements PluginValues {
-
-    /** The folder each replaced class is kept in. */
-    public static final String HISTORY = ".history";
-
-    /** How many replaced copies of one class are kept. */
-    static final int KEPT = 20;
 
     private static final Pattern NUMBERS = Pattern.compile("(\\d+)");
 
@@ -258,7 +252,7 @@ public final class HostValues implements PluginValues {
             if (plan instanceof ManagedHolders.Plan.Refused refused) return Optional.of(refused.reason());
             source = ((ManagedHolders.Plan.Write) plan).source();
         }
-        return write(file, source);
+        return write(file, source, "Added " + named(value.id()));
     }
 
     /** {@code method}'s expression replaced by {@code expression}: empty when written, else why not. */
@@ -296,6 +290,11 @@ public final class HostValues implements PluginValues {
         String from = recorded();
         // Another instance or process moved the folder on while this one waited for the lock.
         if (compare(from, version) >= 0) return Optional.empty();
+        // An older folder whose move failed has no history to keep what the repair replaces: it waits for the move.
+        if (project.isLegacy()) {
+            return Optional.of("This PC's values of " + plugin.artifactId() + " are not in a project yet, so they were"
+                    + " not repaired for " + version + "; they are read as written.");
+        }
         Map<Path, String> sources = new LinkedHashMap<>();
         for (Path file : sources()) {
             try {
@@ -312,11 +311,12 @@ public final class HostValues implements PluginValues {
             return Optional.of("This PC's values of " + plugin.artifactId() + " could not be repaired for " + version
                     + ", so they are left as written: " + e);
         }
-        // Each class's copy is kept before it changes; a copy that cannot be kept is said and the repair goes on, as a
-        // write's does, so the folder is never left half repaired for the want of a backup.
+        // What the repair replaces is committed first: every write is a commit already, but a class changed by hand
+        // since is not. A commit that fails is said and the repair goes on, so the folder is never left unrepaired for
+        // the want of a backup.
+        project.commit(VersionOrigin.SAFETY, "Before the upgrade to " + version).ifPresent(this::warn);
         List<String> failed = new ArrayList<>();
         for (Map.Entry<Path, String> each : planned.rewrites().entrySet()) {
-            keepQuietly(each.getKey(), sources.get(each.getKey()));
             try {
                 Files.writeString(each.getKey(), each.getValue());
             } catch (IOException | UncheckedIOException e) {
@@ -324,7 +324,6 @@ public final class HostValues implements PluginValues {
             }
         }
         for (Path gone : planned.deleted()) {
-            keepQuietly(gone, sources.get(gone));
             try {
                 Files.deleteIfExists(gone);
             } catch (IOException e) {
@@ -342,17 +341,8 @@ public final class HostValues implements PluginValues {
         compiles().ifPresent(broken -> warn(moving + "the folder does not compile after the repair, so each write is"
                 + " refused until " + folder + " is fixed by hand. " + broken));
         record();
+        project.commit(VersionOrigin.UPDATE, "Upgraded to " + version).ifPresent(this::warn);
         return Optional.empty();
-    }
-
-    /** {@link #keep}, a copy that cannot be kept said rather than thrown. */
-    private void keepQuietly(Path file, String previous) {
-        if (previous == null) return;
-        try {
-            keep(file, previous);
-        } catch (IOException | UncheckedIOException e) {
-            warn("Could not keep the replaced " + file.getFileName() + " in " + HISTORY + ": " + e.getMessage());
-        }
     }
 
     private Optional<String> setLocked(ManagedMethod method, JavaValue expression) {
@@ -369,7 +359,7 @@ public final class HostValues implements PluginValues {
         if (after.equals(before)) {
             return Optional.of(method.qualified() + " changed since it was opened, so nothing was written.");
         }
-        return write(method.file(), after);
+        return write(method.file(), after, "Set " + named(method.id()));
     }
 
     /**
@@ -408,9 +398,10 @@ public final class HostValues implements PluginValues {
 
     /**
      * Writes {@code source} to {@code file}, then compiles the folder: when that fails, puts the old text back and
-     * answers javac's sentence; else keeps the old text in {@code .history/}. Under {@link #locked}.
+     * answers javac's sentence; else records this version and commits the change as {@code label}. Under
+     * {@link #locked}, so two writers' commits come in the order their writes did.
      */
-    private Optional<String> write(Path file, String source) {
+    private Optional<String> write(Path file, String source, String label) {
         String previous;
         try {
             Files.createDirectories(file.getParent());
@@ -429,37 +420,15 @@ public final class HostValues implements PluginValues {
             }
             return refused;
         }
-        if (previous != null) {
-            try {
-                keep(file, previous);
-            } catch (IOException | UncheckedIOException e) {
-                warn("Could not keep the replaced " + file.getFileName() + " in " + HISTORY + ": " + e.getMessage());
-            }
-        }
         record();
+        // Written and checked: history is not what the write needs, so a commit that fails is said, never refused.
+        project.commit(VersionOrigin.SAVE, label).ifPresent(this::warn);
         return Optional.empty();
     }
 
-    /** Copies {@code previous} to {@code .history/<Class>.<n>.java}, keeping the last {@value #KEPT}. */
-    private void keep(Path file, String previous) throws IOException {
-        Path history = folder.resolve(HISTORY);
-        Files.createDirectories(history);
-        String name = file.getFileName().toString();
-        String stem = name.substring(0, name.length() - ".java".length());
-        Pattern copy = Pattern.compile(Pattern.quote(stem) + "\\.(\\d+)\\.java");
-        List<Path> copies;
-        try (Stream<Path> files = Files.list(history)) {
-            copies = files.filter(each -> copy.matcher(each.getFileName().toString()).matches())
-                    .sorted(Comparator.comparingInt(each -> number(copy, each))).toList();
-        }
-        int next = copies.isEmpty() ? 1 : number(copy, copies.getLast()) + 1;
-        Files.writeString(history.resolve(stem + "." + next + ".java"), previous);
-        for (int i = 0; i <= copies.size() - KEPT; i++) Files.deleteIfExists(copies.get(i));
-    }
-
-    private static int number(Pattern copy, Path file) {
-        Matcher matched = copy.matcher(file.getFileName().toString());
-        return matched.matches() ? Integer.parseInt(matched.group(1)) : 0;
+    /** A value's id as a commit names it: its constant alone, {@code GREETING} for {@code …PcValue$Id.GREETING}. */
+    static String named(String id) {
+        return id.substring(Math.max(id.lastIndexOf('.'), id.lastIndexOf('$')) + 1);
     }
 
     /** Empty when the folder's classes compile against the plugin's classpath, else javac's first error. */

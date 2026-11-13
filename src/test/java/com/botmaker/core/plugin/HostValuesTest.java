@@ -1,5 +1,6 @@
 package com.botmaker.core.plugin;
 
+import com.botmaker.core.project.vcs.ProjectVcs;
 import com.botmaker.java.grammar.ValueGrammar;
 import com.botmaker.plugin.api.managed.HostHolder;
 import com.botmaker.plugin.api.managed.ManagedId;
@@ -22,7 +23,6 @@ import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
-import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -98,8 +98,17 @@ public class HostValuesTest {
         ValueContext opened = values.open(GREETING).orElseThrow();
         opened.write("goodbye");
         assertTrue(text(file).contains("\"goodbye\""), text(file));
-        assertTrue(Files.isRegularFile(values.folder().resolve(".history/Emulators.1.java")),
-                "the replaced class is kept");
+        assertEquals(List.of("Set GREETING", "Added GREETING", "Initial commit"), titles(values),
+                "each accepted write is one commit, newest first");
+        assertTrue(vcs(values).status().isClean(), "nothing a write made is left out of its commit");
+    }
+
+    private static ProjectVcs vcs(HostValues values) {
+        return new ProjectVcs(values.folder());
+    }
+
+    private static List<String> titles(HostValues values) throws Exception {
+        return vcs(values).history().stream().map(ProjectVcs.CommitInfo::title).toList();
     }
 
     @Test
@@ -142,10 +151,12 @@ public class HostValuesTest {
         Files.writeString(values.sourcesDir().resolve("Broken.java"),
                 "package com_github_example.my_plugin; class Broken { int x = \"no\"; }");
 
+        List<String> history = titles(values);
+
         ValueContext opened = values.open(GREETING).orElseThrow();
         opened.write("again");
         assertEquals(before, text(file), "the file is put back");
-        assertFalse(Files.exists(values.folder().resolve(HostValues.HISTORY)), "a refused write keeps no copy");
+        assertEquals(history, titles(values), "a refused write commits nothing");
     }
 
     @Test
@@ -182,14 +193,27 @@ public class HostValuesTest {
     }
 
     @Test
-    void historyKeepsTheLastTwenty() throws Exception {
-        HostValues values = values("1.0.0");
-        values.create(GREETING);
-        for (int i = 0; i < 25; i++) values.open(GREETING).orElseThrow().write("v" + i);
-        try (Stream<Path> kept = Files.list(values.folder().resolve(HostValues.HISTORY))) {
-            assertEquals(HostValues.KEPT, kept.count());
-        }
-        assertTrue(text(values.sourcesDir().resolve("Emulators.java")).contains("\"v24\""));
+    void twoWritersCommitEachWriteInTurn() throws Exception {
+        HostValues first = values("1.0.0");
+        first.create(GREETING);
+        first.create(SPEED);
+        HostValues second = values("1.0.0");
+        int writes = 4;
+        Thread greeting = Thread.ofPlatform().start(() -> {
+            for (int i = 0; i < writes; i++) first.open(GREETING).orElseThrow().write("g" + i);
+        });
+        Thread speed = Thread.ofPlatform().start(() -> {
+            for (int i = 0; i < writes; i++) second.open(SPEED).orElseThrow().write(10 + i);
+        });
+        greeting.join();
+        speed.join();
+
+        List<String> titles = titles(first);
+        assertEquals(writes, titles.stream().filter("Set GREETING"::equals).count(), titles.toString());
+        assertEquals(writes, titles.stream().filter("Set SPEED"::equals).count(), titles.toString());
+        assertTrue(vcs(first).status().isClean(), "no write is left uncommitted");
+        String last = text(first.sourcesDir().resolve("Emulators.java"));
+        assertTrue(last.contains("\"g3\"") && last.contains("return 13;"), last);
     }
 
     @Test

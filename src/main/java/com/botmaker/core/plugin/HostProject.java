@@ -51,7 +51,7 @@ final class HostProject {
     static final String LEGACY_PROPERTIES = "host.properties";
 
     /** The older folder's copies of replaced classes, deleted by the move. */
-    static final String LEGACY_HISTORY = HostValues.HISTORY;
+    static final String LEGACY_HISTORY = ".history";
 
     /**
      * What git keeps out: the writers' lock, the plugin's window state ({@code state/}, JSON a window keeps beside its
@@ -100,6 +100,21 @@ final class HostProject {
     /** The project's history. */
     ProjectVcs vcs() {
         return new ProjectVcs(folder);
+    }
+
+    /**
+     * Commits what changed in the folder as one version labelled {@code label}: empty when committed or nothing
+     * changed, else why not. A folder that is not a project (its move failed) commits nothing.
+     */
+    Optional<String> commit(VersionOrigin origin, String label) {
+        if (!isProject()) return Optional.empty();
+        try {
+            vcs().checkpoint(origin, label);
+            return Optional.empty();
+        } catch (IOException | RuntimeException e) {
+            return Optional.of("Could not record \"" + label + "\" in the history of this PC's values of "
+                    + plugin.artifactId() + ": " + e.getMessage());
+        }
     }
 
     /** Whether the folder is a project already: a pom and a repository. */

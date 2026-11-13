@@ -1,5 +1,6 @@
 package com.botmaker.core.plugin;
 
+import com.botmaker.core.project.vcs.ProjectVcs;
 import com.botmaker.java.grammar.ValueGrammar;
 import com.botmaker.plugin.api.managed.HostHolder;
 import com.botmaker.plugin.api.managed.ManagedId;
@@ -11,8 +12,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.File;
-import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
@@ -22,7 +21,6 @@ import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
-import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -62,14 +60,6 @@ public class HostUpgradeTest {
         return new HostValues(root, PLUGIN, version, List.of(declared), ValueGrammar.empty(), null, () -> CLASSPATH);
     }
 
-    private static String read(Path file) {
-        try {
-            return Files.readString(file);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-    }
-
     /** Version 1.0.0's folder, its speed then broken by what 2.0.0 no longer has. */
     private Path written() throws Exception {
         HostValues first = at("1.0.0", GREETING, SPEED, RETIRED);
@@ -95,9 +85,11 @@ public class HostUpgradeTest {
         assertTrue(text.contains("@Refactor"), "and is marked for review: " + text);
         assertTrue(text.contains("\"hello\""), "a value that still compiles is left: " + text);
         assertEquals("2.0.0", next.recorded());
-        try (Stream<Path> kept = Files.list(next.folder().resolve(HostValues.HISTORY))) {
-            assertTrue(kept.anyMatch(each -> read(each).contains("GoneIn2.SPEED")), "the class before the repair is kept");
-        }
+        ProjectVcs vcs = new ProjectVcs(next.folder());
+        List<String> titles = vcs.history().stream().map(ProjectVcs.CommitInfo::title).toList();
+        assertEquals(List.of("Upgraded to 2.0.0", "Before the upgrade to 2.0.0"), titles.subList(0, 2),
+                "the class changed by hand is committed before the repair, and the repair is a commit: " + titles);
+        assertTrue(vcs.status().isClean(), "nothing the repair changed is left out of its commit");
     }
 
     @Test

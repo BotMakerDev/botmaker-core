@@ -15,16 +15,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   `push`, `pull`; shared's `SignInsRunning`): a password is typed there. Its reads stay open. Nothing in the tool
   signs in, applies a configuration or manages instances.
 - `plugin.HostValues`: a plugin's values of this PC (`HostHolder`) kept as Java in
-  `<config>/plugins/<group>/<artifact>/`, read and written as a bot's are. Each write is compiled against the plugin's
-  classpath and refused with javac's sentence when it would not compile, the replaced class kept in `.history/` (the
-  last 20), and `host.properties` refuses a write from a version older than the last writer (a `-SNAPSHOT` is older
-  than its release). Method values only so far. A write locks the folder across processes (`.lock`).
+  `<config>/plugins/<group>/<artifact>/`, read and written as a bot's are. The folder is a project the plugin manages
+  (`plugin.HostProject`): a `pom.xml` naming the plugin at the version that last wrote, the classes in
+  `src/main/java/<group>/<artifact>/`, and its own git, in which each accepted write is one commit labelled with the
+  value (`Set GREETING`). An older folder (classes at its root, `.history/`, `host.properties`) is moved into that
+  layout once, committed as "Moved from the folder of this PC". Each write is compiled against the plugin's classpath
+  and refused with javac's sentence when it would not compile, committing nothing; the pom's version refuses a write
+  from a version older than the last writer (a `-SNAPSHOT` is older than its release). Method values only so far. A
+  write locks the folder across processes (`.lock`).
 - `StudioServices.hostValues()` is served, with or without a bot open (`plugin.HostFolders`): the newest version of a
   plugin bound in this process serves its values of this PC, and a project pinning an older one gets that copy.
 - A newer plugin version repairs its host folder before its first read or write (`plugin.HostUpgrade`), as a bot's
   values are on that plugin's upgrade: its `@Migrate` rules when the older jar is on this PC, then a gone id removed and
-  a value that no longer compiles reset and marked `@Refactor`; each class's copy kept in `.history/`, the version
-  recorded only once the repair succeeded.
+  a value that no longer compiles reset and marked `@Refactor`. What it replaces is committed first ("Before the
+  upgrade to …") and the repair is one commit ("Upgraded to …"), the version recorded only once it succeeded.
 - A bot's values never hold a value of this PC: a bind plans no host holder, and `pluginValues()` neither reads,
   opens nor creates one.
 - `device`'s `focus` names the home app and marks an app in front that is the emulator's own (its launcher, store or
