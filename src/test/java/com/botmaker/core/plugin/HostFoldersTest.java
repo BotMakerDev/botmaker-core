@@ -1,5 +1,6 @@
 package com.botmaker.core.plugin;
 
+import com.botmaker.core.project.ProjectPreferences;
 import com.botmaker.plugin.api.StudioPlugin;
 import com.botmaker.plugin.api.source.PluginValues;
 import com.botmaker.plugin.host.LoadedPlugin;
@@ -10,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.File;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
@@ -17,6 +19,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** The newest version of a plugin bound on this PC serves its values of this PC alone. */
@@ -96,5 +99,21 @@ class HostFoldersTest {
         LoadedPlugin loaded = TestPlugins.loaded("plain", plain);
         HostFolders.bound(List.of(loaded), CLASSPATH);
         assertSame(PluginValues.NONE, HostFolders.of(loaded));
+    }
+
+    @Test
+    void aPluginsFolderIsNoProjectToOpenNorARecent() throws Exception {
+        Path folder = root.resolve("plugins").resolve("com_example").resolve("pc");
+        Files.createDirectories(folder.resolve("src/main/java"));
+        Files.writeString(folder.resolve("pom.xml"), "<project/>");
+
+        assertTrue(HostFolders.ownedByAPlugin(folder).orElseThrow().contains("plugin's own windows"));
+        assertTrue(HostFolders.ownedByAPlugin(folder.resolve("..").resolve("pc")).isPresent());
+        assertTrue(HostFolders.ownedByAPlugin(root.resolve("bots").resolve("mine")).isEmpty());
+
+        ProjectPreferences prefs = new ProjectPreferences();
+        prefs.recordOpened(folder);
+        assertTrue(prefs.getRecentProjects().isEmpty());
+        assertNull(prefs.lastOpenedDirectory());
     }
 }

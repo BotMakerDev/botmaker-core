@@ -8,6 +8,7 @@ import com.botmaker.core.edit.EditResult;
 import com.botmaker.core.event.CoreEvent;
 import com.botmaker.core.plugin.HomePlugins;
 import com.botmaker.core.plugin.HomeServices;
+import com.botmaker.core.plugin.HostFolders;
 import com.botmaker.core.plugin.HostServices;
 import com.botmaker.core.plugin.PluginHost;
 import com.botmaker.core.plugin.UiPort;
@@ -226,6 +227,9 @@ public final class Projects implements AutoCloseable, CoreHome.Host {
      * opener's thread.
      */
     private Optional<String> opened(Path dir) {
+        // Every open comes here, whichever client or route asked: a plugin's folder of this PC is never one.
+        Optional<String> owned = HostFolders.ownedByAPlugin(dir);
+        if (owned.isPresent()) return owned;
         if (open != null && !open.directory().equals(dir)) {
             if (!open.unattended() || open.running()) {
                 return Optional.of(open.directory().getFileName() + " is open in BotMaker's core"

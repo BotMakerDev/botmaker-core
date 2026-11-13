@@ -7,9 +7,11 @@ import com.botmaker.plugin.host.LoadedPlugin;
 import com.botmaker.plugin.host.PluginCoordinate;
 import com.botmaker.shared.tools.UserDirs;
 
+import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -74,6 +76,30 @@ public final class HostFolders {
     static String servingVersion(PluginCoordinate coordinate) {
         Served served = SERVED.get(key(canonical(coordinate)));
         return served == null ? "" : served.version();
+    }
+
+    /**
+     * Why {@code dir} is never opened as a project, when it lies under the plugins' folders of this PC (2026-11-13, the
+     * user's call: only the plugin's own windows show and change one); empty for any other folder.
+     */
+    public static Optional<String> ownedByAPlugin(Path dir) {
+        Path wanted = dir.toAbsolutePath().normalize();
+        // Real paths both: a short name or a link spells the same folder another way.
+        if (!real(wanted).startsWith(real(HostValues.plugins(root())))) {
+            return Optional.empty();
+        }
+        return Optional.of(wanted + " keeps a plugin's values of this PC: that plugin's own windows show and change "
+                + "them, so it is not opened as a project.");
+    }
+
+    /** {@code path}'s real path, or its absolute normal form when it is not there to resolve. */
+    private static Path real(Path path) {
+        Path absolute = path.toAbsolutePath().normalize();
+        try {
+            return absolute.toRealPath();
+        } catch (IOException | RuntimeException e) {
+            return absolute;
+        }
     }
 
     /** Puts the folders under {@code folder}, forgetting every served copy; null puts them back. For tests. */

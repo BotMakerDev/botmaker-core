@@ -139,9 +139,14 @@ public final class HostValues implements PluginValues {
         return history;
     }
 
-    /** {@code plugin}'s host folder under {@code root}: {@code plugins/<group>/<artifact>/}, each {@link PluginState#part}. */
+    /** The folder every plugin's host folder lies in under {@code root}: {@code plugins/}. */
+    public static Path plugins(Path root) {
+        return root.resolve("plugins");
+    }
+
+    /** {@code plugin}'s host folder under {@code root}:{@code plugins/<group>/<artifact>/}, each {@link PluginState#part}. */
     public static Path folder(Path root, PluginCoordinate plugin) {
-        return root.resolve("plugins").resolve(PluginState.part(plugin.groupId()))
+        return plugins(root).resolve(PluginState.part(plugin.groupId()))
                 .resolve(PluginState.part(plugin.artifactId()));
     }
 

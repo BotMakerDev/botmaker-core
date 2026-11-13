@@ -2,6 +2,7 @@ package com.botmaker.core.assist;
 
 import com.botmaker.plugin.api.assist.AssistantTool;
 import com.botmaker.plugin.api.assist.Describe;
+import com.botmaker.core.plugin.HostFolders;
 import com.botmaker.core.project.ProjectManager;
 import com.botmaker.core.sharing.UnpackedBots;
 import io.modelcontextprotocol.json.McpJsonMapper;
@@ -132,6 +133,8 @@ public final class HomeTools {
         if (!dir.isAbsolute()) throw new IllegalArgumentException("Give the folder's absolute path: " + path);
         Path wanted = dir.normalize();
         if (!Files.isDirectory(wanted)) throw new IllegalArgumentException("No folder " + wanted + ".");
+        Optional<String> owned = HostFolders.ownedByAPlugin(wanted);
+        if (owned.isPresent()) throw new IllegalArgumentException(owned.get());
         if (!UnpackedBots.isUnpacked(wanted) && new ProjectManager().projectAt(wanted).isEmpty()) {
             throw new IllegalArgumentException(wanted + " has no " + ProjectManager.PROJECT_SHAPE
                     + ", so there is no project here to open.");

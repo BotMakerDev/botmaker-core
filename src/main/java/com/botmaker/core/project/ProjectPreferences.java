@@ -1,5 +1,6 @@
 package com.botmaker.core.project;
 
+import com.botmaker.core.plugin.HostFolders;
 import com.botmaker.core.sharing.UnpackedBots;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.databind.DeserializationFeature;
@@ -110,6 +111,8 @@ public class ProjectPreferences {
      */
     public void recordOpened(Path projectDir) {
         Path dir = projectDir.toAbsolutePath().normalize();
+        // A plugin's folder of this PC is never a card, whatever opened it.
+        if (HostFolders.ownedByAPlugin(dir).isPresent()) return;
         // Forget first: forgetting the last-opened project also clears "last opened", which is about to be set.
         forgetRecent(dir);
         lastOpenedProject = dir.getFileName().toString();
@@ -168,6 +171,8 @@ public class ProjectPreferences {
         for (ProjectEntry entry : List.copyOf(recentProjects)) {
             Path dir = entry.directory().toAbsolutePath().normalize();
             if (ours.stream().anyMatch(dir::startsWith) && !Files.exists(dir)) forgetRecent(dir);
+            // One remembered before 2026-11-13: a plugin's folder of this PC is no card.
+            else if (HostFolders.ownedByAPlugin(dir).isPresent()) forgetRecent(dir);
         }
     }
 
