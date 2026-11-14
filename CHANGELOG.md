@@ -9,6 +9,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- **The `device` tool refuses another instance on the address** (2026-11-14): it connects through shared's
+  `AdbDevice.connect(EmulatorInstance)`, which checks the instance's ID file.
+
 - **`StudioProjectSettings.WorkspaceLayout.runChoice`** (2026-11-13): what Studio's Run split button last ran, kept
   in `settings.json` beside the rest of the window's layout; `withPublishDivider` and `withOpenFiles` keep it.
 

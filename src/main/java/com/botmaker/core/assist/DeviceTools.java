@@ -594,7 +594,7 @@ final class DeviceTools {
     /** {@code use}'s answer over a connection to the running instance {@code reference} names. */
     private static <T> T withDevice(String reference, Function<AdbDevice, T> use) {
         EmulatorInstance instance = running(instance(reference));
-        try (AdbDevice device = AdbDevice.connect(instance.adb())) {
+        try (AdbDevice device = AdbDevice.connect(instance)) {
             return use.apply(device);
         }
     }
