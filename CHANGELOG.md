@@ -14,6 +14,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- **A plugin's values of this PC read faster** (2026-11-14): `HostValues` parses a holder class again only when its
+  text changed. Each value opened used to parse every class, so a window that opens several (the Emulators window's
+  Accounts tab opens eight) took a second or more. A write by another process is still seen at once.
 - **Words that named Studio's old tabs** (2026-11-13): a refused update, an upgrade's summary, a `.bmk` export refused
   for want of a commit and the `checkpoint` tool's description now say the Versions window. The `hidden_trace`
   setting says the Run tab's Trace.

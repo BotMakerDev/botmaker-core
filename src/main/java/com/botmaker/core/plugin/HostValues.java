@@ -99,6 +99,8 @@ public final class HostValues implements PluginValues {
     private final StudioServices services;
     private final Supplier<List<Path>> classpath;
     private final HostFolderHistory history;
+    /** Each class's last parse, by file ({@link #values}); the text is compared, so another process's write is seen. */
+    private final Map<Path, Parsed> parsed = new ConcurrentHashMap<>();
 
     /** Whether this instance has made the folder a project, or tried to ({@link HostProject#ready}). */
     private volatile boolean readied;
@@ -179,21 +181,35 @@ public final class HostValues implements PluginValues {
         return values().stream().map(ManagedMethod::id).toList();
     }
 
-    /** Every marked method in the folder's classes, file by file in name order. */
+    /**
+     * Every marked method in the folder's classes, file by file in name order. A file whose text is the one read last
+     * time is not parsed again ({@link #parsed}): a window's refresh opens each of its values, and each open used to
+     * parse every class (2026-11-14, a second and more to show the Emulators window's Accounts tab).
+     */
     List<ManagedMethod> values() {
         List<ManagedMethod> out = new ArrayList<>();
-        for (Path file : sources()) {
+        List<Path> files = sources();
+        for (Path file : files) {
             String source;
             try {
                 source = Files.readString(file);
             } catch (IOException | UncheckedIOException unreadable) {
                 continue;
             }
-            out.addAll(JavaManagedSource.read(file, source, BotParser.SYNTAX.parse(file, source), grammar,
-                    BotRecords.none(), declared));
+            Parsed last = parsed.get(file);
+            if (last == null || !last.source().equals(source)) {
+                last = new Parsed(source, List.copyOf(JavaManagedSource.read(file, source,
+                        BotParser.SYNTAX.parse(file, source), grammar, BotRecords.none(), declared)));
+                parsed.put(file, last);
+            }
+            out.addAll(last.methods());
         }
+        parsed.keySet().retainAll(files);
         return List.copyOf(out);
     }
+
+    /** One class's text as last read, and the marked methods parsed from it. */
+    private record Parsed(String source, List<ManagedMethod> methods) {}
 
     private Optional<ManagedMethod> find(String id) {
         return values().stream().filter(value -> value.id().equals(id)).findFirst();

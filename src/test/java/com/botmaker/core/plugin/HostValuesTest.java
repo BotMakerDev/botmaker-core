@@ -192,6 +192,18 @@ public class HostValuesTest {
         assertTrue(values.open(GREETING).isPresent());
     }
 
+    /** A read parses a class again only when its text changed: a write by another copy is still seen at once. */
+    @Test
+    void aReadSeesAnotherCopysWriteAfterAnEarlierRead() {
+        HostValues first = values("1.0.0");
+        first.create(GREETING);
+        first.open(GREETING).orElseThrow().write("mine");
+        assertEquals(Optional.of("mine"), first.open(GREETING).orElseThrow().value(String.class));
+
+        values("1.0.0").open(GREETING).orElseThrow().write("theirs");
+        assertEquals(Optional.of("theirs"), first.open(GREETING).orElseThrow().value(String.class));
+    }
+
     @Test
     void twoWritersCommitEachWriteInTurn() throws Exception {
         HostValues first = values("1.0.0");
