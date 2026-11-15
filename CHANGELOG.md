@@ -9,6 +9,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- **The bot's pools listed** (2026-11-15, `project.params.JavaParameters.pools`): every pool of its `@Pools` groups, read
+  by botmaker-java's `PoolReader`. An element may be one of the bot's own records.
 - **A bot run beside the open one** (2026-11-15, `run.SideRunner`): the contract's `sideRuns()`, served in the core
   and in Studio (`HostServices.serveSideRuns`). It resolves the folder's pom, compiles it with javac only when its
   sources or classpath changed (`botmaker-side-run.stamp`), filling each private parameter the folder lacks from

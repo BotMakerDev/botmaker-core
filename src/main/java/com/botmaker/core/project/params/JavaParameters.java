@@ -28,6 +28,8 @@ import com.botmaker.core.project.ProjectWrites;
 import com.botmaker.core.project.managed.ManagedConstants;
 import com.botmaker.core.project.managed.ManagedHolders;
 import com.botmaker.java.index.BotIndex;
+import com.botmaker.java.index.PoolReader;
+import com.botmaker.java.grammar.ValueTypes;
 import com.botmaker.core.services.BotSources;
 import org.eclipse.jdt.core.dom.AST;
 import org.eclipse.jdt.core.dom.ASTNode;
@@ -151,6 +153,33 @@ public final class JavaParameters {
             units.forEach((file, unit) -> out.addAll(
                     JavaParameterSource.read(file, index.sources().get(file), unit, grammar, records, names,
                             managed)));
+            return List.copyOf(out);
+        });
+    }
+
+    /**
+     * Every pool of the bot's {@code @Pools} groups, file by file (2026-11-15, spec
+     * {@code 2026-11-15-run-claims-design.md} §1): what several runs are dealt from. A pool that does not read is
+     * listed with its reason.
+     */
+    public static List<PoolReader.Reading> pools(ProjectConfig config, ProjectState state) {
+        if (config == null) return List.of();
+        return pools(BotSources.index(config, state), PluginHost.grammar());
+    }
+
+    /**
+     * The same over {@code index}, whose classpath must hold the contract: a pool reads by its bindings. An element
+     * may be one of the bot's own records, read as the Parameters window reads one.
+     */
+    public static List<PoolReader.Reading> pools(BotIndex index, ValueGrammar grammar) {
+        return index.memo(PluginHost.managedValues(), Arrays.asList(PoolReader.class, grammar), units -> {
+            ManagedConstants.Lookup names = new ManagedConstants.Lookup(ManagedConstants.over(index), grammar);
+            BotRecords records = BotRecords.over(grammar, units.values());
+            PoolReader.Elements own = (type, element) -> type instanceof ValueTypes.BotClass declared
+                    && records.partsOf(declared, element.source()).isPresent();
+            List<PoolReader.Reading> out = new ArrayList<>();
+            units.forEach((file, unit) -> out.addAll(
+                    PoolReader.read(unit, index.sources().get(file), units.values(), grammar, names, own)));
             return List.copyOf(out);
         });
     }
