@@ -1,9 +1,11 @@
 package com.botmaker.core.run.agent;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.lang.instrument.Instrumentation;
 import java.lang.reflect.InvocationTargetException;
 import java.nio.file.Path;
+import java.util.Optional;
 
 /**
  * The one agent Studio starts every bot with ({@code -javaagent:<jar>=<plan file>}): the host inside the bot's JVM
@@ -24,7 +26,21 @@ public final class RunAgent {
 
     private static final String INNER = "com.botmaker.core.run.agent.run.AgentRun";
 
+    /**
+     * The exit code of a run the agent stopped before or as it started: one of several runs that could not take the
+     * values it was dealt, or have its claims checked. A run on the wrong values would play with another run's.
+     */
+    public static final int STOPPED = 78;
+
     private RunAgent() {}
+
+    private static Optional<byte[]> classBytes(ClassLoader loader, String binaryName) {
+        try (InputStream in = loader.getResourceAsStream(binaryName.replace('.', '/') + ".class")) {
+            return in == null ? Optional.empty() : Optional.of(in.readAllBytes());
+        } catch (IOException e) {
+            return Optional.empty();
+        }
+    }
 
     /** The agent's entry point: reads the plan Studio wrote, starts the run's host, and traces calls. */
     public static void premain(String planFile, Instrumentation instrumentation) {
@@ -36,9 +52,35 @@ public final class RunAgent {
             System.err.println("[BotMaker] this run has no log and no trace: " + e.getMessage());
             return;
         }
+        ClassLoader bot = ClassLoader.getSystemClassLoader();
+        PooledMethods rewrites = plan.pooled().isEmpty() ? null : new PooledMethods(plan.pooled());
+        if (rewrites != null) {
+            // Before anything loads a listed class: building a pool again names its parameter (fills(Farm::account)).
+            instrumentation.addTransformer(rewrites);
+            Optional<String> unfit = PooledMethods.unfit(plan.pooled(), owner -> classBytes(bot, owner));
+            if (unfit.isPresent()) {
+                MainStop.install(instrumentation, unfit.get());
+                return;
+            }
+        }
         RunLines lines = plan.inner().map(jar -> inner(jar, plan)).orElse(null);
+        if (plan.runId().isPresent() && lines == null) {
+            // Its claims would all be granted, and two runs would take one key.
+            MainStop.install(instrumentation,
+                    "this run is one of several, and its claims could not be checked against the others");
+            return;
+        }
         TracedCalls.to(lines);
+        // Before the pools are built again, which loads bot classes: a class loaded before it is never traced.
         if (!plan.trace().traced().isEmpty()) instrumentation.addTransformer(new CallSites(plan.trace()));
+        Optional<String> unbuilt = plan.pooled().isEmpty() ? Optional.empty()
+                : PooledValues.load(plan.pooled(), bot);
+        if (unbuilt.isEmpty() && rewrites != null) unbuilt = rewrites.failed();
+        if (unbuilt.isPresent()) {
+            if (lines != null) lines.ended();
+            MainStop.install(instrumentation, unbuilt.get());
+            return;
+        }
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             TracedCalls.reportOpen();
             if (lines != null) lines.ended();

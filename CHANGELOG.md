@@ -9,6 +9,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- **Several runs of one bot started at once** (2026-11-15, `run.CodeExecutionService.startSeveral`,
+  `run.claims.PooledRuns`): one compile, then k rows dealt from the bot's `@Pools` groups and held in the live runs
+  under one lock, each run started with its row and run id, and its row freed when its process ends or at once when
+  it never starts. Every pooled method is checked against the compile first, and one that is gone, changed its type
+  or has no body refuses the start in words. Each run's output goes to `target/botmaker-several/<run id>.log`. While
+  they go, neither a Run nor another start compiles over their classes, and no run takes the project's background
+  session.
+- **The run agent gives each run its dealt values** (2026-11-15, `run.agent.PooledMethods`, `PooledValues`,
+  `WrittenValues`): only the listed methods are rewritten as their classes load, to return the value built once in
+  the bot's JVM, so a bot reading its parameter by a direct call reads its own row. The agent builds each pool again
+  and stops the run (exit 78, `RunAgent.STOPPED`) when it lists other elements than the core dealt from, or a value
+  cannot be built; a stopped run ends as its main class initialises, before any of the bot's code (`MainStop`; an exit
+  from `premain` takes 60 s on JDK 26 on Windows). A run of several serves `Claims` over the live runs (`RunClaims`)
+  and stops when it cannot.
+- **A pool's element written one way** (2026-11-15, `run.claims.Canonical`): every class fully qualified from the
+  value's imports and each literal by its value (`1_000` and `1000` alike), the identity of an element in the live
+  runs, `dealt.json` and a pin, and what the agent builds.
 - **The live runs of this PC** (2026-11-15, `run.claims.RunRegistry`): one file per run under
   `UserDirs.data()/live-runs/`, with its bot, run id, the elements its row holds, its run-time claims and its process.
   Every check and write is under one lock shared by every process, a run whose process is gone is dropped as it is

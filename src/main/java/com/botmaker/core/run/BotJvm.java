@@ -54,19 +54,47 @@ public final class BotJvm {
      */
     public static List<String> runAgent(ProjectConfig config, StudioProjectSettings settings) {
         if (config == null) return List.of();
-        List<String> offered = PluginHost.menuFacades().stream().map(f -> f.type().getName()).toList();
         try {
-            RunAgentJar.Jars jars = RunAgentJar.jars();
-            Path plan = runPlan(config);
-            TracePlan trace = new TracePlan(Set.of(config.compiledOutputPath()), Set.copyOf(offered),
-                    settings == null ? Set.of() : Set.copyOf(settings.hiddenTraceWriters()));
-            new RunPlan(trace, Optional.of(config.projectPath().resolve(RunLog.FOLDER)), jars.inner())
-                    .write(plan);
-            return List.of("-javaagent:" + jars.agent() + "=" + plan);
+            return agent(config, settings, runPlan(config), List.of(), Optional.empty(), Optional.empty());
         } catch (IOException | RuntimeException e) {
             System.err.println("Runs this time without its log and call trace: " + e.getMessage());
             return List.of();
         }
+    }
+
+    /**
+     * {@link #runAgent} for one of several runs (spec {@code 2026-11-15-run-claims-design.md} §5): its plan, a file of
+     * its own beside the classes, lists the methods the agent rewrites to return what {@code runId} was dealt, and the
+     * live runs its claims are checked in. Unlike one run's, it throws when the agent cannot be written: a run of
+     * several without it would use the body's values.
+     *
+     * @return the agent's argument, and the plan file, which the run reads once at its start
+     */
+    public static Agent pooledAgent(ProjectConfig config, StudioProjectSettings settings, String runId,
+                                    List<RunPlan.Pooled> pooled, Path registry) throws IOException {
+        Path plan = config.compiledOutputPath().resolveSibling("botmaker-run-" + runId + ".properties");
+        List<String> argument = agent(config, settings, plan, pooled, Optional.of(runId), Optional.of(registry));
+        return new Agent(argument, plan);
+    }
+
+    /** The agent's command-line argument and the plan file it names. */
+    public record Agent(List<String> arguments, Path plan) {
+
+        public Agent {
+            arguments = List.copyOf(arguments);
+        }
+    }
+
+    private static List<String> agent(ProjectConfig config, StudioProjectSettings settings, Path plan,
+                                      List<RunPlan.Pooled> pooled, Optional<String> runId, Optional<Path> registry)
+            throws IOException {
+        List<String> offered = PluginHost.menuFacades().stream().map(f -> f.type().getName()).toList();
+        RunAgentJar.Jars jars = RunAgentJar.jars();
+        TracePlan trace = new TracePlan(Set.of(config.compiledOutputPath()), Set.copyOf(offered),
+                settings == null ? Set.of() : Set.copyOf(settings.hiddenTraceWriters()));
+        new RunPlan(trace, Optional.of(config.projectPath().resolve(RunLog.FOLDER)), jars.inner(), pooled, runId,
+                registry).write(plan);
+        return List.of("-javaagent:" + jars.agent() + "=" + plan);
     }
 
     /** Where {@link #runAgent} writes the plan the agent reads once, at the JVM's start. */

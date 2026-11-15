@@ -47,7 +47,11 @@ class RunAgentJarTest {
     private static final Path AGENT_SOURCES = Path.of("src/main/java/com/botmaker/core/run/agent");
     private static final List<String> INNER_NAMES = List.of("java.", "com.botmaker.runlog.", "com.botmaker.shared.ipc.",
             "com.fasterxml.jackson.", "com.botmaker.plugin.host.", "com.botmaker.plugin.api.",
-            "com.botmaker.core.run.agent.");
+            "com.botmaker.core.run.agent.", "com.botmaker.core.run.claims.RunRegistry");
+    /** The one class of the claims package in the inner jar. */
+    private static final Path REGISTRY_SOURCE = Path.of("src/main/java/com/botmaker/core/run/claims/RunRegistry.java");
+    /** Named by {@code RunRegistry.ofThisPc} alone, which only the core calls: the inner half is given the folder. */
+    private static final String CORE_ONLY = "com.botmaker.shared.tools.UserDirs";
 
     /** A plugin whose bot half says one line and one fact through its run channel. */
     public static final class StubPlugin extends DeclaredPlugin {
@@ -77,6 +81,19 @@ class RunAgentJarTest {
     }
 
     @Test
+    void theInnerJarHoldsTheRegistryAloneOfItsPackage(@TempDir Path dir) throws IOException {
+        Path jar = dir.resolve("inner.jar");
+        RunAgentJar.writeInner(jar);
+        String claims = "com/botmaker/core/run/claims/";
+        List<String> held = new ArrayList<>();
+        try (JarFile file = new JarFile(jar.toFile())) {
+            file.stream().map(e -> e.getName()).filter(n -> n.startsWith(claims)).forEach(held::add);
+        }
+        assertTrue(held.contains(claims + "RunRegistry.class"), held.toString());
+        assertTrue(held.stream().allMatch(n -> n.startsWith(claims + "RunRegistry")), held.toString());
+    }
+
+    @Test
     void theBootstrapNamesOnlyTheJdkAndTheInnerHalfOnlyWhatItsJarHolds() throws IOException {
         try (Stream<Path> files = Files.list(AGENT_SOURCES)) {
             for (Path file : files.filter(Files::isRegularFile).toList()) {
@@ -90,6 +107,9 @@ class RunAgentJarTest {
                         file.getFileName() + " imports " + named));
             }
         }
+        imports(REGISTRY_SOURCE).forEach(named -> assertTrue(
+                named.equals(CORE_ONLY) || INNER_NAMES.stream().anyMatch(named::startsWith),
+                "RunRegistry imports " + named));
     }
 
     @Test

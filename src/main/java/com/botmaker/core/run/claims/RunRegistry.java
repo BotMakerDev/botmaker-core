@@ -185,6 +185,11 @@ public final class RunRegistry {
         this.alive = alive;
     }
 
+    /** The folder of the live runs: what a run's agent opens to check its claims. */
+    public Path folder() {
+        return folder;
+    }
+
     /** Every live run, the dead dropped. */
     public List<LiveRun> live() {
         return locked(Locked::live);

@@ -276,8 +276,12 @@ class DealerTest {
                         String.class, String.class)), Optional.empty(), values, 0, 2, true, "");
     }
 
+    private static PoolSources.Target target(String method) {
+        return new PoolSources.Target("com.bot.params.sdk.SdkParams", method, "()Z", "");
+    }
+
     @Test
-    void theBotsPoolsAreReadAsTheGrammarPrintsThemAndOneUnreadIsAWarning() {
+    void theBotsPoolsAreWrittenCanonicallyAndOneUnreadIsAWarning() {
         PoolReader.Reading unread = new PoolReader.Reading("com.bot.params.bot.FarmPools", "heroes",
                 Optional.empty(), Optional.empty(), List.of(), 0, 1, false, "fills no parameter");
         PoolSources.Read read = PoolSources.ofBot("farm",
@@ -285,7 +289,7 @@ class DealerTest {
 
         Source accounts = read.pools().getFirst();
         assertEquals(1, read.pools().size());
-        assertEquals(List.of("new Login(\"a\",1)", "Accounts.MAIN"), accounts.elements());
+        assertEquals(List.of("new Login(\"a\", 1)", "Accounts.MAIN"), accounts.elements());
         assertEquals(ACCOUNT, accounts.parameter());
         assertEquals("accounts", accounts.name());
         assertEquals(2, accounts.each());
@@ -305,8 +309,11 @@ class DealerTest {
         List<PoolSources.Declared> plugins = List.of(new PoolSources.Declared(SDK, List.of(setups, pauses)));
 
         PoolSources.Read read = PoolSources.of(plugins,
-                id -> Optional.of(id.equals(SETUP.id()) ? "doSetup" : "pause"), ValueGrammar.empty(), null, "farm",
-                List.of(reading("accounts", "account", "\"a\"", "\"b\"")));
+                id -> Optional.of(target(id.equals(SETUP.id()) ? "doSetup" : "pause")), ValueGrammar.empty(), null,
+                "farm", List.of(reading("accounts", "account", "\"a\"", "\"b\"")));
+        assertEquals(target("doSetup"), read.targets().get(SETUP.id()));
+        assertEquals(new PoolSources.Target("com.bot.params.bot.Farm", "account", "()Ljava/lang/String;",
+                "com.bot.params.bot.FarmPools#accounts"), read.targets().get(ACCOUNT));
         assertEquals(List.of("doSetup", "pause", "accounts"), read.pools().stream().map(Source::name).toList());
         assertEquals(Hold.plugin(SDK, SETUP.id(), "true"), read.pools().getFirst().hold("true"));
 
@@ -315,7 +322,8 @@ class DealerTest {
         assertEquals(List.of("true", "false"), picked(dealing, PAUSE.id()));
 
         PoolSources.Read unbound = PoolSources.of(plugins,
-                id -> id.equals(SETUP.id()) ? Optional.of("doSetup") : Optional.empty(), ValueGrammar.empty(), null,
+                id -> id.equals(SETUP.id()) ? Optional.of(target("doSetup")) : Optional.empty(), ValueGrammar.empty(),
+                null,
                 "farm", List.of());
         assertEquals(List.of("doSetup"), unbound.pools().stream().map(Source::name).toList());
     }
@@ -326,7 +334,7 @@ class DealerTest {
             throw new IllegalStateException("no host values");
         });
         Dealer.Failed failed = assertThrows(Dealer.Failed.class, () -> PoolSources.of(
-                List.of(new PoolSources.Declared(SDK, List.of(broken))), id -> Optional.of("doSetup"),
+                List.of(new PoolSources.Declared(SDK, List.of(broken))), id -> Optional.of(target("doSetup")),
                 ValueGrammar.empty(), null, "farm", List.of()));
         assertEquals(SDK, failed.owner());
         assertTrue(failed.getMessage().contains("doSetup"), failed.getMessage());

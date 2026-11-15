@@ -5,6 +5,7 @@ import com.botmaker.runlog.RunLog;
 import com.botmaker.shared.ipc.TelemetryClient;
 import com.botmaker.core.run.agent.RunAgent;
 import com.botmaker.core.run.agent.run.AgentRun;
+import com.botmaker.core.run.claims.RunRegistry;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -56,6 +57,8 @@ public final class RunAgentJar {
     /** Each package tree of the inner jar, by a class that lives in it. */
     static final List<Tree> INNER = List.of(
             new Tree(AgentRun.class, "com/botmaker/core/run/agent/run/"),
+            // The live runs a run's claims are checked against (RunClaims); not the rest of its package (JDT, grammar).
+            Tree.onlyClass(RunRegistry.class),
             new Tree(TelemetryClient.class, "com/botmaker/shared/ipc/"),
             new Tree(RunLog.class, "com/botmaker/runlog/"),
             new Tree(ObjectMapper.class, "com/fasterxml/jackson/"),
@@ -66,10 +69,27 @@ public final class RunAgentJar {
             new Tree(XmlPullParserException.class, "org/codehaus/plexus/util/"));
 
     /** The classes under {@code prefix} wherever {@code anchor} was loaded from. */
-    record Tree(Class<?> anchor, String prefix) {
+    record Tree(Class<?> anchor, String prefix, String only) {
+
+        Tree(Class<?> anchor, String prefix) {
+            this(anchor, prefix, "");
+        }
+
+        /** {@code type} and the classes nested in it, nothing else of its package. */
+        static Tree onlyClass(Class<?> type) {
+            return new Tree(type, type.getPackageName().replace('.', '/') + "/", type.getSimpleName());
+        }
+
         /** The anchor's own class file, which the tree must hold. */
         String anchorEntry() {
             return anchor.getName().replace('.', '/') + ".class";
+        }
+
+        /** Whether {@code entry}, a class file under {@link #prefix}, is one this tree takes. */
+        boolean takes(String entry) {
+            if (only.isEmpty()) return true;
+            String name = entry.substring(prefix.length());
+            return name.equals(only + ".class") || name.startsWith(only + "$");
         }
     }
 
@@ -148,7 +168,7 @@ public final class RunAgentJar {
                 for (Path f : files.filter(Files::isRegularFile).filter(p -> p.toString().endsWith(".class"))
                         .toList()) {
                     String name = from.relativize(f).toString().replace('\\', '/');
-                    if (!entries.add(name)) continue;
+                    if (!tree.takes(name) || !entries.add(name)) continue;
                     try (InputStream in = Files.newInputStream(f)) {
                         put(out, name, in);
                     }
@@ -164,7 +184,7 @@ public final class RunAgentJar {
                 String name = entry.getName();
                 if (entry.isDirectory() || !name.startsWith(tree.prefix()) || !name.endsWith(".class")) continue;
                 if (!below && name.indexOf('/', tree.prefix().length()) >= 0) continue;
-                if (!entries.add(name)) continue;
+                if (!tree.takes(name) || !entries.add(name)) continue;
                 try (InputStream in = jar.getInputStream(entry)) {
                     put(out, name, in);
                 }

@@ -11,6 +11,10 @@ import com.botmaker.core.project.vcs.VersionOrigin;
 import com.botmaker.core.project.ProjectState;
 import com.botmaker.java.index.BotIndex;
 import com.botmaker.core.run.tryhost.TryHost;
+import com.botmaker.core.project.params.JavaParameters;
+import com.botmaker.core.run.claims.PoolSources;
+import com.botmaker.core.run.claims.PooledRuns;
+import com.botmaker.core.run.claims.RunRegistry;
 import com.botmaker.core.services.BotSources;
 import com.botmaker.core.run.trial.TrialCaller;
 import com.botmaker.session.launch.BackgroundLauncher;
@@ -23,7 +27,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
@@ -45,6 +52,8 @@ public class CodeExecutionService {
     private final RunTelemetry.Listener telemetry;
 
     private volatile Process currentRunningProcess;
+    /** The processes of several runs ({@link #startSeveral}), each removed as it ends. */
+    private final Set<Process> several = ConcurrentHashMap.newKeySet();
     private volatile ConsoleBatcher activeConsole;
     private volatile TelemetryServer telemetryServer;
     /** From the request to the process's end, the compile included. */
@@ -160,6 +169,12 @@ public class CodeExecutionService {
         // call) would otherwise check again and compile beside the first, putting two bots on the game.
         if (!isRunning.compareAndSet(false, true)) {
             status("Program is already running. Stop it first.");
+            return;
+        }
+        if (!several.isEmpty()) {
+            // A compile now would change the classes their JVMs still load, and this run would hold nothing.
+            isRunning.set(false);
+            status("Several runs are going. Stop them first.");
             return;
         }
         RunCheck.Verdict verdict;
@@ -599,6 +614,87 @@ public class CodeExecutionService {
         }
         if (warm != null) warm.close();
         killRunningProcess();
+        several.forEach(Process::destroyForcibly);
+    }
+
+    /**
+     * Compiles once and starts {@code runs} runs of the bot, each dealt a row of its pools (spec
+     * {@code 2026-11-15-run-claims-design.md} §5), on the calling thread. Each run goes on in its own process, its
+     * output in {@code target/botmaker-several/<run id>.log}; this core's end ends them, as it does one run.
+     *
+     * <p>Only the bot's own pools are dealt here: a plugin's join with phase 8 of the plan, where the SDK's is
+     * declared.
+     *
+     * @param pins by row index, the picks fixed by hand
+     * @throws PooledRuns.Refused when the bot does not compile, a pooled method no longer fits the compile, or one run
+     *                            already runs
+     */
+    public PooledRuns.Outcome startSeveral(ProjectState.Snapshot snapshot, int runs,
+                                           Map<Integer, Map<String, List<String>>> pins)
+            throws PooledRuns.Refused, InterruptedException {
+        // Held through the compile, as one run holds it: no run or second start compiles beside this one.
+        if (!isRunning.compareAndSet(false, true)) {
+            throw new PooledRuns.Refused("A run is going: stop it before starting several.");
+        }
+        try {
+            if (!several.isEmpty()) {
+                // Their JVMs still load classes from the compile a new one would overwrite.
+                throw new PooledRuns.Refused("Several runs are going: stop them before starting more.");
+            }
+            return startSeveralCompiled(snapshot, runs, pins);
+        } finally {
+            isRunning.set(false);
+        }
+    }
+
+    private PooledRuns.Outcome startSeveralCompiled(ProjectState.Snapshot snapshot, int runs,
+                                                    Map<Integer, Map<String, List<String>>> pins)
+            throws PooledRuns.Refused, InterruptedException {
+        try {
+            if (!compileAndWait(snapshot, config.compiledOutputPath())) {
+                throw new PooledRuns.Refused("The bot did not compile: see the Run tab.");
+            }
+        } catch (IOException e) {
+            throw new PooledRuns.Refused("The bot could not be compiled: " + e.getMessage());
+        }
+        PoolSources.Read read = PoolSources.ofBot(bot(), JavaParameters.pools(config, state));
+        Optional<String> unfit = PooledRuns.unfit(config.compiledOutputPath(), read);
+        if (unfit.isPresent()) throw new PooledRuns.Refused(unfit.get());
+        String classpath = buildRuntimeClasspath(snapshot);
+        Path outputs = config.compiledOutputPath().resolveSibling("botmaker-several");
+        RunRegistry registry = RunRegistry.ofThisPc();
+        PooledRuns.Outcome outcome = PooledRuns.start(bot(), config.projectPath(), read, runs, pins, registry,
+                (runId, pooled) -> {
+                    BotJvm.Agent agent = BotJvm.pooledAgent(config, state.getSettings(), runId, pooled,
+                            registry.folder());
+                    List<String> command = new ArrayList<>(List.of(config.javaExecutable()));
+                    command.addAll(BotJvm.options(state.getSettings()));
+                    command.addAll(agent.arguments());
+                    // No session hand-off: the project's one live session would put every run on one window.
+                    command.addAll(new Launch(null, config.entryClassName(), List.of()).tail(classpath));
+                    Files.createDirectories(outputs);
+                    Process process = new ProcessBuilder(command).directory(config.projectPath().toFile())
+                            .redirectErrorStream(true)
+                            .redirectOutput(outputs.resolve(runId + ".log").toFile())
+                            .start();
+                    several.add(process);
+                    process.onExit().thenRun(() -> {
+                        several.remove(process);
+                        try {
+                            Files.deleteIfExists(agent.plan());
+                        } catch (IOException left) {
+                            // A plan left beside the classes is read by no later run: each names its own.
+                        }
+                    });
+                    return process;
+                });
+        status(outcome.words());
+        return outcome;
+    }
+
+    /** Who the bot's own elements are held under in the live runs: its folder, the same for every process. */
+    private String bot() {
+        return config.projectPath().toAbsolutePath().normalize().toString();
     }
 
     /**

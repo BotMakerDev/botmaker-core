@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -109,6 +110,24 @@ class TraceAgentTest {
         rewritten(BotFixture.class, plan).getMethod("run").invoke(null);
 
         assertTrue(lines.heard.isEmpty(), lines.heard.toString());
+    }
+
+    @Test
+    void oneOfSeveralRunsPlanKeepsItsPooledMethodsRunIdAndRegistry() throws IOException {
+        Path file = Files.createTempFile("plan", ".properties");
+        Path base = file.getParent().toAbsolutePath();
+        RunPlan.Pooled account = new RunPlan.Pooled("com.bot.params.bot.Farm", "account", "()Ljava/lang/String;",
+                "\"account-1@example.com\"", "com.bot.params.bot.FarmPools#accounts",
+                List.of("\"account-1@example.com\"", "\"a, b = c\""));
+        RunPlan.Pooled taken = new RunPlan.Pooled("com.bot.params.bot.Farm", "heroes", "()Ljava/util/List;",
+                "java.util.List.of(1, 2)", "", List.of());
+        RunPlan plan = new RunPlan(new TracePlan(Set.of(base.resolve("classes")), Set.of(), Set.of()),
+                Optional.of(base.resolve("runs")), Optional.of(base.resolve("inner.jar")), List.of(account, taken),
+                Optional.of("run-1"), Optional.of(base.resolve("live")));
+        plan.write(file);
+        assertEquals(plan, RunPlan.read(file));
+        assertEquals("com.bot.params.bot.Farm#account()Ljava/lang/String;", account.key());
+        assertEquals("Farm.account()", account.said());
     }
 
     @Test
