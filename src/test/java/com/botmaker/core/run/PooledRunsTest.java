@@ -15,10 +15,13 @@ import com.botmaker.plugin.api.StudioPlugin;
 import com.botmaker.runlog.RunLog;
 import com.botmaker.shared.Diag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
+import java.io.Writer;
 import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -76,6 +79,61 @@ class PooledRunsTest {
         assertEquals(2, again.started().size(), "both rows were freed: " + again.words());
         for (PooledRuns.Started run : again.started()) finished(run.process());
         awaitEmpty(registry);
+    }
+
+    @Test
+    @Timeout(value = 90, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
+    void ofTwoLiveRunsClaimingOneKeyOnlyOneGetsIt(@TempDir Path dir) throws Exception {
+        RunRegistry registry = new RunRegistry(dir.resolve("live"), RunRegistry.Alive.PROCESSES);
+        PooledRuns.Outcome outcome = PooledRuns.start("bot", dir.resolve("bot"), read(FIRST, SECOND), 2, Map.of(),
+                registry, launcher(dir, registry, "claim"));
+        try {
+            assertEquals(2, outcome.started().size(), outcome.words());
+
+            List<String> claimed = new ArrayList<>();
+            List<BufferedReader> outputs = new ArrayList<>();
+            for (PooledRuns.Started run : outcome.started()) {
+                BufferedReader out = run.process().inputReader(StandardCharsets.UTF_8);
+                outputs.add(out);
+                claimed.add(claimedLine(out));
+            }
+            assertEquals(List.of("claimed=false", "claimed=true"), claimed.stream().sorted().toList(),
+                    claimed.toString());
+            assertEquals(1, registry.live().stream().filter(run -> run.claims().contains(PooledBot.KEY)).count());
+
+            for (int i = 0; i < outcome.started().size(); i++) {
+                Process process = outcome.started().get(i).process();
+                process.getOutputStream().close();
+                outputs.get(i).transferTo(Writer.nullWriter());
+                assertTrue(process.waitFor(30, TimeUnit.SECONDS));
+                assertEquals(0, process.exitValue());
+            }
+            awaitEmpty(registry);
+        } finally {
+            // A run that never claimed waits on its input for ever: ended here, its row with it.
+            for (PooledRuns.Started run : outcome.started()) run.process().destroyForcibly();
+        }
+    }
+
+    @Test
+    void aKeyACrashedRunClaimedIsFreeForTheNextRun(@TempDir Path dir) throws Exception {
+        RunRegistry registry = new RunRegistry(dir.resolve("live"), RunRegistry.Alive.PROCESSES);
+        for (int attempt = 1; attempt <= 2; attempt++) {
+            PooledRuns.Outcome outcome = PooledRuns.start("bot", dir.resolve("bot"), read(FIRST, SECOND), 1,
+                    Map.of(), registry, launcher(dir, registry, "claim-and-crash"));
+            Finished run = finished(outcome.started().getFirst().process());
+            assertEquals(9, run.exit(), run.output());
+            assertTrue(run.output().contains("claimed=true"), "run " + attempt + ": " + run.output());
+            awaitEmpty(registry);
+        }
+    }
+
+    /** The line a {@code claim} run says once it has claimed, read as it comes: the run stays alive after it. */
+    private static String claimedLine(BufferedReader out) throws IOException {
+        for (String line = out.readLine(); line != null; line = out.readLine()) {
+            if (line.startsWith("claimed=")) return line;
+        }
+        throw new AssertionError("the run ended before it claimed");
     }
 
     @Test

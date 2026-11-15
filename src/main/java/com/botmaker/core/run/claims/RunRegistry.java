@@ -109,7 +109,7 @@ public final class RunRegistry {
      * One live run.
      *
      * @param startedMillis when its process started, epoch millis, 0 when unknown: a reused pid is not the run's
-     * @param claims        its run-time claims, as the grammar writes each key
+     * @param claims        its run-time claims, each key as the run gave it to {@code Claims.claim}
      */
     public record LiveRun(String runId, String bot, long pid, long startedMillis, List<Hold> holds,
                           List<String> claims) {

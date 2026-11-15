@@ -16,6 +16,7 @@ import com.botmaker.core.plugin.HostParamScope;
 import com.botmaker.core.plugin.PluginHost;
 import com.botmaker.core.project.params.JavaParameter;
 import com.botmaker.core.run.claims.BoundMethods;
+import com.botmaker.core.run.claims.ClaimCalls;
 import com.botmaker.core.run.claims.Dealer;
 import com.botmaker.core.run.claims.PoolSources;
 import com.botmaker.plugin.api.StudioServices;
@@ -724,7 +725,14 @@ public class CodeExecutionService {
                     });
                     return process;
                 });
-        status(outcome.words());
+        String unlisted = "";
+        try {
+            outcome = outcome.claiming(ClaimCalls.in(config.compiledOutputPath()));
+        } catch (RuntimeException e) {
+            // Only words: the runs are going, and each one's claims are checked as it makes them.
+            unlisted = "; the bot's claims could not be listed: " + e.getMessage();
+        }
+        status(outcome.words() + unlisted);
         return outcome;
     }
 

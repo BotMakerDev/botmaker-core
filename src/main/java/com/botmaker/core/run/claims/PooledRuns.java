@@ -59,20 +59,32 @@ public final class PooledRuns {
      * @param started  the runs started, in row order
      * @param warnings what the runs should be told (a pool that did not read)
      * @param failed   each row that was dealt but did not start, in words; its elements are free again
+     * @param claims   each method of the bot that claims a value while it runs ({@link ClaimCalls}): those keys are
+     *                 decided while running, and counted into no capacity
      */
-    public record Outcome(Dealer.Dealing dealing, List<Started> started, List<String> warnings, List<String> failed) {
+    public record Outcome(Dealer.Dealing dealing, List<Started> started, List<String> warnings, List<String> failed,
+                          List<String> claims) {
 
         public Outcome {
             started = List.copyOf(started);
             warnings = List.copyOf(warnings);
             failed = List.copyOf(failed);
+            claims = List.copyOf(claims);
         }
 
-        /** {@code "2 of 3 started: …"}, the dealing's reasons and the failures after it. */
+        /** This outcome, saying the keys {@code sites} claim are decided while running. */
+        public Outcome claiming(List<String> sites) {
+            return new Outcome(dealing, started, warnings, failed, sites);
+        }
+
+        /** {@code "2 of 3 started: …"}, the dealing's reasons, the failures, then what is decided while running. */
         public String words() {
             StringBuilder out = new StringBuilder(started.size() + " of " + dealing.asked() + " started");
             List<String> why = new ArrayList<>(dealing.reasons().stream().map(Dealer.Reason::words).toList());
             why.addAll(failed);
+            if (!claims.isEmpty()) {
+                why.add("decided while running: the keys claimed in " + String.join(", ", claims));
+            }
             if (!why.isEmpty()) out.append(": ").append(String.join("; ", why));
             return out.toString();
         }
@@ -142,6 +154,6 @@ public final class PooledRuns {
             // What threw left the rest the core's own, held as long as it lives: freed now.
             for (int i = next; i < held.size(); i++) registry.release(held.get(i).runId());
         }
-        return new Outcome(dealing, started, read.warnings(), failed);
+        return new Outcome(dealing, started, read.warnings(), failed, List.of());
     }
 }

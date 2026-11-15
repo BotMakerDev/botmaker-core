@@ -9,6 +9,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- **What several runs claim is said to be decided while running** (2026-11-15, `run.claims.ClaimCalls`): a start of
+  several runs finds the methods of the compiled bot that call `Claims.claim`, and its words end with "decided while
+  running: the keys claimed in …", since the host can neither count nor deal those keys ahead
+  (`PooledRuns.Outcome.claims`). Two live runs claiming one key, and a key a crashed run claimed, are tested over real
+  run JVMs.
 - **A plugin's setup work holds a pooled value** (2026-11-15, `run.claims.RegistryHolds`): the contract's
   `liveRuns()` holds the value in the registry of live runs under this process, as the plugin's pool's element, so a
   dealing finds it held; refused with the holding run's words. `HostServices.serveLiveRuns` installs it, in the core
