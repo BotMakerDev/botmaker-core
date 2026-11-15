@@ -9,6 +9,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- **The live runs of this PC** (2026-11-15, `run.claims.RunRegistry`): one file per run under
+  `UserDirs.data()/live-runs/`, with its bot, run id, the elements its row holds, its run-time claims and its process.
+  Every check and write is under one lock shared by every process, a run whose process is gone is dropped as it is
+  read, and a plugin pool's element is held for every bot on this PC.
 - **The bot's pools listed** (2026-11-15, `project.params.JavaParameters.pools`): every pool of its `@Pools` groups, read
   by botmaker-java's `PoolReader`. An element may be one of the bot's own records.
 - **A bot run beside the open one** (2026-11-15, `run.SideRunner`): the contract's `sideRuns()`, served in the core
