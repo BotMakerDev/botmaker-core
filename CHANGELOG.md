@@ -14,6 +14,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   sources or classpath changed (`botmaker-side-run.stamp`), filling each private parameter the folder lacks from
   `starting-params/`, and starts it with the run agent, its output in `botmaker-side-run.log`. A process still running
   when the host exits is killed.
+- **A catalog bot's run copy for a plugin** (2026-11-15, `sharing.CatalogCopies`, the contract's
+  `SideRuns.catalogCopy`): got as *Get* gets one (`BmkDownload`, then `BmkOpen.openGot`) into the same bots folder,
+  for an official bot only. The listed tag's checked copy serves without a download; a newer listed tag is got and
+  replaces it; only with GitHub out of reach does the newest copy kept serve. A bot the catalog, reached, no longer
+  lists is not run, and a file that isn't the one it pinned (`BmkDownload.NotPinned`, new) is refused, never swapped
+  for the old copy. One copy is got at a time, and the catalog is asked again on each, so a release since BotMaker
+  started is got.
 
 - **The `device` tool refuses another instance on the address** (2026-11-14): it connects through shared's
   `AdbDevice.connect(EmulatorInstance)`, which checks the instance's ID file.

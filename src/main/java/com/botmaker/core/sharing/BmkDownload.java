@@ -96,12 +96,19 @@ public final class BmkDownload {
                 }
             }
             if (!BotFiles.sha256(part).equalsIgnoreCase(pinned)) {
-                throw new IOException("The file on " + entry.slug() + "'s " + tag + " release is not the one the "
+                throw new NotPinned("The file on " + entry.slug() + "'s " + tag + " release is not the one the "
                         + "catalog checked: it was replaced since. It was not opened.");
             }
             return Files.move(part, file, StandardCopyOption.REPLACE_EXISTING);
         } finally {
             Files.deleteIfExists(part);
+        }
+    }
+
+    /** The file downloaded is not the one the catalog pinned: refused, unlike GitHub out of reach. */
+    public static final class NotPinned extends IOException {
+        NotPinned(String why) {
+            super(why);
         }
     }
 

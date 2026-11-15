@@ -4,6 +4,7 @@ import com.botmaker.core.project.ProjectConfig;
 import com.botmaker.core.runtime.JavacRelease;
 import com.botmaker.core.services.MavenService;
 import com.botmaker.core.services.ProgressReporter;
+import com.botmaker.core.sharing.CatalogCopies;
 import com.botmaker.core.sharing.UnpackedBots;
 import com.botmaker.core.util.ClassPathManager;
 import com.botmaker.java.grammar.ParamsFitter;
@@ -88,6 +89,12 @@ public final class SideRunner implements SideRuns {
         LIVE.add(process);
         process.onExit().thenRun(() -> LIVE.remove(process));
         return new Running(process);
+    }
+
+    /** Through {@link CatalogCopies#live()}: the bot list's own copies, an official bot only. */
+    @Override
+    public Path catalogCopy(String repo) throws IOException {
+        return CatalogCopies.live().copyOf(repo);
     }
 
     /** The compiled classes, the resources, then the bot's jars. */
