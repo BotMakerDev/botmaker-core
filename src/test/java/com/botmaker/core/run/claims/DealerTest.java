@@ -329,6 +329,18 @@ class DealerTest {
     }
 
     @Test
+    void aBotPoolFillingTheMethodAPluginsPoolFillsIsRefused() {
+        PluginPool<Boolean> setups = PluginPool.fills(SETUP).from(services -> List.of(true, false));
+        PoolSources.Target account = new PoolSources.Target("com.bot.params.bot.Farm", "account",
+                "()Ljava/lang/String;", "");
+        Dealer.Failed failed = assertThrows(Dealer.Failed.class, () -> PoolSources.of(
+                List.of(new PoolSources.Declared(SDK, List.of(setups))), id -> Optional.of(account),
+                ValueGrammar.empty(), null, "farm", List.of(reading("accounts", "account", "\"a\"", "\"b\""))));
+        assertEquals("farm", failed.owner());
+        assertTrue(failed.getMessage().contains("Farm::account"), failed.getMessage());
+    }
+
+    @Test
     void aPluginThatThrowsFailsTheDealingWithThePluginNamed() {
         PluginPool<Boolean> broken = PluginPool.fills(SETUP).from(services -> {
             throw new IllegalStateException("no host values");

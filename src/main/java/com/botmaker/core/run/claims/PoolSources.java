@@ -123,6 +123,17 @@ public final class PoolSources {
             }
         }
         Read own = ofBot(bot, readings);
+        // One method dealt twice would be rewritten twice, with two values: the bot's pool gives way to the plugin's.
+        for (Target mine : own.targets().values()) {
+            for (Target theirs : targets.values()) {
+                if (mine.owner().equals(theirs.owner()) && mine.method().equals(theirs.method())) {
+                    String type = mine.owner().substring(mine.owner().lastIndexOf('.') + 1);
+                    throw new Dealer.Failed(bot, "fills " + type + "::" + mine.method()
+                            + " from its own pool " + mine.pool() + ", which a plugin's pool already fills: remove "
+                            + "the bot's pool", null);
+                }
+            }
+        }
         pools.addAll(own.pools());
         targets.putAll(own.targets());
         return new Read(pools, targets, own.warnings());

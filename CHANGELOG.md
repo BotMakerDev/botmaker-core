@@ -9,6 +9,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- **Several runs are dealt the plugins' pools too** (2026-11-15, `run.claims.BoundMethods`): `startSeveral` takes each
+  loaded plugin's pools, binds each to the bot's group method carrying its parameter's mark (a conditional parameter
+  only while it applies), and deals them before the bot's own.
 - **Several runs of one bot started at once** (2026-11-15, `run.CodeExecutionService.startSeveral`,
   `run.claims.PooledRuns`): one compile, then k rows dealt from the bot's `@Pools` groups and held in the live runs
   under one lock, each run started with its row and run id, and its row freed when its process ends or at once when
