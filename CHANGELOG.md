@@ -9,6 +9,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- **A bot run beside the open one** (2026-11-15, `run.SideRunner`): the contract's `sideRuns()`, served in the core
+  and in Studio (`HostServices.serveSideRuns`). It resolves the folder's pom, compiles it with javac only when its
+  sources or classpath changed (`botmaker-side-run.stamp`), filling each private parameter the folder lacks from
+  `starting-params/`, and starts it with the run agent, its output in `botmaker-side-run.log`. A process still running
+  when the host exits is killed.
+
 - **The `device` tool refuses another instance on the address** (2026-11-14): it connects through shared's
   `AdbDevice.connect(EmulatorInstance)`, which checks the instance's ID file.
 

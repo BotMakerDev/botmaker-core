@@ -6,6 +6,7 @@ import com.botmaker.plugin.api.PluginLog;
 import com.botmaker.plugin.api.Runs;
 import com.botmaker.plugin.api.StudioServices;
 import com.botmaker.plugin.api.Theme;
+import com.botmaker.plugin.api.run.SideRuns;
 import com.botmaker.plugin.api.source.PluginValues;
 import com.botmaker.core.project.ProjectConfig;
 
@@ -122,6 +123,23 @@ public final class HostServices implements StudioServices {
     @Override
     public Runs runs() {
         return HostRuns.live();
+    }
+
+    /** The runner {@link #serveSideRuns} installed: {@code run.SideRunner} in the core and in Studio, else none. */
+    private static volatile SideRuns sideRuns = SideRuns.NONE;
+
+    /**
+     * Makes {@code runner} what every plugin's {@link #sideRuns()} starts through, with or without a bot open; null
+     * takes it away. Installed by each process's start: this package does not name {@code run}, which imports it.
+     */
+    public static void serveSideRuns(SideRuns runner) {
+        sideRuns = runner == null ? SideRuns.NONE : runner;
+    }
+
+    /** A bot that is not the open one, run beside it: the same runner with or without a project. */
+    @Override
+    public SideRuns sideRuns() {
+        return sideRuns;
     }
 
     /**

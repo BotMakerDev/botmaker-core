@@ -6,6 +6,7 @@ import com.botmaker.plugin.api.PluginLog;
 import com.botmaker.plugin.api.Runs;
 import com.botmaker.plugin.api.StudioServices;
 import com.botmaker.plugin.api.Theme;
+import com.botmaker.plugin.api.run.SideRuns;
 import com.botmaker.plugin.api.source.PluginValues;
 
 import java.lang.reflect.Proxy;
@@ -68,6 +69,12 @@ public final class HomeServices implements StudioServices {
     @Override
     public PluginValues pluginValues() {
         return refusing(PluginValues.class);
+    }
+
+    /** A bot that is not the open one: it needs none open. */
+    @Override
+    public SideRuns sideRuns() {
+        return BARE.sideRuns();
     }
 
     /** The calling plugin's values of this PC: they need no bot ({@link HostFolders}). */
