@@ -6,6 +6,7 @@ import com.botmaker.plugin.api.PluginLog;
 import com.botmaker.plugin.api.Runs;
 import com.botmaker.plugin.api.StudioServices;
 import com.botmaker.plugin.api.Theme;
+import com.botmaker.plugin.api.run.LiveRuns;
 import com.botmaker.plugin.api.run.SideRuns;
 import com.botmaker.plugin.api.source.PluginValues;
 import com.botmaker.core.project.ProjectConfig;
@@ -140,6 +141,23 @@ public final class HostServices implements StudioServices {
     @Override
     public SideRuns sideRuns() {
         return sideRuns;
+    }
+
+    /** The registry {@link #serveLiveRuns} installed: {@code run.claims.RegistryHolds} in the core and in Studio. */
+    private static volatile LiveRuns liveRuns = LiveRuns.NONE;
+
+    /**
+     * Makes {@code holds} what every plugin's {@link #liveRuns()} holds through, with or without a bot open; null takes
+     * it away. Installed by each process's start, for the reason {@link #serveSideRuns} is.
+     */
+    public static void serveLiveRuns(LiveRuns holds) {
+        liveRuns = holds == null ? LiveRuns.NONE : holds;
+    }
+
+    /** This PC's live runs, for setup work that holds what a run could be dealt. */
+    @Override
+    public LiveRuns liveRuns() {
+        return liveRuns;
     }
 
     /**

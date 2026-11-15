@@ -9,6 +9,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- **A plugin's setup work holds a pooled value** (2026-11-15, `run.claims.RegistryHolds`): the contract's
+  `liveRuns()` holds the value in the registry of live runs under this process, as the plugin's pool's element, so a
+  dealing finds it held; refused with the holding run's words. `HostServices.serveLiveRuns` installs it, in the core
+  and in Studio; a parameter no bound plugin's pool fills holds nothing.
 - **Several runs are dealt the plugins' pools too** (2026-11-15, `run.claims.BoundMethods`): `startSeveral` takes each
   loaded plugin's pools, binds each to the bot's group method carrying its parameter's mark (a conditional parameter
   only while it applies), and deals them before the bot's own.

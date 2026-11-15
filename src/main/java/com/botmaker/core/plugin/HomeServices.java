@@ -6,6 +6,7 @@ import com.botmaker.plugin.api.PluginLog;
 import com.botmaker.plugin.api.Runs;
 import com.botmaker.plugin.api.StudioServices;
 import com.botmaker.plugin.api.Theme;
+import com.botmaker.plugin.api.run.LiveRuns;
 import com.botmaker.plugin.api.run.SideRuns;
 import com.botmaker.plugin.api.source.PluginValues;
 
@@ -75,6 +76,12 @@ public final class HomeServices implements StudioServices {
     @Override
     public SideRuns sideRuns() {
         return BARE.sideRuns();
+    }
+
+    /** The live runs of this PC: they need no bot. */
+    @Override
+    public LiveRuns liveRuns() {
+        return BARE.liveRuns();
     }
 
     /** The calling plugin's values of this PC: they need no bot ({@link HostFolders}). */

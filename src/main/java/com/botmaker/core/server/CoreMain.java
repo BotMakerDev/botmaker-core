@@ -4,6 +4,7 @@ import com.botmaker.core.assist.McpConfig;
 import com.botmaker.core.config.AppVersion;
 import com.botmaker.core.plugin.HostServices;
 import com.botmaker.core.run.SideRunner;
+import com.botmaker.core.run.claims.RegistryHolds;
 import com.botmaker.shared.config.CacheDirs;
 
 import java.io.IOException;
@@ -28,6 +29,7 @@ public final class CoreMain {
         }
         CountDownLatch ended = new CountDownLatch(1);
         HostServices.serveSideRuns(new SideRunner());
+        HostServices.serveLiveRuns(RegistryHolds.ofThisPc());
         Running core = serveOnMcpPort(dir, ended::countDown);
         Runtime.getRuntime().addShutdownHook(new Thread(core::close, "core-shutdown"));
         System.out.println("BotMaker's core " + AppVersion.label() + " serves on port " + core.server().port() + ".");
