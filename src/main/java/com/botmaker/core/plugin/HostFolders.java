@@ -9,6 +9,7 @@ import com.botmaker.shared.tools.UserDirs;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -108,9 +109,27 @@ public final class HostFolders {
         SERVED.clear();
     }
 
-    private static Path root() {
+    /** The folder the plugins' folders are under, which a run's plan names for its plugins' values of this PC. */
+    public static Path root() {
         Path at = root;
         return at != null ? at : UserDirs.config();
+    }
+
+    /**
+     * Readies every served folder for a run (2026-11-15, {@code HostValues.readyForRun}): what cannot be readied is
+     * said, never refused, and the run's plugins are refused that write with why.
+     */
+    public static List<String> readyForRun() {
+        List<String> said = new ArrayList<>();
+        for (Served served : SERVED.values()) served.values().readyForRun().ifPresent(said::add);
+        return said;
+    }
+
+    /** Commits what a run that ended wrote into each served folder, one version each labelled {@code label}. */
+    public static List<String> afterRun(String label) {
+        List<String> said = new ArrayList<>();
+        for (Served served : SERVED.values()) served.values().commitRun(label).ifPresent(said::add);
+        return said;
     }
 
     private static List<ManagedValue<?>> declared(LoadedPlugin plugin) {

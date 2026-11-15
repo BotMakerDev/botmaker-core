@@ -9,6 +9,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- **A run keeps its plugins' values of this PC** (2026-11-15): before a run, each served plugin's method values are
+  seeded (`HostValues.readyForRun`) and the run's plan names the folder (`RunPlan.hostValues`), which the agent serves
+  through plugin-host's `RunHostFolders`; when the run ends, what it wrote is one commit, `Run of <bot>` (none when
+  nothing changed), for a single run and for each of several.
+
 - **What several runs claim is said to be decided while running** (2026-11-15, `run.claims.ClaimCalls`): a start of
   several runs finds the methods of the compiled bot that call `Claims.claim`, and its words end with "decided while
   running: the keys claimed in …", since the host can neither count nor deal those keys ahead

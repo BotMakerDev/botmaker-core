@@ -1,5 +1,6 @@
 package com.botmaker.core.run;
 
+import com.botmaker.core.plugin.HostFolders;
 import com.botmaker.core.plugin.PluginHost;
 import com.botmaker.core.project.ProjectConfig;
 import com.botmaker.core.project.StudioProjectSettings;
@@ -53,9 +54,23 @@ public final class BotJvm {
      * Empty only when the agent cannot be written: a run never fails over it.
      */
     public static List<String> runAgent(ProjectConfig config, StudioProjectSettings settings) {
+        return runAgent(config, settings, Optional.empty());
+    }
+
+    /**
+     * {@link #runAgent} for a run whose plugins keep their values of this PC (2026-11-15): the caller readies the
+     * folders before it ({@code HostFolders.readyForRun}) and commits what it wrote after ({@code afterRun}). A try,
+     * a debug session and a side run keep none.
+     */
+    public static List<String> keepingRunAgent(ProjectConfig config, StudioProjectSettings settings) {
+        return runAgent(config, settings, Optional.of(HostFolders.root()));
+    }
+
+    private static List<String> runAgent(ProjectConfig config, StudioProjectSettings settings,
+                                         Optional<Path> hostValues) {
         if (config == null) return List.of();
         try {
-            return agent(config, settings, runPlan(config), List.of(), Optional.empty(), Optional.empty());
+            return agent(config, settings, runPlan(config), List.of(), Optional.empty(), Optional.empty(), hostValues);
         } catch (IOException | RuntimeException e) {
             System.err.println("Runs this time without its log and call trace: " + e.getMessage());
             return List.of();
@@ -73,7 +88,8 @@ public final class BotJvm {
     public static Agent pooledAgent(ProjectConfig config, StudioProjectSettings settings, String runId,
                                     List<RunPlan.Pooled> pooled, Path registry) throws IOException {
         Path plan = config.compiledOutputPath().resolveSibling("botmaker-run-" + runId + ".properties");
-        List<String> argument = agent(config, settings, plan, pooled, Optional.of(runId), Optional.of(registry));
+        List<String> argument = agent(config, settings, plan, pooled, Optional.of(runId), Optional.of(registry),
+                Optional.of(HostFolders.root()));
         return new Agent(argument, plan);
     }
 
@@ -86,14 +102,14 @@ public final class BotJvm {
     }
 
     private static List<String> agent(ProjectConfig config, StudioProjectSettings settings, Path plan,
-                                      List<RunPlan.Pooled> pooled, Optional<String> runId, Optional<Path> registry)
-            throws IOException {
+                                      List<RunPlan.Pooled> pooled, Optional<String> runId, Optional<Path> registry,
+                                      Optional<Path> hostValues) throws IOException {
         List<String> offered = PluginHost.menuFacades().stream().map(f -> f.type().getName()).toList();
         RunAgentJar.Jars jars = RunAgentJar.jars();
         TracePlan trace = new TracePlan(Set.of(config.compiledOutputPath()), Set.copyOf(offered),
                 settings == null ? Set.of() : Set.copyOf(settings.hiddenTraceWriters()));
         new RunPlan(trace, Optional.of(config.projectPath().resolve(RunLog.FOLDER)), jars.inner(), pooled, runId,
-                registry).write(plan);
+                registry, hostValues).write(plan);
         return List.of("-javaagent:" + jars.agent() + "=" + plan);
     }
 

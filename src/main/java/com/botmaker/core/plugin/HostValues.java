@@ -260,6 +260,29 @@ public final class HostValues implements PluginValues {
         return told(locked(() -> created(value, method)));
     }
 
+    /**
+     * Readies the folder for a run (2026-11-15): repaired to this version, and every declared value written that it
+     * lacks, so a run's plugin finds each holder class it writes into. Empty when ready, else the first reason not.
+     */
+    public Optional<String> readyForRun() {
+        Optional<String> first = Optional.empty();
+        for (ManagedValue<?> value : declared) {
+            if (!(value instanceof com.botmaker.plugin.api.source.ManagedMethod<?>)) continue;
+            if (find(value.id()).isPresent()) continue;
+            Optional<String> refused = create(value);
+            if (first.isEmpty()) first = refused;
+        }
+        return first;
+    }
+
+    /**
+     * Commits what a run wrote into the folder ({@code RunHostValues}, which writes and commits nothing) as one version
+     * labelled {@code label}; nothing when it wrote nothing. Empty when done, else why not.
+     */
+    public Optional<String> commitRun(String label) {
+        return told(locked(() -> project.commit(VersionOrigin.AUTO, label)));
+    }
+
     /** {@code written}, after telling the history's listeners of a write that passed: outside the lock, so one may undo. */
     private Optional<String> told(Optional<String> written) {
         if (written.isEmpty()) history.changed();

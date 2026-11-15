@@ -123,9 +123,10 @@ class TraceAgentTest {
                 "java.util.List.of(1, 2)", "", List.of());
         RunPlan plan = new RunPlan(new TracePlan(Set.of(base.resolve("classes")), Set.of(), Set.of()),
                 Optional.of(base.resolve("runs")), Optional.of(base.resolve("inner.jar")), List.of(account, taken),
-                Optional.of("run-1"), Optional.of(base.resolve("live")));
+                Optional.of("run-1"), Optional.of(base.resolve("live")), Optional.of(base.resolve("this-pc")));
         plan.write(file);
         assertEquals(plan, RunPlan.read(file));
+        assertEquals(Optional.of(base.resolve("this-pc")), RunPlan.read(file).hostValues(), "the values of this PC");
         assertEquals("com.bot.params.bot.Farm#account()Ljava/lang/String;", account.key());
         assertEquals("Farm.account()", account.said());
     }

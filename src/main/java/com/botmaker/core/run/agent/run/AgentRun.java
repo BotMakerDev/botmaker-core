@@ -105,6 +105,7 @@ public final class AgentRun implements RunLines {
                     () -> new IllegalStateException("one of several runs was given no live runs to check"));
             Claims.serve(new RunClaims(new RunRegistry(live, RunRegistry.Alive.PROCESSES), plan.runId().get()));
         }
+        plan.hostValues().ifPresent(AgentRun::serveHostValues);
         Path folder = null;
         Path botFolder = Path.of(System.getProperty("user.dir", ".")).toAbsolutePath();
         if (plan.runs().isPresent()) {
@@ -121,6 +122,25 @@ public final class AgentRun implements RunLines {
         run.diag = DiagBridge.attach(run);
         BotPlugins.start(run);
         return run;
+    }
+
+    /** plugin-host's run half of the values of this PC, by name: the bot's own copy, beside the bot's grammar. */
+    static final String HOST_VALUES = "com.botmaker.plugin.host.RunHostFolders";
+
+    /**
+     * Serves the plugins' values of this PC under {@code root} ({@code RunHostValues}) from plugin-host as the bot's
+     * own loader has it, never this agent's inner copy: its grammar must be the one the bot's plugins were built
+     * against. A bot with no plugin-host, or an older one, keeps none, and its plugins' writes are refused with why.
+     */
+    private static void serveHostValues(Path root) {
+        try {
+            Class.forName(HOST_VALUES, true, ClassLoader.getSystemClassLoader()).getMethod("serve", Path.class)
+                    .invoke(null, root);
+        } catch (ClassNotFoundException | NoSuchMethodException | LinkageError older) {
+            // No such half in the bot's plugin-host: nothing to serve.
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            System.err.println("[BotMaker] this run keeps no values of this PC: " + e);
+        }
     }
 
     /** What {@code -Dbotmaker.debug} says, on when it says nothing else. */

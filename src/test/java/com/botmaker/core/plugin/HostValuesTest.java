@@ -103,6 +103,26 @@ public class HostValuesTest {
         assertTrue(vcs(values).status().isClean(), "nothing a write made is left out of its commit");
     }
 
+    @Test
+    void aRunsWritesAreOneCommitAfterIt() throws Exception {
+        HostValues values = values("1.0.0");
+
+        assertEquals(Optional.empty(), values.readyForRun());
+        assertTrue(values.open(GREETING).isPresent() && values.open(SPEED).isPresent(), "every method value is made");
+        assertTrue(values.open(SETTINGS).isEmpty(), "the bot's is not this PC's");
+        List<String> before = titles(values);
+
+        Path file = values.sourcesDir().resolve("Emulators.java");
+        Files.writeString(file, text(file).replace("\"hello\"", "\"from a run\""));
+        assertEquals(Optional.empty(), values.commitRun("Run of Farm"));
+        assertEquals(Optional.empty(), values.commitRun("Run of Farm"));
+
+        List<String> after = titles(values);
+        assertEquals(before.size() + 1, after.size(), "one commit, and none for a run that wrote nothing: " + after);
+        assertEquals("Run of Farm", after.getFirst());
+        assertEquals("from a run", values.open(GREETING).orElseThrow().value(String.class).orElseThrow());
+    }
+
     private static ProjectVcs vcs(HostValues values) {
         return new ProjectVcs(values.folder());
     }

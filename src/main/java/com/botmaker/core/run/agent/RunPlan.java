@@ -22,9 +22,11 @@ import java.util.Properties;
  *                 where nothing is rewritten
  * @param runId    this run's id in the live runs of this PC, for a run the core holds there; empty otherwise
  * @param registry the folder of those live runs, which the run's claims are checked against; empty with no run id
+ * @param hostValues the folder the plugins' values of this PC are under ({@code UserDirs.config()}), which the run's
+ *                 plugins read and write through {@code RunHostValues}; empty when the run keeps none
  */
 public record RunPlan(TracePlan trace, Optional<Path> runs, Optional<Path> inner, List<Pooled> pooled,
-                      Optional<String> runId, Optional<Path> registry) {
+                      Optional<String> runId, Optional<Path> registry, Optional<Path> hostValues) {
 
     /**
      * One method the agent rewrites to return a dealt value (spec §5).
@@ -65,9 +67,16 @@ public record RunPlan(TracePlan trace, Optional<Path> runs, Optional<Path> inner
     private static final String POOLED = "pooled";
     private static final String RUN_ID = "runId";
     private static final String REGISTRY = "registry";
+    private static final String HOST_VALUES = "hostValues";
 
     public RunPlan {
         pooled = List.copyOf(pooled);
+    }
+
+    /** A plan keeping no values of this PC. */
+    public RunPlan(TracePlan trace, Optional<Path> runs, Optional<Path> inner, List<Pooled> pooled,
+                   Optional<String> runId, Optional<Path> registry) {
+        this(trace, runs, inner, pooled, runId, registry, Optional.empty());
     }
 
     /** A plan of one run: nothing rewritten, held nowhere. */
@@ -82,6 +91,7 @@ public record RunPlan(TracePlan trace, Optional<Path> runs, Optional<Path> inner
         inner.ifPresent(p -> properties.setProperty(INNER, p.toAbsolutePath().toString()));
         runId.ifPresent(id -> properties.setProperty(RUN_ID, id));
         registry.ifPresent(p -> properties.setProperty(REGISTRY, p.toAbsolutePath().toString()));
+        hostValues.ifPresent(p -> properties.setProperty(HOST_VALUES, p.toAbsolutePath().toString()));
         properties.setProperty(POOLED, Integer.toString(pooled.size()));
         for (int i = 0; i < pooled.size(); i++) {
             Pooled one = pooled.get(i);
@@ -114,7 +124,8 @@ public record RunPlan(TracePlan trace, Optional<Path> runs, Optional<Path> inner
         }
         String runId = properties.getProperty(RUN_ID, "").strip();
         return new RunPlan(TracePlan.from(properties), path(properties, RUNS), path(properties, INNER), pooled,
-                runId.isEmpty() ? Optional.empty() : Optional.of(runId), path(properties, REGISTRY));
+                runId.isEmpty() ? Optional.empty() : Optional.of(runId), path(properties, REGISTRY),
+                path(properties, HOST_VALUES));
     }
 
     private static int count(Properties properties, String key) {

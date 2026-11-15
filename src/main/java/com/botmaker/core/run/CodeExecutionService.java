@@ -12,6 +12,7 @@ import com.botmaker.core.project.ProjectState;
 import com.botmaker.java.index.BotIndex;
 import com.botmaker.core.run.tryhost.TryHost;
 import com.botmaker.core.project.params.JavaParameters;
+import com.botmaker.core.plugin.HostFolders;
 import com.botmaker.core.plugin.HostParamScope;
 import com.botmaker.core.plugin.PluginHost;
 import com.botmaker.core.project.params.JavaParameter;
@@ -258,13 +259,14 @@ public class CodeExecutionService {
                 // java [bot options] [session hand-off] -cp <classes:deps> <mainClass> [args]
                 List<String> command = new ArrayList<>(List.of(config.javaExecutable()));
                 command.addAll(BotJvm.options(state.getSettings()));
-                command.addAll(BotJvm.runAgent(config, state.getSettings()));
+                command.addAll(BotJvm.keepingRunAgent(config, state.getSettings()));
                 command.addAll(sessionHandoffArguments());
                 command.addAll(launch.tail(classpath));
                 ProcessBuilder pb = new ProcessBuilder(command)
                         .directory(config.projectPath().toFile());
 
                 startTelemetry(pb);
+                readyHostValues();
                 currentRunningProcess = pb.start();
                 ran = true;
                 events.accept(new CoreEvent.RunProcess(currentRunningProcess.pid()));
@@ -298,6 +300,7 @@ public class CodeExecutionService {
                 String endedRun = ran ? RunFolders.latest(config.projectPath()).map(Path::toString).orElse("") : "";
                 // What the run wrote to its parameters is on disk: read back, so the next edit lands on it.
                 if (ran) sourcesWritten.run();
+                if (ran) commitHostValues("Run of " + config.projectPath().getFileName());
                 isRunning.set(false);
                 currentRunningProcess = null;
                 closeConsole();
@@ -700,6 +703,7 @@ public class CodeExecutionService {
         String classpath = buildRuntimeClasspath(snapshot);
         Path outputs = config.compiledOutputPath().resolveSibling("botmaker-several");
         RunRegistry registry = RunRegistry.ofThisPc();
+        readyHostValues();
         PooledRuns.Outcome outcome = PooledRuns.start(bot(), config.projectPath(), read, runs, pins, registry,
                 (runId, pooled) -> {
                     BotJvm.Agent agent = BotJvm.pooledAgent(config, state.getSettings(), runId, pooled,
@@ -717,6 +721,7 @@ public class CodeExecutionService {
                     several.add(process);
                     process.onExit().thenRun(() -> {
                         several.remove(process);
+                        commitHostValues("Run " + runId + " of " + config.projectPath().getFileName());
                         try {
                             Files.deleteIfExists(agent.plan());
                         } catch (IOException left) {
@@ -734,6 +739,19 @@ public class CodeExecutionService {
         }
         status(outcome.words() + unlisted);
         return outcome;
+    }
+
+    /**
+     * Readies the plugins' folders of this PC before a run starts (2026-11-15): each holder class a run's plugin
+     * writes into is there. What cannot be readied is said, and the run goes; that plugin's writes are refused.
+     */
+    private void readyHostValues() {
+        for (String said : HostFolders.readyForRun()) System.err.println("[BotMaker] " + said);
+    }
+
+    /** Commits what a run that ended wrote into the plugins' folders of this PC, one version per folder. */
+    private void commitHostValues(String label) {
+        for (String said : HostFolders.afterRun(label)) System.err.println("[BotMaker] " + said);
     }
 
     /** Who the bot's own elements are held under in the live runs: its folder, the same for every process. */
