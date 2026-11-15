@@ -13,6 +13,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   `UserDirs.data()/live-runs/`, with its bot, run id, the elements its row holds, its run-time claims and its process.
   Every check and write is under one lock shared by every process, a run whose process is gone is dropped as it is
   read, and a plugin pool's element is held for every bot on this PC.
+- **Dealing several runs** (2026-11-15, `run.claims.Dealer`): each run asked for is dealt a row, one pick from every
+  pool, the plugins' first then the bot's (`PoolSources`), going back on a dead end. It counts `take` and `each`,
+  deals a pin as given, and keeps a row on what it held last unless its pool rotates (`DealHistory`, the bot's
+  `.botmaker/runs/dealt.json`). The capacity is the rows found, with why there are fewer in words: too few elements,
+  elements with nothing to go with, elements another run holds. A plugin that throws fails the dealing by name.
 - **The bot's pools listed** (2026-11-15, `project.params.JavaParameters.pools`): every pool of its `@Pools` groups, read
   by botmaker-java's `PoolReader`. An element may be one of the bot's own records.
 - **A bot run beside the open one** (2026-11-15, `run.SideRunner`): the contract's `sideRuns()`, served in the core
