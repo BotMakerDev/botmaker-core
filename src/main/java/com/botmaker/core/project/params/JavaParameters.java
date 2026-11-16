@@ -1162,8 +1162,7 @@ public final class JavaParameters {
     }
 
     /** Applies {@code edit} to one file, buffer and disk, and answers whether it changed anything. */
-    private static boolean rewrite(ProjectConfig config, ProjectState state, Path file,
-                                   UnaryOperator<String> edit) {
+    static boolean rewrite(ProjectConfig config, ProjectState state, Path file, UnaryOperator<String> edit) {
         if (config == null || file == null) return false;
         boolean[] changed = {false};
         BotSources.forEach(config, state, (visited, source) -> {

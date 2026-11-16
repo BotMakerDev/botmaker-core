@@ -9,6 +9,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- **The bot's pools written from the Parameters window** (2026-11-16):
+  - `project.params.PoolEdits` puts or removes one pool's method in an `@Pools` group, through JDT, and gives its
+    Java line.
+  - `JavaPools` writes both copies: `params/bot/<Group>Pools.java` with this PC's elements, and its starting copy
+    with the same chain listing none.
+
 - **A dry run, all or none, and pins for several runs** (2026-11-16): `run_bot {runs}` takes `dry_run` (says how
   many can run and what each would be dealt, "7 of 11 can run: …", holding and starting nothing), `all_or_none`
   (starts none unless all can) and `pins` (`pool=value` or `run:pool=value`, the pool and value as a dry run's picks
