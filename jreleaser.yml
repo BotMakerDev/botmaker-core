@@ -45,8 +45,12 @@ release:
     skipTag: true
     # A pushed tag cannot be edited and a published release should not be silently replaced.
     overwrite: false
+    # sluice writes the release page as it tags, so it exists when this job runs: it is updated with the
+    # assets only, its notes left as sluice wrote them; refusing to update failed the tag's run (2026-11-16).
     update:
-      enabled: false
+      enabled: true
+      sections:
+        - ASSETS
     # The CHANGELOG.md section for exactly this version, extracted by tools/changelog-section.sh — the same
     # script the release gate reads it with.
     changelog:
