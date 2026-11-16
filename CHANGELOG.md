@@ -5,6 +5,13 @@ All notable changes to `botmaker-core`.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this module uses
 [semantic versioning](https://semver.org/). `release.sh` refuses to cut a version with no section here.
 
+## [Unreleased]
+
+### Changed
+
+- Licensed under PolyForm Noncommercial 1.0.0, copyright LiQiyeDev: free for any noncommercial use, commercial use
+  needs a license from LiQiyeDev. Releases up to v0.2.1 stay CC0 1.0.
+
 ## [0.2.1] — 2026-11-16
 
 ### Fixed
