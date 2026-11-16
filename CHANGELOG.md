@@ -9,6 +9,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- **The live runs of this PC as the Runs window shows them** (2026-11-16): `run.claims.LiveRunsView` reads the
+  registry and groups its runs by bot (my bot, run copy, side run). Each run has its picks by pooled parameter and
+  the last line it printed. It starts and stops nothing; any process may read it.
 - **The bot's pools written from the Parameters window** (2026-11-16):
   - `project.params.PoolEdits` puts or removes one pool's method in an `@Pools` group, through JDT, and gives its
     Java line.
