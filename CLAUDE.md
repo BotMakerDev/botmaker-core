@@ -18,7 +18,7 @@ per user.
   `BlockId` path, as a string. Undo and redo are a `HistoryStep`, sent alone: the history is the project's, a
   request one file's.
 - `event`: what the core tells every client. `CoreEvent` is sealed: `MethodsChanged` (the methods whose source or
-  id changed, and the ids removed), `Diagnostics` (a run's check tells them), `RunState`, `RunOutput`, `RunLogged`, `RunTraced`, `RunFrame`, `RunProcess`, `DebugSession`,
+  id changed, and the ids removed), `Diagnostics` (a run's check tells them), `RunState`, `RunOutput`, `RunLogged`, `RunTraced`, `RunFrame`, `RunProcess`, `RunsStarted` (what a start of several runs started, 2026-11-16), `DebugSession`,
   `DebugPaused`, `DebugFollowed`, `SourcesChanged`, `InputAsked`, `Status`, `LibrariesResolved`, `Refusal`, and
   `ToolCallStarted`/`ToolCallStep`/`ToolCallProgress`/`ToolCallEnded`, every MCP call and its device steps (shared's
   `DeviceSteps`, bound around each call) `ServedTools` serves (`server.ToolCallLog`, on its own thread, its

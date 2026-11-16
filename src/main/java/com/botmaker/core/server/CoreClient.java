@@ -14,7 +14,9 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
@@ -34,9 +36,13 @@ public final class CoreClient implements AutoCloseable {
     static final Duration OPEN_TIMEOUT = Duration.ofMinutes(10);
     /** How long any other ask may take before the core is treated as gone. */
     static final Duration ANSWER_TIMEOUT = Duration.ofMinutes(1);
+    /** How long a start of several runs may take: it compiles and builds the run's classpath before any starts. */
+    static final Duration SEVERAL_TIMEOUT = Duration.ofMinutes(5);
 
     private final AtomicLong ids = new AtomicLong();
     private final Map<Long, CompletableFuture<EditResult>> waiting = new ConcurrentHashMap<>();
+    /** What a start of several runs this client asked for was told to have started, until its answer is read. */
+    private final Map<String, Optional<CoreEvent.RunsStarted>> several = new ConcurrentHashMap<>();
     private volatile ChannelClient channel;
     private volatile boolean ended;
 
@@ -139,6 +145,26 @@ public final class CoreClient implements AutoCloseable {
         return ask(new Request.Run(ids.incrementAndGet()), ANSWER_TIMEOUT);
     }
 
+    /**
+     * Compiles once and starts {@code runs} runs of the bot, each dealt a row of its pools ({@link Request.RunSeveral});
+     * answers what started, which every client is told too.
+     *
+     * @throws IllegalArgumentException with why none started
+     */
+    public CoreEvent.RunsStarted runSeveral(int runs) throws IOException {
+        Request.RunSeveral request = new Request.RunSeveral(ids.incrementAndGet(), runs, UUID.randomUUID().toString());
+        several.put(request.token(), Optional.empty());
+        try {
+            EditResult result = ask(request, SEVERAL_TIMEOUT);
+            if (result instanceof EditResult.Refused refused) throw new IllegalArgumentException(refused.reason());
+            // Told before the answer, on the one reader thread: there by now when it was told at all.
+            return several.get(request.token()).orElseThrow(() ->
+                    new IllegalArgumentException("The runs were stopped before they started."));
+        } finally {
+            several.remove(request.token());
+        }
+    }
+
     public EditResult runEntry(String title, String mainClass) throws IOException {
         return ask(new Request.RunEntry(ids.incrementAndGet(), title, mainClass), ANSWER_TIMEOUT);
     }
@@ -210,7 +236,13 @@ public final class CoreClient implements AutoCloseable {
                 CompletableFuture<EditResult> asked = waiting.get(answer.id());
                 if (asked != null) asked.complete(answer.result());
             }
-            case Reply.Told change -> told.accept(change.event());
+            case Reply.Told change -> {
+                if (change.event() instanceof CoreEvent.RunsStarted started) {
+                    // Only a start this client waits for: its token is its own.
+                    several.replace(started.asked(), Optional.of(started));
+                }
+                told.accept(change.event());
+            }
             case Reply.Call call -> called.accept(call);
         }
     }

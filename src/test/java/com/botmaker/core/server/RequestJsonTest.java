@@ -41,6 +41,7 @@ class RequestJsonTest {
                 new Request.Compile(11),
                 new Request.Run(12),
                 new Request.RunEntry(13, "Explore map", "com.example.ExploreMap"),
+                new Request.RunSeveral(30, 3, "5f0c-ab12"),
                 new Request.Try(14, new TrialAsk.OnItsOwn("com.mybot", "Mybot", "ore", true)),
                 new Request.Try(15, new TrialAsk.OnItsOwn("", "Mybot.Inner", "ore", false)),
                 new Request.Try(21, new TrialAsk.OneStatement("com/mybot/MyBot.java", "0.1.2", Map.of(),

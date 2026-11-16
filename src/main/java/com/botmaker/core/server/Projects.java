@@ -25,6 +25,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -60,8 +61,10 @@ public final class Projects implements AutoCloseable, CoreHome.Host {
         return thread;
     });
     /** What the open project's runs printed and traced, for the core's own run tools. */
-    private final RunLog log = new RunLog(Clock.systemUTC(), this::busy);
+    private final RunLog log = new RunLog(Clock.systemUTC(), this::launching);
     private final AtomicLong asks = new AtomicLong();
+    /** What each start of several runs the MCP asked for was told to have started, until it is answered. */
+    private final Map<String, Optional<CoreEvent.RunsStarted>> several = new ConcurrentHashMap<>();
     /** Set and read on the opener's thread, and by {@link #close}. */
     private volatile OpenProject open;
     /** The server serving these projects; null in Studio's in-process core and until it runs. */
@@ -107,6 +110,12 @@ public final class Projects implements AutoCloseable, CoreHome.Host {
     public boolean busy() {
         OpenProject project = open;
         return project != null && project.running();
+    }
+
+    /** One run of the open project was asked for and has not ended: what the run log says is starting. */
+    private boolean launching() {
+        OpenProject project = open;
+        return project != null && project.runningOne();
     }
 
     private void received(Channel channel, String text) {
@@ -385,6 +394,8 @@ public final class Projects implements AutoCloseable, CoreHome.Host {
             case CoreEvent.LibrariesResolved ignored -> inTurn(() -> {
                 if (project == open) servePlugins(project);
             });
+            // Only the MCP's own starts are waited for here; a client's is answered on its channel.
+            case CoreEvent.RunsStarted started -> several.replace(started.asked(), Optional.of(started));
             case CoreEvent.RunOutput output -> log.output(output.text());
             case CoreEvent.RunTraced traced -> log.trace(traced.traceLine());
             case CoreEvent.DebugSession session -> {
@@ -438,6 +449,20 @@ public final class Projects implements AutoCloseable, CoreHome.Host {
     @Override
     public String runEntry(RunEntries.Declared entry) {
         return started(entry.title(), id -> new Request.RunEntry(id, entry.title(), entry.mainClass()));
+    }
+
+    @Override
+    public CoreEvent.RunsStarted runSeveral(int runs) {
+        String token = UUID.randomUUID().toString();
+        several.put(token, Optional.empty());
+        Optional<CoreEvent.RunsStarted> started;
+        try {
+            asked(id -> new Request.RunSeveral(id, runs, token));
+        } finally {
+            // Told before its answer, and heard as it was told: in by now when it was told at all.
+            started = several.remove(token);
+        }
+        return started.orElseThrow(() -> new IllegalArgumentException("The runs were stopped before they started."));
     }
 
     @Override

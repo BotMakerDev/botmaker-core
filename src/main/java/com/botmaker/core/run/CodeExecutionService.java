@@ -25,6 +25,7 @@ import com.botmaker.plugin.api.run.PluginPool;
 import com.botmaker.plugin.host.LoadedPlugin;
 import com.botmaker.core.run.claims.PooledRuns;
 import com.botmaker.core.run.claims.RunRegistry;
+import com.botmaker.core.run.claims.SeveralRuns;
 import com.botmaker.core.services.BotSources;
 import com.botmaker.core.run.trial.TrialCaller;
 import com.botmaker.session.launch.BackgroundLauncher;
@@ -579,8 +580,17 @@ public class CodeExecutionService {
         }
         // The run's thread sees its process gone and says the run ended, once per run: a client counts on that.
         killRunningProcess();
+        // Several runs and one run never go at once: with none, a stop ends the several.
+        if (currentRunningProcess == null && !several.isEmpty()) {
+            status("Stopping " + several.size() + " runs…");
+            several.forEach(process -> SeveralRuns.killTree(process.toHandle()));
+        }
     }
 
+    /** Whether runs started by {@link #startSeveral} are still going. */
+    public boolean severalGoing() {
+        return !several.isEmpty();
+    }
     /**
      * Force-kills the bot process and everything it spawned. Deliberately process-only — no event publishing,
      * no UI teardown — so it is also safe to call from {@link #shutdownHook}, where the FX toolkit may already
@@ -626,7 +636,7 @@ public class CodeExecutionService {
         }
         if (warm != null) warm.close();
         killRunningProcess();
-        several.forEach(Process::destroyForcibly);
+        several.forEach(process -> SeveralRuns.killTree(process.toHandle()));
     }
 
     /**
@@ -649,6 +659,7 @@ public class CodeExecutionService {
         if (!isRunning.compareAndSet(false, true)) {
             throw new PooledRuns.Refused("A run is going: stop it before starting several.");
         }
+        cancelled.set(false);
         try {
             if (!several.isEmpty()) {
                 // Their JVMs still load classes from the compile a new one would overwrite.
@@ -664,19 +675,13 @@ public class CodeExecutionService {
      * The pools a dealing reads after a compile: each plugin's whose parameter the bot binds and that applies to it
      * now (a conditional one whose condition does not hold is left out), then the bot's own.
      */
-    private PoolSources.Read pools(StudioServices services) throws PooledRuns.Refused {
+    private PoolSources.Read pools(StudioServices services, List<PoolSources.Declared> plugins)
+            throws PooledRuns.Refused {
         // With no host services a plugin's pool has nothing to read its candidates from: the bot's own only.
         if (services == null) return PoolSources.ofBot(bot(), JavaParameters.pools(config, state));
         HostParamScope scope = HostParamScope.over(services.pluginValues());
-        List<PoolSources.Declared> plugins = new ArrayList<>();
         try {
             List<JavaParameter> applying = JavaParameters.scan(config, state).stream().filter(scope::shown).toList();
-            for (LoadedPlugin plugin : PluginHost.plugins()) {
-                List<PluginPool<?>> pools = plugin.plugin().pools();
-                if (pools != null && !pools.isEmpty()) {
-                    plugins.add(new PoolSources.Declared(plugin.coordinate().toString(), pools));
-                }
-            }
             return PoolSources.of(plugins, BoundMethods.of(applying, config.sourceRoot(), config.compiledOutputPath()),
                     PluginHost.grammar(), services, bot(), JavaParameters.pools(config, state));
         } catch (Dealer.Failed e) {
@@ -684,6 +689,22 @@ public class CodeExecutionService {
         } catch (RuntimeException | LinkageError e) {
             throw new PooledRuns.Refused("The pools could not be read: " + e);
         }
+    }
+
+    /** Each loaded plugin's pools, a plugin after those it depends on as the host loaded them. */
+    private static List<PoolSources.Declared> declaredPools() throws PooledRuns.Refused {
+        List<PoolSources.Declared> plugins = new ArrayList<>();
+        try {
+            for (LoadedPlugin plugin : PluginHost.plugins()) {
+                List<PluginPool<?>> pools = plugin.plugin().pools();
+                if (pools != null && !pools.isEmpty()) {
+                    plugins.add(new PoolSources.Declared(plugin.coordinate().toString(), pools));
+                }
+            }
+        } catch (RuntimeException | LinkageError e) {
+            throw new PooledRuns.Refused("The plugins' pools could not be read: " + e);
+        }
+        return plugins;
     }
 
     private PooledRuns.Outcome startSeveralCompiled(ProjectState.Snapshot snapshot, int runs,
@@ -697,11 +718,14 @@ public class CodeExecutionService {
         } catch (IOException e) {
             throw new PooledRuns.Refused("The bot could not be compiled: " + e.getMessage());
         }
-        PoolSources.Read read = pools(services);
+        List<PoolSources.Declared> plugins = services == null ? List.of() : declaredPools();
+        PoolSources.Read read = pools(services, plugins);
         Optional<String> unfit = PooledRuns.unfit(config.compiledOutputPath(), read);
         if (unfit.isPresent()) throw new PooledRuns.Refused(unfit.get());
         String classpath = buildRuntimeClasspath(snapshot);
-        Path outputs = config.compiledOutputPath().resolveSibling("botmaker-several");
+        // A stop during the compile ends the start here, before any run: as one run's does.
+        if (cancelled.get()) throw new PooledRuns.Refused("The runs were stopped before they started.");
+        Path outputs = SeveralRuns.outputs(config.projectPath());
         RunRegistry registry = RunRegistry.ofThisPc();
         readyHostValues();
         PooledRuns.Outcome outcome = PooledRuns.start(bot(), config.projectPath(), read, runs, pins, registry,
@@ -730,6 +754,9 @@ public class CodeExecutionService {
                     });
                     return process;
                 });
+        if (!outcome.dealing().complete()) {
+            outcome = outcome.offering(PoolSources.offers(plugins, outcome.dealing(), services));
+        }
         String unlisted = "";
         try {
             outcome = outcome.claiming(ClaimCalls.in(config.compiledOutputPath()));
@@ -756,7 +783,7 @@ public class CodeExecutionService {
 
     /** Who the bot's own elements are held under in the live runs: its folder, the same for every process. */
     private String bot() {
-        return config.projectPath().toAbsolutePath().normalize().toString();
+        return SeveralRuns.bot(config.projectPath());
     }
 
     /**

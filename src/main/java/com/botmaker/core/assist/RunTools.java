@@ -4,8 +4,12 @@ import com.botmaker.plugin.api.assist.AssistantTool;
 import com.botmaker.plugin.api.assist.Describe;
 import com.botmaker.plugin.api.assist.Key;
 import com.botmaker.runlog.api.Level;
+import com.botmaker.core.event.CoreEvent;
 import com.botmaker.core.run.RunEntries;
+import com.botmaker.core.run.claims.RunRegistry;
+import com.botmaker.core.run.claims.SeveralRuns;
 
+import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
@@ -34,7 +38,19 @@ final class RunTools {
 
     record Run(@Describe(value = "a run a plugin declares, by its toolbar title (Explore map); the bot's main when "
             + "not given", optional = true) String entry,
-               @Describe(value = WAIT, optional = true) @Key("wait") Integer seconds) {
+               @Describe(value = WAIT, optional = true) @Key("wait") Integer seconds,
+               @Describe(value = "how many runs of the bot to start at once, each dealt its own row of the bot's "
+                       + "pools; the answer lists each run's id. One ordinary run when not given", optional = true)
+               Integer runs) {
+    }
+
+    /** A run id, as {@code run_bot}'s answer gives one. */
+    private static final String RUN_ID = "a run id run_bot {runs} gave: that one of several runs";
+
+    record State(@Describe(value = RUN_ID, optional = true) String run_id) {
+    }
+
+    record Stop(@Describe(value = RUN_ID + "; all stops every run of this bot", optional = true) String run_id) {
     }
 
     record Activity(@Describe(StudioTools.TARGET) String target,
@@ -59,7 +75,8 @@ final class RunTools {
                  @Describe(value = "to follow a run: only the whole lines from this on, the next an earlier answer "
                          + "gave; -1 starts from now. The answer's first line is then next=… starts=… ends=… "
                          + "busy=… skipped=…", optional = true)
-                 Long from) {
+                 Long from,
+                 @Describe(value = RUN_ID + ": its own output", optional = true) String run_id) {
     }
 
     /** The most lines one read after a cursor gives; the next read gives the rest. */
@@ -87,9 +104,9 @@ final class RunTools {
                                 + "when that only looks at the screen, or given in values. It acts on the game.",
                         Statement.class, call -> started(log, call.seconds(), () -> driver.tryStatement(given(call.file()),
                                 call.blockId(), call.values() == null ? Map.of() : call.values()))),
-                stop(driver),
+                stop(driver, log),
                 McpTools.quitStudio(driver::quit),
-                runState(log),
+                runState(driver, log),
                 readTrace(driver, log),
                 reports(driver));
     }
@@ -102,18 +119,85 @@ final class RunTools {
         return List.of(
                 said("run_bot", "Run the whole bot, as Studio's ▶ Run does. It acts on the game.",
                         Run.class, call -> run(runs, log, call)),
-                stop(runs),
-                runState(log),
+                stop(runs, log),
+                runState(runs, log),
                 readTrace(runs, log),
                 reports(runs));
     }
 
-    private static AssistantTool<?> stop(BotRuns runs) {
-        return said("stop", "Stop the run, the try or the debug session.", runs::stop);
+    private static AssistantTool<?> stop(BotRuns runs, RunLog log) {
+        return said("stop", "Stop the run, the try or the debug session; with run_id, that one of several runs.",
+                Stop.class, call -> stopped(runs, log, call.run_id()));
     }
 
-    private static AssistantTool<?> runState(RunLog log) {
-        return said("run_state", "Say whether something runs now, and for how long.", log::state);
+    private static AssistantTool<?> runState(BotRuns runs, RunLog log) {
+        return said("run_state", "Say whether something runs now, and for how long; with run_id, whether that one "
+                + "of several runs still goes.", State.class, call -> state(runs, log, call.run_id()));
+    }
+
+    /** {@code runId}'s state, or the run's with this bot's several runs after it. */
+    static String state(BotRuns runs, RunLog log, String runId) {
+        if (present(runId)) {
+            return SeveralRuns.find(runs.registry(), project(runs), runId)
+                    .map(run -> "Run " + run.runId() + " goes" + (run.claims().isEmpty() ? "."
+                            : ", claiming " + String.join(", ", run.claims()) + "."))
+                    .orElse("Run " + runId + " does not go: it ended, or is no run of this bot.");
+        }
+        String state = log.state();
+        List<RunRegistry.LiveRun> going = runs.projectDir().map(dir -> SeveralRuns.of(runs.registry(), dir))
+                .orElse(List.of());
+        if (going.isEmpty()) return state;
+        return (log.busy() ? state + " " : "") + going.size() + (going.size() == 1 ? " run" : " runs")
+                + " of this bot go: " + String.join(", ", going.stream().map(RunRegistry.LiveRun::runId).toList())
+                + ".";
+    }
+
+    /** Stops {@code runId}, every one of this bot's several runs for {@code all}, or the run with none. */
+    static String stopped(BotRuns runs, RunLog log, String runId) {
+        if (!present(runId)) {
+            // With no one run going, a plain stop is for this bot's several runs, whichever process started them.
+            boolean several = !log.busy() && runs.projectDir()
+                    .map(dir -> !SeveralRuns.of(runs.registry(), dir).isEmpty()).orElse(false);
+            if (!several) return runs.stop();
+            runId = "all";
+        }
+        Path project = project(runs);
+        List<RunRegistry.LiveRun> stopping = "all".equals(runId) ? SeveralRuns.of(runs.registry(), project)
+                : SeveralRuns.find(runs.registry(), project, runId).map(List::of).orElse(List.of());
+        if (stopping.isEmpty()) {
+            return "all".equals(runId) ? "None of this bot's several runs goes."
+                    : "Run " + runId + " does not go: it ended, or is no run of this bot.";
+        }
+        int ended = 0;
+        for (RunRegistry.LiveRun run : stopping) if (SeveralRuns.stop(run)) ended++;
+        return "Stopped " + ended + (ended == 1 ? " run" : " runs") + ". run_state says when "
+                + (ended == 1 ? "it has" : "they have") + " ended.";
+    }
+
+    /** What a start of several runs did: its words, each run with its id and picks, then warnings and offers. */
+    static String several(CoreEvent.RunsStarted started) {
+        StringBuilder out = new StringBuilder(started.words()).append('.');
+        for (CoreEvent.RunsStarted.Started run : started.runs()) {
+            out.append("\n- run ").append(run.row()).append(", id ").append(run.runId());
+            String picks = String.join(", ", run.picks().entrySet().stream()
+                    .map(pick -> pick.getKey() + " = " + String.join(" + ", pick.getValue())).toList());
+            if (!picks.isEmpty()) out.append(": ").append(picks);
+        }
+        if (!started.warnings().isEmpty()) {
+            out.append("\nWarnings: ").append(String.join("; ", started.warnings()));
+        }
+        if (!started.offers().isEmpty()) {
+            out.append("\nTo run more, the user may pick in BotMaker (nothing here runs them): ")
+                    .append(String.join("; ", started.offers()));
+        }
+        if (!started.runs().isEmpty()) {
+            out.append("\nread_trace, run_state and stop take a run_id; stop with run_id all stops them all.");
+        }
+        return out.toString();
+    }
+
+    private static boolean present(String text) {
+        return text != null && !text.isBlank();
     }
 
     private static AssistantTool<?> readTrace(BotRuns runs, RunLog log) {
@@ -132,7 +216,25 @@ final class RunTools {
     }
 
     /** The bot's main, or the declared run {@code entry} names — refused, listing the declared ones, when none is. */
-    private static String run(BotRuns driver, RunLog log, Run call) {
+    static String run(BotRuns driver, RunLog log, Run call) {
+        if (call.runs() != null) {
+            if (call.runs() < 1 || call.runs() > SeveralRuns.MOST) {
+                throw new IllegalArgumentException("runs is 1 to " + SeveralRuns.MOST + ".");
+            }
+            if (present(call.entry())) throw new IllegalArgumentException("runs starts the bot's main, not an entry.");
+            if (call.seconds() != null && call.seconds() > 0) {
+                throw new IllegalArgumentException("Several runs are not waited for: read_trace with a run_id reads "
+                        + "each.");
+            }
+            return idle(log, () -> several(driver.runSeveral(call.runs())));
+        }
+        // The run log counts one run only: several of this bot that go leave no room for another.
+        List<RunRegistry.LiveRun> going = driver.projectDir().map(dir -> SeveralRuns.of(driver.registry(), dir))
+                .orElse(List.of());
+        if (!going.isEmpty()) {
+            throw new IllegalArgumentException(going.size() + (going.size() == 1 ? " run of this bot goes"
+                    : " runs of this bot go") + ": stop them first (stop with run_id all), or wait for them.");
+        }
         if (call.entry() == null || call.entry().isBlank()) return started(log, call.seconds(), driver::runBot);
         RunEntries.Declared entry = RunEntries.require(call.entry());
         return started(log, call.seconds(), () -> driver.runEntry(entry));
@@ -142,12 +244,33 @@ final class RunTools {
         int lines = call.lines() == null ? 50 : call.lines();
         Level level = call.level() == null || call.level().isBlank() ? null : Level.fromId(call.level());
         if (level == Level.UNKNOWN) throw new IllegalArgumentException("level is debug, info, warn or error.");
+        if (present(call.run_id())) return ownOutput(driver, call.run_id(), lines);
         if (call.run() != null && !call.run().isBlank()) {
             return PastRuns.trace(project(driver), call.run(), level, lines);
         }
         if (call.from() != null) return followed(log.since(call.from(), FOLLOW_LINES));
         return log.read(new RunLog.Read(lines, call.this_run() == null || call.this_run(),
                 level != null && level.problem()));
+    }
+
+    /** The last {@code lines} lines one of several runs printed, after a line saying whether it still goes. */
+    static String ownOutput(BotRuns driver, String runId, int lines) {
+        if (!runId.matches("[A-Za-z0-9-]{1,64}")) throw new IllegalArgumentException("A run id is letters, digits "
+                + "and dashes, as run_bot gave it.");
+        Path project = project(driver);
+        boolean going = SeveralRuns.find(driver.registry(), project, runId).isPresent();
+        List<String> printed;
+        try {
+            printed = SeveralRuns.lastLines(project, runId, Math.max(1, Math.min(lines, FOLLOW_LINES)));
+        } catch (IOException e) {
+            throw new IllegalArgumentException("Run " + runId + "'s output could not be read: " + e.getMessage());
+        }
+        if (printed.isEmpty() && !going) {
+            throw new IllegalArgumentException("Run " + runId + " printed nothing here: it is no run of this bot, or "
+                    + "its output was cleaned.");
+        }
+        String head = "Run " + runId + (going ? " goes." : " has ended.");
+        return printed.isEmpty() ? head + " It printed nothing yet." : head + "\n" + String.join("\n", printed);
     }
 
     /** {@code since} as a terminal reads it: one line of where things stand, then the lines. */

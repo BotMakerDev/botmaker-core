@@ -6,6 +6,7 @@ import com.botmaker.java.grammar.ValueGrammar;
 import com.botmaker.java.index.PoolReader;
 import com.botmaker.plugin.api.StudioServices;
 import com.botmaker.plugin.api.run.PluginPool;
+import com.botmaker.plugin.api.run.PoolOffer;
 import com.botmaker.plugin.api.source.ManagedParam;
 
 import java.util.ArrayList;
@@ -137,6 +138,41 @@ public final class PoolSources {
         pools.addAll(own.pools());
         targets.putAll(own.targets());
         return new Read(pools, targets, own.warnings());
+    }
+
+    /**
+     * The titles of what {@code plugins} offer for each of their pools {@code dealing} found too few elements in, the
+     * likeliest first. Asking runs nothing; a plugin that throws while asked offers nothing.
+     */
+    public static List<String> offers(List<Declared> plugins, Dealer.Dealing dealing, StudioServices services) {
+        List<String> titles = new ArrayList<>();
+        for (Dealer.Reason reason : dealing.reasons()) {
+            if (reason.kind() != Dealer.Reason.Kind.TOO_FEW || reason.count() < 1) continue;
+            PluginPool.Shortfall shortfall = new PluginPool.Shortfall() {
+                @Override
+                public int asked() {
+                    return dealing.asked();
+                }
+
+                @Override
+                public int missing() {
+                    return reason.count();
+                }
+            };
+            for (Declared plugin : plugins) {
+                for (PluginPool<?> pool : plugin.pools()) {
+                    if (!pool.parameter().id().equals(reason.pool())) continue;
+                    try {
+                        for (PoolOffer offer : pool.offers(shortfall, services)) {
+                            if (!titles.contains(offer.title())) titles.add(offer.title());
+                        }
+                    } catch (RuntimeException | LinkageError e) {
+                        // Only an offer is lost: the start already said why fewer runs started.
+                    }
+                }
+            }
+        }
+        return List.copyOf(titles);
     }
 
     /** The bot's own pools, in its groups' order; one that does not read is a warning and no pool. */

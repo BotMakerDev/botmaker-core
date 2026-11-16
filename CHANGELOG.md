@@ -9,6 +9,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- **Several runs from the MCP** (2026-11-16): `run_bot {runs: k}` starts k runs dealt by the bot's pools and answers
+  what started, each run's id and picks, the warnings and what a plugin offers to cover a shortfall (listed, never
+  run); `run_state`, `stop` and `read_trace` take a `run_id`. On the channel, `Request.RunSeveral` and
+  `CoreEvent.RunsStarted`. The core stays up while several runs go.
 - **A run keeps its plugins' values of this PC** (2026-11-15): before a run, each served plugin's method values are
   seeded (`HostValues.readyForRun`) and the run's plan names the folder (`RunPlan.hostValues`), which the agent serves
   through plugin-host's `RunHostFolders`; when the run ends, what it wrote is one commit, `Run of <bot>` (none when

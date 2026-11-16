@@ -61,20 +61,28 @@ public final class PooledRuns {
      * @param failed   each row that was dealt but did not start, in words; its elements are free again
      * @param claims   each method of the bot that claims a value while it runs ({@link ClaimCalls}): those keys are
      *                 decided while running, and counted into no capacity
+     * @param offers   the plugins' ways to raise capacity when fewer started than asked, by title; listed, never run
+     *                 by the start
      */
     public record Outcome(Dealer.Dealing dealing, List<Started> started, List<String> warnings, List<String> failed,
-                          List<String> claims) {
+                          List<String> claims, List<String> offers) {
 
         public Outcome {
             started = List.copyOf(started);
             warnings = List.copyOf(warnings);
             failed = List.copyOf(failed);
             claims = List.copyOf(claims);
+            offers = List.copyOf(offers);
         }
 
         /** This outcome, saying the keys {@code sites} claim are decided while running. */
         public Outcome claiming(List<String> sites) {
-            return new Outcome(dealing, started, warnings, failed, sites);
+            return new Outcome(dealing, started, warnings, failed, sites, offers);
+        }
+
+        /** This outcome, listing {@code titles} as the ways to raise capacity. */
+        public Outcome offering(List<String> titles) {
+            return new Outcome(dealing, started, warnings, failed, claims, titles);
         }
 
         /** {@code "2 of 3 started: …"}, the dealing's reasons, the failures, then what is decided while running. */
@@ -154,6 +162,6 @@ public final class PooledRuns {
             // What threw left the rest the core's own, held as long as it lives: freed now.
             for (int i = next; i < held.size(); i++) registry.release(held.get(i).runId());
         }
-        return new Outcome(dealing, started, read.warnings(), failed, List.of());
+        return new Outcome(dealing, started, read.warnings(), failed, List.of(), List.of());
     }
 }

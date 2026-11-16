@@ -36,6 +36,7 @@ import com.botmaker.core.run.CodeExecutionService;
 import com.botmaker.core.run.DebuggingService;
 import com.botmaker.core.run.RunCheck;
 import com.botmaker.core.run.RunTelemetry;
+import com.botmaker.core.run.claims.PooledRuns;
 import com.botmaker.core.run.debug.DebugSnapshot;
 import com.botmaker.core.run.debug.DebugView;
 import com.botmaker.core.run.debug.FollowPacer;
@@ -347,6 +348,11 @@ public final class OpenProject implements AutoCloseable {
 
     /** Whether a run is asked for and has not ended, its compile included. */
     boolean running() {
+        return execution.isRunning() || execution.severalGoing();
+    }
+
+    /** Whether one run (not several) was asked for and has not ended, its compile included. */
+    boolean runningOne() {
         return execution.isRunning();
     }
 
@@ -378,6 +384,7 @@ public final class OpenProject implements AutoCloseable {
                 || request instanceof Request.Debugging debugging && debugging.step() == Request.Debugging.Step.STOP) {
             stops.incrementAndGet();
         }
+        if (request instanceof Request.RunSeveral several) return runSeveral(several, stopsBefore);
         try {
             return CompletableFuture.supplyAsync(() -> {
                 try {
@@ -495,6 +502,8 @@ public final class OpenProject implements AutoCloseable {
             case Request.Run run -> started(() -> execution.runCode(state.snapshot()));
             case Request.RunEntry entry ->
                     started(() -> execution.runEntry(state.snapshot(), entry.title(), entry.mainClass()));
+            // Never here: ask starts it apart, since its start leaves the project's thread.
+            case Request.RunSeveral several -> new EditResult.Refused("Several runs are asked through ask.");
             case Request.Try attempt -> trial(attempt.trial());
             case Request.Debug debug -> started(() -> debugger.startDebugging(debug.follow(), breakpoints(debug)));
             case Request.Control steer -> steer(steer);
@@ -507,6 +516,43 @@ public final class OpenProject implements AutoCloseable {
     private static boolean startsABot(Request request) {
         return request instanceof Request.Run || request instanceof Request.RunEntry || request instanceof Request.Try
                 || request instanceof Request.Debug;
+    }
+
+    /**
+     * Compiles once and starts several runs, on this thread: what started is told before the answer, so a client
+     * reads it before it reads that the ask was accepted. Refused, saying why, when none could start.
+     */
+    /**
+     * {@code several} in its turn: the sources read on the project's thread, then compiled and started on a thread of
+     * their own, as one run's compile is, so the asks after it are not held for minutes. A stop that overtook it
+     * starts nothing.
+     */
+    private CompletableFuture<EditResult> runSeveral(Request.RunSeveral several, long stopsBefore) {
+        try {
+            return CompletableFuture.supplyAsync(() -> stops.get() != stopsBefore ? null : state.snapshot(), owner)
+                    .thenApplyAsync(snapshot -> snapshot == null
+                            ? new EditResult.Refused("The runs were stopped before they started.")
+                            : startSeveral(several, snapshot), work -> Thread.ofVirtual().name("core-several").start(work))
+                    .exceptionally(e -> new EditResult.Refused("The core could not do that: " + e));
+        } catch (RejectedExecutionException closed) {
+            return CompletableFuture.completedFuture(new EditResult.Refused("The project was closed."));
+        }
+    }
+
+    private EditResult startSeveral(Request.RunSeveral several, ProjectState.Snapshot snapshot) {
+        PooledRuns.Outcome outcome;
+        try {
+            outcome = execution.startSeveral(snapshot, several.runs(), Map.of(), HostServices.forProject(config));
+        } catch (PooledRuns.Refused refused) {
+            return new EditResult.Refused(refused.getMessage());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return new EditResult.Refused("The start of several runs was interrupted.");
+        }
+        tell(new CoreEvent.RunsStarted(several.token(), outcome.words(), outcome.started().stream()
+                .map(run -> new CoreEvent.RunsStarted.Started(run.row() + 1, run.runId(), run.picks())).toList(),
+                outcome.warnings(), outcome.offers()));
+        return new EditResult.Accepted(List.of());
     }
 
     /** A client that asked for a run waits for its end; a debug session it asked for never began, so nothing ends. */

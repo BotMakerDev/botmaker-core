@@ -28,6 +28,7 @@ import java.util.OptionalInt;
         @JsonSubTypes.Type(value = CoreEvent.RunTraced.class, name = "runTraced"),
         @JsonSubTypes.Type(value = CoreEvent.RunFrame.class, name = "runFrame"),
         @JsonSubTypes.Type(value = CoreEvent.RunProcess.class, name = "runProcess"),
+        @JsonSubTypes.Type(value = CoreEvent.RunsStarted.class, name = "runsStarted"),
         @JsonSubTypes.Type(value = CoreEvent.DebugSession.class, name = "debugSession"),
         @JsonSubTypes.Type(value = CoreEvent.DebugPaused.class, name = "debugPaused"),
         @JsonSubTypes.Type(value = CoreEvent.DebugFollowed.class, name = "debugFollowed"),
@@ -177,6 +178,40 @@ public sealed interface CoreEvent {
 
     /** The bot's process started as {@code pid}, what a client's pause signals; it is gone at the run's end. */
     record RunProcess(long pid) implements CoreEvent {
+    }
+
+    /**
+     * A start of several runs did what it could (spec {@code 2026-11-15-run-claims-design.md} §5), told before its
+     * answer.
+     *
+     * @param asked    the start's {@code Request.RunSeveral} token
+     * @param words   {@code "7 of 11 started: …"}, with every reason fewer started
+     * @param runs     each run started, in row order
+     * @param warnings what the runs should be told: a pool that did not read
+     * @param offers   the plugins' ways to raise capacity, by title: listed, never run by being told
+     */
+    record RunsStarted(String asked, String words, List<Started> runs, List<String> warnings, List<String> offers)
+            implements CoreEvent {
+        public RunsStarted {
+            if (asked == null || asked.isBlank()) throw new IllegalArgumentException("a start of runs names its ask");
+            if (words == null || words.isBlank()) throw new IllegalArgumentException("a start of runs says what it did");
+            runs = runs == null ? List.of() : List.copyOf(runs);
+            warnings = warnings == null ? List.of() : List.copyOf(warnings);
+            offers = offers == null ? List.of() : List.copyOf(offers);
+        }
+
+        /**
+         * One run started.
+         *
+         * @param row   its row, from 1
+         * @param picks what it was dealt, by each pool's parameter
+         */
+        public record Started(int row, String runId, Map<String, List<String>> picks) {
+            public Started {
+                if (runId == null || runId.isBlank()) throw new IllegalArgumentException("a run started has its id");
+                picks = picks == null ? Map.of() : Map.copyOf(picks);
+            }
+        }
     }
 
     /** A debug session started, ran on after a pause, or finished. */

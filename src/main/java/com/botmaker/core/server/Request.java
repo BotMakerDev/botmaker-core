@@ -4,6 +4,7 @@ import com.botmaker.core.edit.Edit;
 import com.botmaker.core.edit.EditRequest;
 import com.botmaker.core.edit.HistoryStep;
 import com.botmaker.core.plugin.PluginWrite;
+import com.botmaker.core.run.claims.SeveralRuns;
 import com.botmaker.core.run.trial.TrialAsk;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
@@ -34,6 +35,7 @@ import java.util.Set;
         @JsonSubTypes.Type(value = Request.Compile.class, name = "compile"),
         @JsonSubTypes.Type(value = Request.Run.class, name = "run"),
         @JsonSubTypes.Type(value = Request.RunEntry.class, name = "runEntry"),
+        @JsonSubTypes.Type(value = Request.RunSeveral.class, name = "runSeveral"),
         @JsonSubTypes.Type(value = Request.Try.class, name = "try"),
         @JsonSubTypes.Type(value = Request.Debug.class, name = "debug"),
         @JsonSubTypes.Type(value = Request.Stop.class, name = "stop"),
@@ -59,6 +61,23 @@ public sealed interface Request {
 
     /** Compiles and runs the bot; accepted once it started to, how it goes told as {@code CoreEvent}s. */
     record Run(long id) implements Request {
+    }
+
+    /**
+     * Compiles once and starts {@code runs} runs of the bot, each dealt a row of its pools; answered once they started,
+     * what started told first as {@code CoreEvent.RunsStarted}, or refused saying why none could.
+     *
+     * @param token what the told event names this start by: unique across clients, whose ids are each their own
+     */
+    record RunSeveral(long id, int runs, String token) implements Request {
+        public RunSeveral {
+            if (runs < 1 || runs > SeveralRuns.MOST) {
+                throw new IllegalArgumentException("several runs are 1 to " + SeveralRuns.MOST + ", not " + runs);
+            }
+            if (token == null || !token.matches("[A-Za-z0-9-]{1,64}")) {
+                throw new IllegalArgumentException("a start of several runs has a token of letters, digits and dashes");
+            }
+        }
     }
 
     /** As {@link Run}, with a plugin's declared run {@code title} as the JVM's main, {@code mainClass}. */
