@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 LiQiyeDev
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+
 package com.botmaker.core.run.agent;
 
 /** A bot's own class, as the trace agent's tests see one: every call it makes into {@link TracedFixture}. */

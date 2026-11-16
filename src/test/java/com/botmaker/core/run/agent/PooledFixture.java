@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 LiQiyeDev
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+
 package com.botmaker.core.run.agent;
 
 /** The methods {@link PooledMethodsTest} rewrites: each body is what a run of several must not see. */
