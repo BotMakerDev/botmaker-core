@@ -185,30 +185,39 @@ public sealed interface CoreEvent {
      * answer.
      *
      * @param asked    the start's {@code Request.RunSeveral} token
-     * @param words   {@code "7 of 11 started: …"}, with every reason fewer started
-     * @param runs     each run started, in row order
+     * @param words   {@code "7 of 11 started: …"}, with every reason fewer started; {@code "7 of 11 can run: …"} for
+     *                 a count
+     * @param runs     each run started, in row order; for a count, each row that could, with no run id
      * @param warnings what the runs should be told: a pool that did not read
      * @param offers   the plugins' ways to raise capacity, by title: listed, never run by being told
+     * @param counted  a count, which started none: its runs have no run id; every started run has one
      */
-    record RunsStarted(String asked, String words, List<Started> runs, List<String> warnings, List<String> offers)
-            implements CoreEvent {
+    record RunsStarted(String asked, String words, List<Started> runs, List<String> warnings, List<String> offers,
+                       boolean counted) implements CoreEvent {
         public RunsStarted {
             if (asked == null || asked.isBlank()) throw new IllegalArgumentException("a start of runs names its ask");
             if (words == null || words.isBlank()) throw new IllegalArgumentException("a start of runs says what it did");
             runs = runs == null ? List.of() : List.copyOf(runs);
             warnings = warnings == null ? List.of() : List.copyOf(warnings);
             offers = offers == null ? List.of() : List.copyOf(offers);
+            for (Started run : runs) {
+                if (counted != run.runId().isEmpty()) {
+                    throw new IllegalArgumentException(counted ? "a count's row has no run id"
+                            : "a started run has its run id");
+                }
+            }
         }
 
         /**
-         * One run started.
+         * One run started, or for a count one that could.
          *
          * @param row   its row, from 1
+         * @param runId its id in the live runs; empty for a count, which starts none
          * @param picks what it was dealt, by each pool's parameter
          */
         public record Started(int row, String runId, Map<String, List<String>> picks) {
             public Started {
-                if (runId == null || runId.isBlank()) throw new IllegalArgumentException("a run started has its id");
+                runId = runId == null ? "" : runId;
                 picks = picks == null ? Map.of() : Map.copyOf(picks);
             }
         }

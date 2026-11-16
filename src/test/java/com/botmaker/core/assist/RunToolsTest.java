@@ -3,6 +3,7 @@ package com.botmaker.core.assist;
 import com.botmaker.core.event.CoreEvent;
 import com.botmaker.core.run.RunEntries;
 import com.botmaker.core.run.claims.RunRegistry;
+import com.botmaker.core.run.claims.SeveralAsk;
 import com.botmaker.core.run.claims.SeveralRuns;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -28,13 +29,22 @@ class RunToolsTest {
             "7 of 11 can run: 4 instances missing",
             List.of(new CoreEvent.RunsStarted.Started(1, "r-1", Map.of("Sdk#instance", List.of("Instance.named(\"ld-1\")"))),
                     new CoreEvent.RunsStarted.Started(2, "r-2", Map.of())),
-            List.of("accounts() could not be read"), List.of("Create 4 instances"));
+            List.of("accounts() could not be read"), List.of("Create 4 instances"), false);
+
+    private static final CoreEvent.RunsStarted COUNTED = new CoreEvent.RunsStarted("t-2",
+            "1 of 2 can run: 1 instance missing",
+            List.of(new CoreEvent.RunsStarted.Started(1, "", Map.of("Sdk#instance", List.of("Instance.named(\"ld-1\")")))),
+            List.of(), List.of("Create 1 instance"), true);
+
+    private static RunTools.Run runs(Integer runs) {
+        return new RunTools.Run(null, null, runs, null, null, null);
+    }
 
     /** A bot whose several runs are dealt {@code started}, its live runs in a registry of the test's own. */
     private final class Fake implements BotRuns {
         final Path project = dir.resolve("farm");
         final RunRegistry registry = new RunRegistry(dir.resolve("live"), (pid, started) -> true);
-        int askedFor;
+        SeveralAsk asked;
 
         @Override
         public Optional<Path> projectDir() {
@@ -52,9 +62,9 @@ class RunToolsTest {
         }
 
         @Override
-        public CoreEvent.RunsStarted runSeveral(int runs) {
-            askedFor = runs;
-            return SEVEN_OF_ELEVEN;
+        public CoreEvent.RunsStarted runSeveral(SeveralAsk ask) {
+            asked = ask;
+            return ask.how() == SeveralAsk.How.COUNT ? COUNTED : SEVEN_OF_ELEVEN;
         }
 
         @Override
@@ -75,8 +85,8 @@ class RunToolsTest {
     @Test
     void severalRunsAnswerWhatStartedEachRunItsIdAndOffersOnlyListed() {
         Fake bot = new Fake();
-        String answer = RunTools.run(bot, idleLog(), new RunTools.Run(null, null, 11));
-        assertEquals(11, bot.askedFor);
+        String answer = RunTools.run(bot, idleLog(), runs(11));
+        assertEquals(SeveralAsk.of(11), bot.asked);
         assertTrue(answer.startsWith("7 of 11 can run: 4 instances missing."), answer);
         assertTrue(answer.contains("- run 1, id r-1: Sdk#instance = Instance.named(\"ld-1\")"), answer);
         assertTrue(answer.contains("- run 2, id r-2\n"), answer);
@@ -87,13 +97,34 @@ class RunToolsTest {
     @Test
     void severalRunsRefuseAnEntryAWaitAndFewerThanOne() {
         Fake bot = new Fake();
-        assertThrows(IllegalArgumentException.class, () -> RunTools.run(bot, idleLog(), new RunTools.Run(null, null, 0)));
-        assertThrows(IllegalArgumentException.class,
-                () -> RunTools.run(bot, idleLog(), new RunTools.Run(null, null, SeveralRuns.MOST + 1)));
-        assertThrows(IllegalArgumentException.class,
-                () -> RunTools.run(bot, idleLog(), new RunTools.Run("Explore map", null, 2)));
-        assertThrows(IllegalArgumentException.class, () -> RunTools.run(bot, idleLog(), new RunTools.Run(null, 30, 2)));
-        assertEquals(0, bot.askedFor);
+        assertThrows(IllegalArgumentException.class, () -> RunTools.run(bot, idleLog(), runs(0)));
+        assertThrows(IllegalArgumentException.class, () -> RunTools.run(bot, idleLog(), runs(SeveralRuns.MOST + 1)));
+        assertThrows(IllegalArgumentException.class, () -> RunTools.run(bot, idleLog(),
+                new RunTools.Run("Explore map", null, 2, null, null, null)));
+        assertThrows(IllegalArgumentException.class, () -> RunTools.run(bot, idleLog(),
+                new RunTools.Run(null, 30, 2, null, null, null)));
+        assertThrows(IllegalArgumentException.class, () -> RunTools.run(bot, idleLog(),
+                new RunTools.Run(null, null, 2, null, null, List.of("5:Sdk#instance=x"))));
+        // A dry run, all or none and pins are a start of several runs' only.
+        assertThrows(IllegalArgumentException.class, () -> RunTools.run(bot, idleLog(),
+                new RunTools.Run(null, null, null, true, null, null)));
+        assertThrows(IllegalArgumentException.class, () -> RunTools.run(bot, idleLog(),
+                new RunTools.Run(null, null, null, null, null, List.of("Sdk#instance=x"))));
+        assertEquals(null, bot.asked);
+    }
+
+    @Test
+    void aDryRunListsWhatCouldRunWithNoRunIdAndPinsAndAllOrNoneReachTheStart() {
+        Fake bot = new Fake();
+        String answer = RunTools.run(bot, idleLog(), new RunTools.Run(null, null, 2, true, null, null));
+        assertEquals(SeveralAsk.How.COUNT, bot.asked.how());
+        assertTrue(answer.startsWith("1 of 2 can run: 1 instance missing.\n- run 1: Sdk#instance = "), answer);
+        assertTrue(!answer.contains("read_trace"), "nothing started to read: " + answer);
+
+        RunTools.run(bot, idleLog(), new RunTools.Run(null, null, 2, null, true,
+                List.of("2:Sdk#instance=Instance.named(\"ld-2\")")));
+        assertEquals(new SeveralAsk(2, SeveralAsk.How.ALL_OR_NONE,
+                Map.of(1, Map.of("Sdk#instance", List.of("Instance.named(\"ld-2\")")))), bot.asked);
     }
 
     @Test
@@ -112,7 +143,7 @@ class RunToolsTest {
 
         // One more run waits for them, and a plain stop is for them; this test's own process is never killed.
         String refused = assertThrows(IllegalArgumentException.class,
-                () -> RunTools.run(bot, idleLog(), new RunTools.Run(null, null, null))).getMessage();
+                () -> RunTools.run(bot, idleLog(), runs(null))).getMessage();
         assertTrue(refused.startsWith("1 run of this bot goes"), refused);
         assertEquals("Stopped 0 runs. run_state says when they have ended.", RunTools.stopped(bot, idleLog(), null));
     }

@@ -7,6 +7,7 @@ import com.botmaker.runlog.api.Level;
 import com.botmaker.core.event.CoreEvent;
 import com.botmaker.core.run.RunEntries;
 import com.botmaker.core.run.claims.RunRegistry;
+import com.botmaker.core.run.claims.SeveralAsk;
 import com.botmaker.core.run.claims.SeveralRuns;
 
 import java.io.IOException;
@@ -41,7 +42,21 @@ final class RunTools {
                @Describe(value = WAIT, optional = true) @Key("wait") Integer seconds,
                @Describe(value = "how many runs of the bot to start at once, each dealt its own row of the bot's "
                        + "pools; the answer lists each run's id. One ordinary run when not given", optional = true)
-               Integer runs) {
+               Integer runs,
+               @Describe(value = "with runs: true only says how many can run and what each would be dealt, starting "
+                       + "none", optional = true) Boolean dry_run,
+               @Describe(value = "with runs: true starts none unless every run asked for can run", optional = true)
+               Boolean all_or_none,
+               @Describe(value = "with runs: picks fixed by hand, each pool=value or run:pool=value (run from 1, the "
+                       + "first when not given), the pool and value as a dry run's picks write them", optional = true)
+               List<String> pins) {
+
+        /** What a start of {@code runs} several runs asks; the runs checked by the caller. */
+        SeveralAsk several() {
+            SeveralAsk.How how = Boolean.TRUE.equals(dry_run) ? SeveralAsk.How.COUNT
+                    : Boolean.TRUE.equals(all_or_none) ? SeveralAsk.How.ALL_OR_NONE : SeveralAsk.How.START;
+            return SeveralAsk.pinned(runs, how, pins);
+        }
     }
 
     /** A run id, as {@code run_bot}'s answer gives one. */
@@ -178,7 +193,8 @@ final class RunTools {
     static String several(CoreEvent.RunsStarted started) {
         StringBuilder out = new StringBuilder(started.words()).append('.');
         for (CoreEvent.RunsStarted.Started run : started.runs()) {
-            out.append("\n- run ").append(run.row()).append(", id ").append(run.runId());
+            out.append("\n- run ").append(run.row());
+            if (!run.runId().isEmpty()) out.append(", id ").append(run.runId());
             String picks = String.join(", ", run.picks().entrySet().stream()
                     .map(pick -> pick.getKey() + " = " + String.join(" + ", pick.getValue())).toList());
             if (!picks.isEmpty()) out.append(": ").append(picks);
@@ -190,7 +206,7 @@ final class RunTools {
             out.append("\nTo run more, the user may pick in BotMaker (nothing here runs them): ")
                     .append(String.join("; ", started.offers()));
         }
-        if (!started.runs().isEmpty()) {
+        if (started.runs().stream().anyMatch(run -> !run.runId().isEmpty())) {
             out.append("\nread_trace, run_state and stop take a run_id; stop with run_id all stops them all.");
         }
         return out.toString();
@@ -226,7 +242,14 @@ final class RunTools {
                 throw new IllegalArgumentException("Several runs are not waited for: read_trace with a run_id reads "
                         + "each.");
             }
-            return idle(log, () -> several(driver.runSeveral(call.runs())));
+            SeveralAsk ask = call.several();
+            // A count starts nothing, so it is asked while a run goes too.
+            if (ask.how() == SeveralAsk.How.COUNT) return several(driver.runSeveral(ask));
+            return idle(log, () -> several(driver.runSeveral(ask)));
+        }
+        if (Boolean.TRUE.equals(call.dry_run()) || Boolean.TRUE.equals(call.all_or_none())
+                || (call.pins() != null && !call.pins().isEmpty())) {
+            throw new IllegalArgumentException("dry_run, all_or_none and pins go with runs.");
         }
         // The run log counts one run only: several of this bot that go leave no room for another.
         List<RunRegistry.LiveRun> going = driver.projectDir().map(dir -> SeveralRuns.of(driver.registry(), dir))

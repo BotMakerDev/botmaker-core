@@ -44,7 +44,9 @@ class CoreEventJsonTest {
             new CoreEvent.RunProcess(4242),
             new CoreEvent.RunsStarted("5f0c-ab12","1 of 2 can run: 1 instance missing", List.of(
                     new CoreEvent.RunsStarted.Started(1, "r-1", Map.of("INSTANCE", List.of("Instance.named(\"ld-1\")")))),
-                    List.of("accounts() could not be read"), List.of("Create 1 instance")),
+                    List.of("accounts() could not be read"), List.of("Create 1 instance"), false),
+            new CoreEvent.RunsStarted("5f0c-ab13", "1 of 2 can run", List.of(
+                    new CoreEvent.RunsStarted.Started(1, "", Map.of())), List.of(), List.of(), true),
             new CoreEvent.DebugSession(CoreEvent.DebugSession.Phase.RESUMED),
             new CoreEvent.DebugPaused(FILE, 18, new DebugSnapshot("main", List.of(
                     new DebugSnapshot.Frame("play", "com.mybot.Main", Path.of("/bots/mybot/Main.java"), 18, List.of(

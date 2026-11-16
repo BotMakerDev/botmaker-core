@@ -7,6 +7,7 @@ import com.botmaker.core.edit.EditResult;
 import com.botmaker.core.edit.HistoryStep;
 import com.botmaker.core.event.CoreEvent;
 import com.botmaker.core.plugin.PluginWrite;
+import com.botmaker.core.run.claims.SeveralAsk;
 import com.botmaker.core.run.trial.TrialAsk;
 
 import java.io.IOException;
@@ -146,13 +147,13 @@ public final class CoreClient implements AutoCloseable {
     }
 
     /**
-     * Compiles once and starts {@code runs} runs of the bot, each dealt a row of its pools ({@link Request.RunSeveral});
-     * answers what started, which every client is told too.
+     * Compiles once and starts the runs {@code ask} asks for, each dealt a row of its pools, or counts them
+     * ({@link Request.RunSeveral}); answers what started, which every client is told too.
      *
      * @throws IllegalArgumentException with why none started
      */
-    public CoreEvent.RunsStarted runSeveral(int runs) throws IOException {
-        Request.RunSeveral request = new Request.RunSeveral(ids.incrementAndGet(), runs, UUID.randomUUID().toString());
+    public CoreEvent.RunsStarted runSeveral(SeveralAsk ask) throws IOException {
+        Request.RunSeveral request = new Request.RunSeveral(ids.incrementAndGet(), ask, UUID.randomUUID().toString());
         several.put(request.token(), Optional.empty());
         try {
             EditResult result = ask(request, SEVERAL_TIMEOUT);

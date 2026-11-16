@@ -4,7 +4,7 @@ import com.botmaker.core.edit.Edit;
 import com.botmaker.core.edit.EditRequest;
 import com.botmaker.core.edit.HistoryStep;
 import com.botmaker.core.plugin.PluginWrite;
-import com.botmaker.core.run.claims.SeveralRuns;
+import com.botmaker.core.run.claims.SeveralAsk;
 import com.botmaker.core.run.trial.TrialAsk;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
@@ -64,16 +64,15 @@ public sealed interface Request {
     }
 
     /**
-     * Compiles once and starts {@code runs} runs of the bot, each dealt a row of its pools; answered once they started,
-     * what started told first as {@code CoreEvent.RunsStarted}, or refused saying why none could.
+     * Compiles once and starts the runs {@code ask} asks for, each dealt a row of its pools, or only counts them;
+     * answered once they started, what started (or could) told first as {@code CoreEvent.RunsStarted}, or refused
+     * saying why none could.
      *
      * @param token what the told event names this start by: unique across clients, whose ids are each their own
      */
-    record RunSeveral(long id, int runs, String token) implements Request {
+    record RunSeveral(long id, SeveralAsk ask, String token) implements Request {
         public RunSeveral {
-            if (runs < 1 || runs > SeveralRuns.MOST) {
-                throw new IllegalArgumentException("several runs are 1 to " + SeveralRuns.MOST + ", not " + runs);
-            }
+            if (ask == null) throw new IllegalArgumentException("a start of several runs says what it asks");
             if (token == null || !token.matches("[A-Za-z0-9-]{1,64}")) {
                 throw new IllegalArgumentException("a start of several runs has a token of letters, digits and dashes");
             }

@@ -41,7 +41,7 @@ class ClaimCallsTest {
     @Test
     void aStartSaysWhatIsDecidedWhileRunning() {
         PooledRuns.Outcome outcome = new PooledRuns.Outcome(new Dealer.Dealing(0, List.of(), List.of()), List.of(),
-                List.of(), List.of(), List.of(), List.of());
+                List.of(), List.of(), List.of(), List.of(), SeveralAsk.How.START);
         assertEquals("0 of 0 started", outcome.words());
         assertEquals("0 of 0 started: decided while running: the keys claimed in Farm.run",
                 outcome.claiming(List.of("Farm.run")).words());

@@ -98,7 +98,9 @@ per user.
   keeps a project open with no client while the MCP opened it or a kept run goes (`Request.Close(keepRun)`), and the
   core stays up while one runs. `CoreLauncher` saves its start command as `core-command.json` for `botmaker mcp-bridge`.
 - `read_trace`'s `from` (phase 12) is a cursor over `RunLog.since`: its first line `next= starts= ends= busy= skipped=`
-  is read by `botmaker bot run` (the cli's `BotRun.HEAD`), so a change to that line changes both.
+  is read by `botmaker bot run` (the cli's `BotRun.HEAD`), so a change to that line changes both. Likewise
+  `run_bot {runs}`'s first words, `K of N can run` for a dry run and `K of N started` (`PooledRuns.Outcome.words`),
+  are read by `botmaker bot run --runs` (the cli's `SeveralStart`).
 - Plugins load in both processes since phase 10c (2026-11-05). The core alone resolves the pom and tells
   `LibrariesResolved`, and Studio binds its copy to it. Each copy's writes are `PluginWrite`s that the core makes on the
   project's thread (`Request.PluginWriting`, `Request.Batch`). Studio's copy forwards over the channel

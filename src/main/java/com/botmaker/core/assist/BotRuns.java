@@ -3,6 +3,7 @@ package com.botmaker.core.assist;
 import com.botmaker.core.event.CoreEvent;
 import com.botmaker.core.run.RunEntries;
 import com.botmaker.core.run.claims.RunRegistry;
+import com.botmaker.core.run.claims.SeveralAsk;
 
 import java.nio.file.Path;
 import java.util.Optional;
@@ -25,12 +26,12 @@ public interface BotRuns {
     String runEntry(RunEntries.Declared entry);
 
     /**
-     * Compiles once and starts {@code runs} runs of the bot, each dealt a row of its pools (spec
-     * {@code 2026-11-15-run-claims-design.md} §5); answers what started, once it has.
+     * Compiles once and starts the runs {@code ask} asks for, each dealt a row of its pools (spec
+     * {@code 2026-11-15-run-claims-design.md} §5), or only counts them; answers what started, once it has.
      *
      * @throws IllegalArgumentException with why none started
      */
-    default CoreEvent.RunsStarted runSeveral(int runs) {
+    default CoreEvent.RunsStarted runSeveral(SeveralAsk ask) {
         throw new IllegalArgumentException("Several runs at once are not served here.");
     }
 

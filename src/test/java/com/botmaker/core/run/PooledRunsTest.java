@@ -6,6 +6,7 @@ import com.botmaker.core.run.agent.TracePlan;
 import com.botmaker.core.run.claims.PoolSources;
 import com.botmaker.core.run.claims.PooledRuns;
 import com.botmaker.core.run.claims.RunRegistry;
+import com.botmaker.core.run.claims.SeveralAsk;
 import com.botmaker.core.run.pooled.PooledBot;
 import com.botmaker.core.run.pooled.PooledParams;
 import com.botmaker.core.run.pooled.PooledPools;
@@ -51,7 +52,7 @@ class PooledRunsTest {
         PoolSources.Read read = read(FIRST, SECOND);
         assertEquals(Optional.empty(), PooledRuns.unfit(location(PooledParams.class), read));
 
-        PooledRuns.Outcome outcome = PooledRuns.start("bot", dir.resolve("bot"), read, 2, Map.of(), registry,
+        PooledRuns.Outcome outcome = PooledRuns.start("bot", dir.resolve("bot"), read, SeveralAsk.of(2), registry,
                 launcher(dir, registry));
         assertEquals(2, outcome.started().size(), outcome.words());
         assertEquals(2, registry.live().size(), "held while they run");
@@ -65,16 +66,58 @@ class PooledRunsTest {
     }
 
     @Test
+    void aCountAndAnAllOrNoneThatFallsShortHoldAndStartNothing(@TempDir Path dir) {
+        RunRegistry registry = new RunRegistry(dir.resolve("live"), RunRegistry.Alive.PROCESSES);
+        PooledRuns.Launcher never = (runId, pooled) -> {
+            throw new AssertionError("nothing starts");
+        };
+
+        PooledRuns.Outcome counted = PooledRuns.start("bot", dir.resolve("bot"), read(FIRST, SECOND),
+                new SeveralAsk(3, SeveralAsk.How.COUNT, Map.of()), registry, never);
+        assertEquals(2, counted.dealing().rows().size());
+        assertTrue(counted.words().startsWith("2 of 3 can run: "), counted.words());
+        assertEquals(List.of(), counted.started());
+        assertEquals(List.of("", ""), counted.listed().stream().map(PooledRuns.Listed::runId).toList());
+
+        PooledRuns.Outcome none = PooledRuns.start("bot", dir.resolve("bot"), read(FIRST, SECOND),
+                new SeveralAsk(3, SeveralAsk.How.ALL_OR_NONE, Map.of()), registry, never);
+        assertEquals(List.of(), none.started());
+        assertTrue(none.words().startsWith("0 of 3 started: "), none.words());
+        assertTrue(none.words().endsWith("all or none was asked, so none started"), none.words());
+        assertEquals(List.of(), registry.live(), "nothing held");
+    }
+
+    @Test
+    @Timeout(60)
+    void allOrNoneStopsTheRunsItLaunchedWhenOneDoesNotStart(@TempDir Path dir) throws Exception {
+        RunRegistry registry = new RunRegistry(dir.resolve("live"), RunRegistry.Alive.PROCESSES);
+        PooledRuns.Launcher real = launcher(dir, registry);
+        List<String> launched = new ArrayList<>();
+        PooledRuns.Launcher secondFails = (runId, pooled) -> {
+            launched.add(runId);
+            if (launched.size() == 2) throw new IOException("no JVM");
+            return real.launch(runId, pooled);
+        };
+
+        PooledRuns.Outcome outcome = PooledRuns.start("bot", dir.resolve("bot"), read(FIRST, SECOND),
+                new SeveralAsk(2, SeveralAsk.How.ALL_OR_NONE, Map.of()), registry, secondFails);
+        assertEquals(List.of(), outcome.started(), outcome.words());
+        assertTrue(outcome.words().contains("did not start: no JVM"), outcome.words());
+        assertTrue(outcome.words().endsWith("all or none was asked, so none started"), outcome.words());
+        assertEquals(List.of(), registry.live(), "both freed");
+    }
+
+    @Test
     void aRunThatCrashesFreesItsRowForTheNextStart(@TempDir Path dir) throws Exception {
         RunRegistry registry = new RunRegistry(dir.resolve("live"), RunRegistry.Alive.PROCESSES);
         PoolSources.Read read = read(FIRST, SECOND);
 
-        PooledRuns.Outcome crashed = PooledRuns.start("bot", dir.resolve("bot"), read, 2, Map.of(), registry,
+        PooledRuns.Outcome crashed = PooledRuns.start("bot", dir.resolve("bot"), read, SeveralAsk.of(2), registry,
                 launcher(dir, registry, "crash"));
         for (PooledRuns.Started run : crashed.started()) assertEquals(9, finished(run.process()).exit());
         awaitEmpty(registry);
 
-        PooledRuns.Outcome again = PooledRuns.start("bot", dir.resolve("bot"), read, 2, Map.of(), registry,
+        PooledRuns.Outcome again = PooledRuns.start("bot", dir.resolve("bot"), read, SeveralAsk.of(2), registry,
                 launcher(dir, registry));
         assertEquals(2, again.started().size(), "both rows were freed: " + again.words());
         for (PooledRuns.Started run : again.started()) finished(run.process());
@@ -85,7 +128,7 @@ class PooledRunsTest {
     @Timeout(value = 90, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
     void ofTwoLiveRunsClaimingOneKeyOnlyOneGetsIt(@TempDir Path dir) throws Exception {
         RunRegistry registry = new RunRegistry(dir.resolve("live"), RunRegistry.Alive.PROCESSES);
-        PooledRuns.Outcome outcome = PooledRuns.start("bot", dir.resolve("bot"), read(FIRST, SECOND), 2, Map.of(),
+        PooledRuns.Outcome outcome = PooledRuns.start("bot", dir.resolve("bot"), read(FIRST, SECOND), SeveralAsk.of(2),
                 registry, launcher(dir, registry, "claim"));
         try {
             assertEquals(2, outcome.started().size(), outcome.words());
@@ -119,8 +162,8 @@ class PooledRunsTest {
     void aKeyACrashedRunClaimedIsFreeForTheNextRun(@TempDir Path dir) throws Exception {
         RunRegistry registry = new RunRegistry(dir.resolve("live"), RunRegistry.Alive.PROCESSES);
         for (int attempt = 1; attempt <= 2; attempt++) {
-            PooledRuns.Outcome outcome = PooledRuns.start("bot", dir.resolve("bot"), read(FIRST, SECOND), 1,
-                    Map.of(), registry, launcher(dir, registry, "claim-and-crash"));
+            PooledRuns.Outcome outcome = PooledRuns.start("bot", dir.resolve("bot"), read(FIRST, SECOND),
+                    SeveralAsk.of(1), registry, launcher(dir, registry, "claim-and-crash"));
             Finished run = finished(outcome.started().getFirst().process());
             assertEquals(9, run.exit(), run.output());
             assertTrue(run.output().contains("claimed=true"), "run " + attempt + ": " + run.output());
@@ -142,7 +185,7 @@ class PooledRunsTest {
         // Read before an edit the run's compile has: the pool lists another account now.
         PoolSources.Read read = read(FIRST, "account-3@example.com");
 
-        PooledRuns.Outcome outcome = PooledRuns.start("bot", dir.resolve("bot"), read, 1, Map.of(), registry,
+        PooledRuns.Outcome outcome = PooledRuns.start("bot", dir.resolve("bot"), read, SeveralAsk.of(1), registry,
                 launcher(dir, registry));
         Finished run = finished(outcome.started().getFirst().process());
         assertEquals(RunAgent.STOPPED, run.exit(), run.output());

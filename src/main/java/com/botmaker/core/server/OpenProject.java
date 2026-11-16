@@ -37,6 +37,7 @@ import com.botmaker.core.run.DebuggingService;
 import com.botmaker.core.run.RunCheck;
 import com.botmaker.core.run.RunTelemetry;
 import com.botmaker.core.run.claims.PooledRuns;
+import com.botmaker.core.run.claims.SeveralAsk;
 import com.botmaker.core.run.debug.DebugSnapshot;
 import com.botmaker.core.run.debug.DebugView;
 import com.botmaker.core.run.debug.FollowPacer;
@@ -542,16 +543,17 @@ public final class OpenProject implements AutoCloseable {
     private EditResult startSeveral(Request.RunSeveral several, ProjectState.Snapshot snapshot) {
         PooledRuns.Outcome outcome;
         try {
-            outcome = execution.startSeveral(snapshot, several.runs(), Map.of(), HostServices.forProject(config));
+            outcome = execution.startSeveral(snapshot, several.ask(), HostServices.forProject(config));
         } catch (PooledRuns.Refused refused) {
             return new EditResult.Refused(refused.getMessage());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return new EditResult.Refused("The start of several runs was interrupted.");
         }
-        tell(new CoreEvent.RunsStarted(several.token(), outcome.words(), outcome.started().stream()
-                .map(run -> new CoreEvent.RunsStarted.Started(run.row() + 1, run.runId(), run.picks())).toList(),
-                outcome.warnings(), outcome.offers()));
+        List<CoreEvent.RunsStarted.Started> runs = outcome.listed().stream()
+                .map(row -> new CoreEvent.RunsStarted.Started(row.row() + 1, row.runId(), row.picks())).toList();
+        tell(new CoreEvent.RunsStarted(several.token(), outcome.words(), runs, outcome.warnings(), outcome.offers(),
+                outcome.how() == SeveralAsk.How.COUNT));
         return new EditResult.Accepted(List.of());
     }
 

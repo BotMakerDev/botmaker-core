@@ -63,9 +63,11 @@ public final class PooledRuns {
      *                 decided while running, and counted into no capacity
      * @param offers   the plugins' ways to raise capacity when fewer started than asked, by title; listed, never run
      *                 by the start
+     * @param how      what the start was asked to do: for {@link SeveralAsk.How#COUNT}, nothing started and the
+     *                 dealing's rows are what could
      */
     public record Outcome(Dealer.Dealing dealing, List<Started> started, List<String> warnings, List<String> failed,
-                          List<String> claims, List<String> offers) {
+                          List<String> claims, List<String> offers, SeveralAsk.How how) {
 
         public Outcome {
             started = List.copyOf(started);
@@ -73,29 +75,55 @@ public final class PooledRuns {
             failed = List.copyOf(failed);
             claims = List.copyOf(claims);
             offers = List.copyOf(offers);
+            if (how == null) how = SeveralAsk.How.START;
         }
 
         /** This outcome, saying the keys {@code sites} claim are decided while running. */
         public Outcome claiming(List<String> sites) {
-            return new Outcome(dealing, started, warnings, failed, sites, offers);
+            return new Outcome(dealing, started, warnings, failed, sites, offers, how);
         }
 
         /** This outcome, listing {@code titles} as the ways to raise capacity. */
         public Outcome offering(List<String> titles) {
-            return new Outcome(dealing, started, warnings, failed, claims, titles);
+            return new Outcome(dealing, started, warnings, failed, claims, titles, how);
         }
 
-        /** {@code "2 of 3 started: …"}, the dealing's reasons, the failures, then what is decided while running. */
+        /**
+         * {@code "2 of 3 started: …"}, or {@code "2 of 3 can run: …"} for a count, the dealing's reasons, the failures,
+         * then what is decided while running.
+         */
         public String words() {
-            StringBuilder out = new StringBuilder(started.size() + " of " + dealing.asked() + " started");
-            List<String> why = new ArrayList<>(dealing.reasons().stream().map(Dealer.Reason::words).toList());
+            // A count's line is the dealing's own, its reasons included.
+            String head = how == SeveralAsk.How.COUNT ? dealing.words()
+                    : started.size() + " of " + dealing.asked() + " started";
+            List<String> why = new ArrayList<>();
+            if (how != SeveralAsk.How.COUNT) why.addAll(dealing.reasons().stream().map(Dealer.Reason::words).toList());
             why.addAll(failed);
+            if (how == SeveralAsk.How.ALL_OR_NONE && started.isEmpty()) why.add("all or none was asked, so none started");
             if (!claims.isEmpty()) {
                 why.add("decided while running: the keys claimed in " + String.join(", ", claims));
             }
-            if (!why.isEmpty()) out.append(": ").append(String.join("; ", why));
-            return out.toString();
+            if (why.isEmpty()) return head;
+            return head + (head.contains(": ") ? "; " : ": ") + String.join("; ", why);
         }
+
+        /** The rows to tell: each run started, or for a count each row that could, with no run id. */
+        public List<Listed> listed() {
+            if (how == SeveralAsk.How.COUNT) {
+                return dealing.rows().stream().map(row -> new Listed(row.index(), "", row.picks())).toList();
+            }
+            return started.stream().map(run -> new Listed(run.row(), run.runId(), run.picks())).toList();
+        }
+    }
+
+    /**
+     * One row an outcome tells.
+     *
+     * @param row   its index
+     * @param runId the run's id; empty for a count's row, which started nothing
+     * @param picks what it was dealt, by each pool's parameter
+     */
+    public record Listed(int row, String runId, Map<String, List<String>> picks) {
     }
 
     /**
@@ -114,22 +142,25 @@ public final class PooledRuns {
     }
 
     /**
-     * Deals {@code runs} rows of {@code read}'s pools for {@code bot}, holds them, keeps what was dealt in the bot's
-     * {@code .botmaker/}, and starts a run per row.
+     * Deals {@code ask}'s rows of {@code read}'s pools for {@code bot}, holds them, keeps what was dealt in the bot's
+     * {@code .botmaker/}, and starts a run per row. A count deals under the same lock and holds, keeps and starts
+     * nothing; all or none starts none unless every run asked for is dealt, held and launched, and stops those it
+     * launched when one fails.
      *
      * @param project the bot's folder, where {@link DealHistory} is kept
-     * @param pins    by row index, the picks fixed by hand
      */
-    public static Outcome start(String bot, Path project, PoolSources.Read read, int runs,
-                                Map<Integer, Map<String, List<String>>> pins, RunRegistry registry,
-                                Launcher launcher) {
+    public static Outcome start(String bot, Path project, PoolSources.Read read, SeveralAsk ask,
+                                RunRegistry registry, Launcher launcher) {
         DealHistory history = DealHistory.of(project);
+        boolean allOrNone = ask.how() == SeveralAsk.How.ALL_OR_NONE;
         List<String> failed = new ArrayList<>();
         record Held(Dealer.Row row, String runId) {}
         List<Held> held = new ArrayList<>();
         Dealer.Dealing dealing = registry.locked(locked -> {
-            Dealer.Dealing dealt = Dealer.deal(Dealer.Request.of(read.pools(), runs, locked.live())
-                    .pinned(pins).after(history));
+            Dealer.Dealing dealt = Dealer.deal(Dealer.Request.of(read.pools(), ask.runs(), locked.live())
+                    .pinned(ask.pins()).after(history));
+            if (ask.how() == SeveralAsk.How.COUNT) return dealt;
+            if (allOrNone && !dealt.complete()) return dealt;
             for (Dealer.Row row : dealt.rows()) {
                 String runId = RunRegistry.newRunId();
                 Optional<RunRegistry.Conflict> conflict = locked.hold(LiveRun.ofThisProcess(runId, bot,
@@ -137,8 +168,16 @@ public final class PooledRuns {
                 if (conflict.isPresent()) failed.add("run " + (row.index() + 1) + ": " + conflict.get().words());
                 else held.add(new Held(row, runId));
             }
+            if (allOrNone && !failed.isEmpty()) {
+                for (Held one : held) locked.release(one.runId());
+                held.clear();
+            }
             return dealt;
         });
+        if (held.isEmpty() && ask.how() != SeveralAsk.How.START) {
+            // Nothing held: a count, or all or none that fell short. Nothing is kept as the last dealing either.
+            return new Outcome(dealing, List.of(), read.warnings(), failed, List.of(), List.of(), ask.how());
+        }
         List<Started> started = new ArrayList<>();
         int next = 0;
         try {
@@ -151,6 +190,16 @@ public final class PooledRuns {
                 } catch (IOException | RuntimeException e) {
                     registry.release(one.runId());
                     failed.add("run " + (one.row().index() + 1) + " did not start: " + e.getMessage());
+                    if (allOrNone) {
+                        // One did not start: the ones that did are stopped, and the rest freed below.
+                        for (Started run : started) {
+                            run.process().destroy();
+                            registry.release(run.runId());
+                        }
+                        started.clear();
+                        next++;
+                        break;
+                    }
                     continue;
                 }
                 // Given to the run's own process: freed when it ends, even when this core has gone.
@@ -162,6 +211,6 @@ public final class PooledRuns {
             // What threw left the rest the core's own, held as long as it lives: freed now.
             for (int i = next; i < held.size(); i++) registry.release(held.get(i).runId());
         }
-        return new Outcome(dealing, started, read.warnings(), failed, List.of(), List.of());
+        return new Outcome(dealing, started, read.warnings(), failed, List.of(), List.of(), ask.how());
     }
 }

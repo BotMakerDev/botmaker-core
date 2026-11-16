@@ -13,6 +13,7 @@ import com.botmaker.core.plugin.HostServices;
 import com.botmaker.core.plugin.PluginHost;
 import com.botmaker.core.plugin.UiPort;
 import com.botmaker.core.run.RunEntries;
+import com.botmaker.core.run.claims.SeveralAsk;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.modelcontextprotocol.json.McpJsonMapper;
@@ -452,12 +453,12 @@ public final class Projects implements AutoCloseable, CoreHome.Host {
     }
 
     @Override
-    public CoreEvent.RunsStarted runSeveral(int runs) {
+    public CoreEvent.RunsStarted runSeveral(SeveralAsk ask) {
         String token = UUID.randomUUID().toString();
         several.put(token, Optional.empty());
         Optional<CoreEvent.RunsStarted> started;
         try {
-            asked(id -> new Request.RunSeveral(id, runs, token));
+            asked(id -> new Request.RunSeveral(id, ask, token));
         } finally {
             // Told before its answer, and heard as it was told: in by now when it was told at all.
             started = several.remove(token);

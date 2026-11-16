@@ -25,6 +25,7 @@ import com.botmaker.plugin.api.run.PluginPool;
 import com.botmaker.plugin.host.LoadedPlugin;
 import com.botmaker.core.run.claims.PooledRuns;
 import com.botmaker.core.run.claims.RunRegistry;
+import com.botmaker.core.run.claims.SeveralAsk;
 import com.botmaker.core.run.claims.SeveralRuns;
 import com.botmaker.core.services.BotSources;
 import com.botmaker.core.run.trial.TrialCaller;
@@ -38,7 +39,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -71,6 +71,8 @@ public class CodeExecutionService {
     private final AtomicBoolean isRunning = new AtomicBoolean(false);
     /** Stop was pressed while the run was still compiling: it ends before starting the bot. */
     private final AtomicBoolean cancelled = new AtomicBoolean(false);
+    /** Held through a count of several runs, which compiles into its own folder: one count at a time. */
+    private final Object counting = new Object();
     /** A try runs in {@link #tries}: a stop interrupts it there rather than killing a process. */
     private volatile boolean trying;
     private WarmTries tries;
@@ -646,15 +648,15 @@ public class CodeExecutionService {
      *
      * <p>The plugins' pools are dealt first, each where the bot binds its parameter, then the bot's own.
      *
-     * @param pins     by row index, the picks fixed by hand
+     * @param ask      how many, how they start (a count starts none), and the picks fixed by hand
      * @param services the project's services: what a plugin's pool reads this PC's data through, and the bot's values
      *                 a conditional parameter's condition reads
      * @throws PooledRuns.Refused when the bot does not compile, a pooled method no longer fits the compile, a plugin's
      *                            pool fails, or one run already runs
      */
-    public PooledRuns.Outcome startSeveral(ProjectState.Snapshot snapshot, int runs,
-                                           Map<Integer, Map<String, List<String>>> pins, StudioServices services)
+    public PooledRuns.Outcome startSeveral(ProjectState.Snapshot snapshot, SeveralAsk ask, StudioServices services)
             throws PooledRuns.Refused, InterruptedException {
+        if (ask.how() == SeveralAsk.How.COUNT) return countSeveral(snapshot, ask, services);
         // Held through the compile, as one run holds it: no run or second start compiles beside this one.
         if (!isRunning.compareAndSet(false, true)) {
             throw new PooledRuns.Refused("A run is going: stop it before starting several.");
@@ -665,7 +667,7 @@ public class CodeExecutionService {
                 // Their JVMs still load classes from the compile a new one would overwrite.
                 throw new PooledRuns.Refused("Several runs are going: stop them before starting more.");
             }
-            return startSeveralCompiled(snapshot, runs, pins, services);
+            return startSeveralCompiled(snapshot, ask, services);
         } finally {
             isRunning.set(false);
         }
@@ -675,14 +677,14 @@ public class CodeExecutionService {
      * The pools a dealing reads after a compile: each plugin's whose parameter the bot binds and that applies to it
      * now (a conditional one whose condition does not hold is left out), then the bot's own.
      */
-    private PoolSources.Read pools(StudioServices services, List<PoolSources.Declared> plugins)
+    private PoolSources.Read pools(StudioServices services, List<PoolSources.Declared> plugins, Path classes)
             throws PooledRuns.Refused {
         // With no host services a plugin's pool has nothing to read its candidates from: the bot's own only.
         if (services == null) return PoolSources.ofBot(bot(), JavaParameters.pools(config, state));
         HostParamScope scope = HostParamScope.over(services.pluginValues());
         try {
             List<JavaParameter> applying = JavaParameters.scan(config, state).stream().filter(scope::shown).toList();
-            return PoolSources.of(plugins, BoundMethods.of(applying, config.sourceRoot(), config.compiledOutputPath()),
+            return PoolSources.of(plugins, BoundMethods.of(applying, config.sourceRoot(), classes),
                     PluginHost.grammar(), services, bot(), JavaParameters.pools(config, state));
         } catch (Dealer.Failed e) {
             throw new PooledRuns.Refused(e.getMessage());
@@ -707,8 +709,7 @@ public class CodeExecutionService {
         return plugins;
     }
 
-    private PooledRuns.Outcome startSeveralCompiled(ProjectState.Snapshot snapshot, int runs,
-                                                    Map<Integer, Map<String, List<String>>> pins,
+    private PooledRuns.Outcome startSeveralCompiled(ProjectState.Snapshot snapshot, SeveralAsk ask,
                                                     StudioServices services)
             throws PooledRuns.Refused, InterruptedException {
         try {
@@ -719,7 +720,7 @@ public class CodeExecutionService {
             throw new PooledRuns.Refused("The bot could not be compiled: " + e.getMessage());
         }
         List<PoolSources.Declared> plugins = services == null ? List.of() : declaredPools();
-        PoolSources.Read read = pools(services, plugins);
+        PoolSources.Read read = pools(services, plugins, config.compiledOutputPath());
         Optional<String> unfit = PooledRuns.unfit(config.compiledOutputPath(), read);
         if (unfit.isPresent()) throw new PooledRuns.Refused(unfit.get());
         String classpath = buildRuntimeClasspath(snapshot);
@@ -728,7 +729,7 @@ public class CodeExecutionService {
         Path outputs = SeveralRuns.outputs(config.projectPath());
         RunRegistry registry = RunRegistry.ofThisPc();
         readyHostValues();
-        PooledRuns.Outcome outcome = PooledRuns.start(bot(), config.projectPath(), read, runs, pins, registry,
+        PooledRuns.Outcome outcome = PooledRuns.start(bot(), config.projectPath(), read, ask, registry,
                 (runId, pooled) -> {
                     BotJvm.Agent agent = BotJvm.pooledAgent(config, state.getSettings(), runId, pooled,
                             registry.folder());
@@ -754,12 +755,46 @@ public class CodeExecutionService {
                     });
                     return process;
                 });
+        return told(outcome, plugins, services, config.compiledOutputPath());
+    }
+
+    /**
+     * How many runs could start, and what each would be dealt, starting none (plan run-claims, phase 12): compiled
+     * into its own folder, so a count asked while runs go overwrites no class they load and waits for none of them.
+     * One count at a time.
+     */
+    private PooledRuns.Outcome countSeveral(ProjectState.Snapshot snapshot, SeveralAsk ask, StudioServices services)
+            throws PooledRuns.Refused, InterruptedException {
+        synchronized (counting) {
+            Path classes = config.projectPath().resolve("target").resolve("botmaker-count");
+            try {
+                if (!compileAndWait(snapshot, classes)) {
+                    throw new PooledRuns.Refused("The bot did not compile: see the Run tab.");
+                }
+            } catch (IOException e) {
+                throw new PooledRuns.Refused("The bot could not be compiled: " + e.getMessage());
+            }
+            List<PoolSources.Declared> plugins = services == null ? List.of() : declaredPools();
+            PoolSources.Read read = pools(services, plugins, classes);
+            Optional<String> unfit = PooledRuns.unfit(classes, read);
+            if (unfit.isPresent()) throw new PooledRuns.Refused(unfit.get());
+            PooledRuns.Outcome outcome = PooledRuns.start(bot(), config.projectPath(), read, ask,
+                    RunRegistry.ofThisPc(), (runId, pooled) -> {
+                        throw new IllegalStateException("a count starts no run");
+                    });
+            return told(outcome, plugins, services, classes);
+        }
+    }
+
+    /** {@code outcome} with the plugins' offers when it fell short and the bot's claims, said in the status. */
+    private PooledRuns.Outcome told(PooledRuns.Outcome outcome, List<PoolSources.Declared> plugins,
+                                    StudioServices services, Path classes) {
         if (!outcome.dealing().complete()) {
             outcome = outcome.offering(PoolSources.offers(plugins, outcome.dealing(), services));
         }
         String unlisted = "";
         try {
-            outcome = outcome.claiming(ClaimCalls.in(config.compiledOutputPath()));
+            outcome = outcome.claiming(ClaimCalls.in(classes));
         } catch (RuntimeException e) {
             // Only words: the runs are going, and each one's claims are checked as it makes them.
             unlisted = "; the bot's claims could not be listed: " + e.getMessage();

@@ -7,6 +7,7 @@ import com.botmaker.core.edit.EditResult;
 import com.botmaker.core.edit.HistoryStep;
 import com.botmaker.core.event.CoreEvent;
 import com.botmaker.core.plugin.PluginWrite;
+import com.botmaker.core.run.claims.SeveralAsk;
 import com.botmaker.core.run.trial.TrialAsk;
 import com.botmaker.java.grammar.JavaValue;
 import org.junit.jupiter.api.Test;
@@ -41,7 +42,9 @@ class RequestJsonTest {
                 new Request.Compile(11),
                 new Request.Run(12),
                 new Request.RunEntry(13, "Explore map", "com.example.ExploreMap"),
-                new Request.RunSeveral(30, 3, "5f0c-ab12"),
+                new Request.RunSeveral(30, SeveralAsk.of(3), "5f0c-ab12"),
+                new Request.RunSeveral(31, SeveralAsk.pinned(3, SeveralAsk.How.COUNT,
+                        List.of("2:INSTANCE=Instance.named(\"ld-1\")")), "5f0c-ab13"),
                 new Request.Try(14, new TrialAsk.OnItsOwn("com.mybot", "Mybot", "ore", true)),
                 new Request.Try(15, new TrialAsk.OnItsOwn("", "Mybot.Inner", "ore", false)),
                 new Request.Try(21, new TrialAsk.OneStatement("com/mybot/MyBot.java", "0.1.2", Map.of(),

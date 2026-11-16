@@ -9,6 +9,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- **A dry run, all or none, and pins for several runs** (2026-11-16): `run_bot {runs}` takes `dry_run` (says how
+  many can run and what each would be dealt, "7 of 11 can run: …", holding and starting nothing), `all_or_none`
+  (starts none unless all can) and `pins` (`pool=value` or `run:pool=value`, the pool and value as a dry run's picks
+  write them). `Request.RunSeveral` carries a `run.claims.SeveralAsk` in place of its count; a count's
+  `RunsStarted` lists each row that could run, with no run id.
 - **Several runs from the MCP** (2026-11-16): `run_bot {runs: k}` starts k runs dealt by the bot's pools and answers
   what started, each run's id and picks, the warnings and what a plugin offers to cover a shortfall (listed, never
   run); `run_state`, `stop` and `read_trace` take a `run_id`. On the channel, `Request.RunSeveral` and
