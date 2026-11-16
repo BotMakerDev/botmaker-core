@@ -5,6 +5,12 @@ All notable changes to `botmaker-core`.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this module uses
 [semantic versioning](https://semver.org/). `release.sh` refuses to cut a version with no section here.
 
+## [Unreleased]
+
+### Fixed
+
+- A tag's release job no longer fails: it adds its files to the release page sluice wrote instead of refusing it.
+
 ## [0.2.0] — 2026-11-16
 
 ### Added
