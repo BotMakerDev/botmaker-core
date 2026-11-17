@@ -43,15 +43,15 @@ final class RunTools {
     record Run(@Describe(value = "a run a plugin declares, by its toolbar title (Explore map); the bot's main when "
             + "not given", optional = true) String entry,
                @Describe(value = WAIT, optional = true) @Key("wait") Integer seconds,
-               @Describe(value = "how many runs of the bot to start at once, each dealt its own row of the bot's "
-                       + "pools; the answer lists each run's id. One ordinary run when not given", optional = true)
+               @Describe(value = "runs started at once, each dealt its own row of the bot's pools; one when not given",
+                       optional = true)
                Integer runs,
-               @Describe(value = "with runs: true only says how many can run and what each would be dealt, starting "
-                       + "none", optional = true) Boolean dry_run,
-               @Describe(value = "with runs: true starts none unless every run asked for can run", optional = true)
+               @Describe(value = "with runs: say what each would be dealt, starting none", optional = true)
+               Boolean dry_run,
+               @Describe(value = "with runs: start none unless all can", optional = true)
                Boolean all_or_none,
-               @Describe(value = "with runs: picks fixed by hand, each pool=value or run:pool=value (run from 1, the "
-                       + "first when not given), the pool and value as a dry run's picks write them", optional = true)
+               @Describe(value = "with runs: fixed picks, pool=value or run:pool=value (run from 1), as a dry run "
+                       + "writes them", optional = true)
                List<String> pins) {
 
         /** What a start of {@code runs} several runs asks; the runs checked by the caller. */
@@ -63,7 +63,7 @@ final class RunTools {
     }
 
     /** A run id, as {@code run_bot}'s answer gives one. */
-    private static final String RUN_ID = "a run id run_bot {runs} gave: that one of several runs";
+    private static final String RUN_ID = "a run id run_bot {runs} gave";
 
     record State(@Describe(value = RUN_ID, optional = true) String run_id) {
     }
@@ -144,13 +144,12 @@ final class RunTools {
     }
 
     private static AssistantTool<?> stop(BotRuns runs, RunLog log) {
-        return said("stop", "Stop the run, the try or the debug session; with run_id, that one of several runs.",
+        return said("stop", "Stop the run, the try or the debug session.",
                 Stop.class, call -> stopped(runs, log, call.run_id()));
     }
 
     private static AssistantTool<?> runState(BotRuns runs, RunLog log) {
-        return said("run_state", "Say whether something runs now, and for how long; with run_id, whether that one "
-                + "of several runs still goes.", State.class, call -> state(runs, log, call.run_id()));
+        return said("run_state", "Say whether something runs now, and for how long.",State.class, call -> state(runs, log, call.run_id()));
     }
 
     /** {@code runId}'s state, or the run's with this bot's several runs after it. */
