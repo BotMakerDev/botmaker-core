@@ -169,8 +169,9 @@ public final class CoreClient implements AutoCloseable {
         }
     }
 
-    public EditResult runEntry(String title, String mainClass) throws IOException {
-        return ask(new Request.RunEntry(ids.incrementAndGet(), title, mainClass), ANSWER_TIMEOUT);
+    /** A plugin's declared run, with {@code arguments} as {@code RunEntry.arguments} gave them ({@code ""}: none). */
+    public EditResult runEntry(String title, String mainClass, String arguments) throws IOException {
+        return ask(new Request.RunEntry(ids.incrementAndGet(), title, mainClass, arguments), ANSWER_TIMEOUT);
     }
 
     /** A ▶ Try, planned by the core; see {@link Request.Try}. */

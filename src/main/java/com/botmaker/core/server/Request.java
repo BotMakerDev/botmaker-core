@@ -82,12 +82,25 @@ public sealed interface Request {
         }
     }
 
-    /** As {@link Run}, with a plugin's declared run {@code title} as the JVM's main, {@code mainClass}. */
-    record RunEntry(long id, String title, String mainClass) implements Request {
+    /**
+     * As {@link Run}, with a plugin's declared run {@code title} as the JVM's main, {@code mainClass}, and its
+     * {@code arguments} as {@code RunEntry.arguments} checked them ({@code ""}: none).
+     */
+    record RunEntry(long id, String title, String mainClass, String arguments) implements Request {
         public RunEntry {
             if (mainClass == null || !SourceVersion.isName(mainClass)) {
                 throw new IllegalArgumentException("a declared run names its class");
             }
+            arguments = arguments == null ? "" : arguments;
+            // RunEntry.arguments' text, Base64: nothing else reaches the run's command line.
+            if (!arguments.matches("[A-Za-z0-9_-]*")) {
+                throw new IllegalArgumentException("a run's arguments are the text RunEntry.arguments gives");
+            }
+        }
+
+        /** A start with no arguments, as a toolbar button or a plugin's window asks it. */
+        public RunEntry(long id, String title, String mainClass) {
+            this(id, title, mainClass, "");
         }
     }
 

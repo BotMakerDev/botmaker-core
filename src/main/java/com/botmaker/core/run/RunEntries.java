@@ -3,6 +3,7 @@
 
 package com.botmaker.core.run;
 
+import com.botmaker.plugin.api.assist.ToolSchema;
 import com.botmaker.plugin.api.run.RunEntry;
 import com.botmaker.plugin.host.LoadedPlugin;
 import com.botmaker.plugin.host.PluginCoordinate;
@@ -24,9 +25,39 @@ public final class RunEntries {
 
     private RunEntries() {}
 
-    /** One declared run, with the plugin that declared it; {@code onBar} false for one its plugin's window starts. */
-    public record Declared(PluginCoordinate plugin, String pluginName, Path jar, String title, String mainClass,
-                           boolean onBar) {}
+    /** One declared run, with the plugin that declared it. */
+    public record Declared(PluginCoordinate plugin, String pluginName, Path jar, RunEntry entry) {
+
+        public String title() {
+            return entry.title();
+        }
+
+        public String mainClass() {
+            return entry.mainClass();
+        }
+
+        /**
+         * Whether it gets a toolbar button: not when its plugin's window starts it, nor while it needs arguments, which
+         * a button cannot give until Studio has a form for them (web discovery plan, phase 4).
+         */
+        public boolean onBar() {
+            return entry.onBar() && !entry.needsArguments();
+        }
+
+        /**
+         * Its title and what it takes, one line: {@code Keep exploring (minutes: integer, optional — minutes at most;
+         * …)}; the title alone for one that takes nothing.
+         */
+        public String described() {
+            List<ToolSchema.Field> fields = entry.schema().fields();
+            if (fields.isEmpty()) return title();
+            return title() + " (" + fields.stream().map(f -> f.name() + ": " + f.kind().jsonType()
+                    + (f.choices().isEmpty() ? "" : " " + String.join("|", f.choices()))
+                    + (f.optional() ? ", optional" : "")
+                    + (f.description().isEmpty() ? "" : " — " + f.description())).collect(Collectors.joining("; "))
+                    + ")";
+        }
+    }
 
     /** Every loaded plugin's runs, in plugin order; a plugin that cannot list its own costs only those. */
     public static List<Declared> all() {
@@ -36,8 +67,7 @@ public final class RunEntries {
                 List<RunEntry> entries = plugin.plugin().runEntries();
                 if (entries == null) continue;
                 for (RunEntry entry : entries) {
-                    out.add(new Declared(plugin.coordinate(), plugin.name(), plugin.jar(), entry.title(),
-                            entry.mainClass(), entry.onBar()));
+                    out.add(new Declared(plugin.coordinate(), plugin.name(), plugin.jar(), entry));
                 }
             } catch (RuntimeException | LinkageError e) {
                 // Includes a plugin built against a contract without runs: it declares none.
@@ -71,7 +101,7 @@ public final class RunEntries {
         List<Declared> declared = all();
         return named(declared, title).orElseThrow(() -> new IllegalArgumentException(
                 "No plugin declares a run titled '" + title.strip() + "'. Declared: " + (declared.isEmpty() ? "none"
-                        : declared.stream().map(Declared::title).collect(Collectors.joining(", "))) + "."));
+                        : declared.stream().map(Declared::described).collect(Collectors.joining(", "))) + "."));
     }
 
     private static String key(String title) {

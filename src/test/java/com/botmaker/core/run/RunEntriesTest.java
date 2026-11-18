@@ -3,6 +3,7 @@
 
 package com.botmaker.core.run;
 
+import com.botmaker.plugin.api.run.RunEntry;
 import com.botmaker.plugin.host.PluginCoordinate;
 import org.junit.jupiter.api.Test;
 
@@ -14,9 +15,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RunEntriesTest {
 
+    public static final class Main {
+        public static void main(String[] args) {
+        }
+    }
+
     private static RunEntries.Declared declared(String artifact, String title) {
-        return new RunEntries.Declared(PluginCoordinate.parse("com.example:" + artifact), artifact, null, title,
-                "com.example.Main", true);
+        return new RunEntries.Declared(PluginCoordinate.parse("com.example:" + artifact), artifact, null,
+                RunEntry.of(title, Main::main));
     }
 
     @Test

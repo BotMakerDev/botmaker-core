@@ -8,6 +8,10 @@ import com.botmaker.core.project.ProjectConfig;
 import com.botmaker.core.project.ProjectFile;
 import com.botmaker.core.project.ProjectState;
 import com.botmaker.plugin.api.TraceLine;
+import com.botmaker.plugin.api.assist.Describe;
+import com.botmaker.plugin.api.run.RunArguments;
+import com.botmaker.plugin.api.run.RunEntry;
+import com.botmaker.plugin.host.PluginCoordinate;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -15,6 +19,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -195,6 +200,42 @@ class CodeExecutionServiceTest {
                 launch.tail("classes:deps"));
         assertEquals(List.of("-cp", "classes", "com.mybot.Bot"),
                 new CodeExecutionService.Launch(null, "com.mybot.Bot", List.of()).tail("classes"));
+    }
+
+    public static final class KeepExploring {
+        public static void main(String[] args) {
+        }
+    }
+
+    public record Budget(@Describe(value = "minutes", optional = true) Integer minutes,
+                         @Describe(value = "screens", optional = true) Integer maxScreens) {
+    }
+
+    /**
+     * Keep exploring started with {@code {"minutes": 1}}: the arguments, checked by what the entry takes, reach the
+     * run's JVM as one property its main reads back, the field left out null.
+     */
+    @Test
+    void anEntryStartedWithArgumentsHandsThemToItsRun() {
+        RunEntries.Declared entry = new RunEntries.Declared(PluginCoordinate.parse("com.example:sdk"), "sdk", null,
+                RunEntry.of("Keep exploring", KeepExploring::main).takes(Budget.class));
+        // As run_bot's args {"minutes": 1} reach it once read (RunToolsTest reads the JSON).
+        String arguments = entry.entry().arguments(Map.of("minutes", 1));
+        List<String> tail = new CodeExecutionService.Launch(entry.title(), entry.mainClass(), List.of("com.mybot.Sdk"),
+                arguments).tail("classes");
+
+        String prefix = "-D" + RunArguments.PROPERTY + "=";
+        assertTrue(tail.getFirst().startsWith(prefix), tail.toString());
+        assertEquals(List.of("-cp", "classes", KeepExploring.class.getName(), "com.mybot.Sdk"),
+                tail.subList(1, tail.size()));
+        String before = System.getProperty(RunArguments.PROPERTY);
+        System.setProperty(RunArguments.PROPERTY, tail.getFirst().substring(prefix.length()));
+        try {
+            assertEquals(new Budget(1, null), RunArguments.read(Budget.class));
+        } finally {
+            if (before == null) System.clearProperty(RunArguments.PROPERTY);
+            else System.setProperty(RunArguments.PROPERTY, before);
+        }
     }
 
     // ---- Stopping ----

@@ -451,8 +451,8 @@ public final class Projects implements AutoCloseable, CoreHome.Host {
     }
 
     @Override
-    public String runEntry(RunEntries.Declared entry) {
-        return started(entry.title(), id -> new Request.RunEntry(id, entry.title(), entry.mainClass()));
+    public String runEntry(RunEntries.Declared entry, String arguments) {
+        return started(entry.title(), id -> new Request.RunEntry(id, entry.title(), entry.mainClass(), arguments));
     }
 
     @Override

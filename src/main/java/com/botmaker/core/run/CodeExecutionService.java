@@ -25,6 +25,7 @@ import com.botmaker.core.run.claims.Dealer;
 import com.botmaker.core.run.claims.PoolSources;
 import com.botmaker.plugin.api.StudioServices;
 import com.botmaker.plugin.api.run.PluginPool;
+import com.botmaker.plugin.api.run.RunArguments;
 import com.botmaker.plugin.host.LoadedPlugin;
 import com.botmaker.core.run.claims.PooledRuns;
 import com.botmaker.core.run.claims.RunRegistry;
@@ -93,17 +94,29 @@ public class CodeExecutionService {
 
     /**
      * What a run's JVM starts: the bot's {@code main} (no {@code title}), or a plugin's declared run
-     * ({@link #runEntry}) with the bot's value holders as {@code args}.
+     * ({@link #runEntry}) with the bot's value holders as {@code args} and its {@code arguments} as
+     * {@code RunEntry.arguments} gave them ({@code ""}: none).
      */
-    public record Launch(String title, String mainClass, List<String> args) {
+    public record Launch(String title, String mainClass, List<String> args, String arguments) {
 
         public Launch {
             args = List.copyOf(args);
+            arguments = arguments == null ? "" : arguments;
         }
 
-        /** The command line's end: {@code -cp <classpath> <mainClass> <args…>}. */
+        /** The bot's own {@code main}, or an entry started with no arguments. */
+        public Launch(String title, String mainClass, List<String> args) {
+            this(title, mainClass, args, "");
+        }
+
+        /**
+         * The command line's end: {@code [-Dbotmaker.run.arguments=<text>] -cp <classpath> <mainClass> <args…>}, the
+         * property only for a run given arguments ({@link RunArguments#PROPERTY}).
+         */
         public List<String> tail(String classpath) {
-            List<String> tail = new ArrayList<>(List.of("-cp", classpath, mainClass));
+            List<String> tail = new ArrayList<>();
+            if (!arguments.isEmpty()) tail.add("-D" + RunArguments.PROPERTY + "=" + arguments);
+            tail.addAll(List.of("-cp", classpath, mainClass));
             tail.addAll(args);
             return tail;
         }
@@ -160,11 +173,13 @@ public class CodeExecutionService {
     /**
      * Runs a plugin's declared run {@code title} as {@link #runCode} runs the bot — compile, version, run folder,
      * telemetry, the end-of-run dialog — with {@code mainClass} as the JVM's main and the bot's value holders
-     * ({@link TrialCaller#holderBinaryNames}) as its arguments. Call it on the FX thread: the sources are read now.
+     * ({@link TrialCaller#holderBinaryNames}) as its arguments, and {@code arguments}, as {@code RunEntry.arguments}
+     * gave them, its {@code RunArguments}. Call it on the FX thread: the sources are read now.
      */
-    public void runEntry(ProjectState.Snapshot snapshot, String title, String mainClass) {
+    public void runEntry(ProjectState.Snapshot snapshot, String title, String mainClass, String arguments) {
         Supplier<BotIndex> index = BotSources.prepareIndex(config, state);
-        launch(snapshot, null, null, () -> new Launch(title, mainClass, TrialCaller.holderBinaryNames(index.get())));
+        launch(snapshot, null, null, () -> new Launch(title, mainClass, TrialCaller.holderBinaryNames(index.get()),
+                arguments));
     }
 
     /**

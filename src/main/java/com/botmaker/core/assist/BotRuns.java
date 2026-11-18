@@ -25,8 +25,11 @@ public interface BotRuns {
     /** ▶ Run the bot, as the toolbar does. */
     String runBot();
 
-    /** ▶ Run {@code entry}, a plugin's declared run, instead of the bot's {@code main}, as its toolbar button does. */
-    String runEntry(RunEntries.Declared entry);
+    /**
+     * ▶ Run {@code entry}, a plugin's declared run, instead of the bot's {@code main}, as its toolbar button does,
+     * with {@code arguments} as {@code RunEntry.arguments} checked them ({@code ""}: none).
+     */
+    String runEntry(RunEntries.Declared entry, String arguments);
 
     /**
      * Compiles once and starts the runs {@code ask} asks for, each dealt a row of its pools (spec

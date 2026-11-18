@@ -8,17 +8,23 @@ import com.botmaker.core.run.RunEntries;
 import com.botmaker.core.run.claims.RunRegistry;
 import com.botmaker.core.run.claims.SeveralAsk;
 import com.botmaker.core.run.claims.SeveralRuns;
+import com.botmaker.plugin.api.assist.Describe;
+import com.botmaker.plugin.api.run.RunEntry;
+import com.botmaker.plugin.host.PluginCoordinate;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -40,7 +46,7 @@ class RunToolsTest {
             List.of(), List.of("Create 1 instance"), true);
 
     private static RunTools.Run runs(Integer runs) {
-        return new RunTools.Run(null, null, runs, null, null, null);
+        return new RunTools.Run(null, null, runs, null, null, null, null);
     }
 
     /** A bot whose several runs are dealt {@code started}, its live runs in a registry of the test's own. */
@@ -60,7 +66,7 @@ class RunToolsTest {
         }
 
         @Override
-        public String runEntry(RunEntries.Declared entry) {
+        public String runEntry(RunEntries.Declared entry, String arguments) {
             return "Started " + entry;
         }
 
@@ -103,29 +109,34 @@ class RunToolsTest {
         assertThrows(IllegalArgumentException.class, () -> RunTools.run(bot, idleLog(), runs(0)));
         assertThrows(IllegalArgumentException.class, () -> RunTools.run(bot, idleLog(), runs(SeveralRuns.MOST + 1)));
         assertThrows(IllegalArgumentException.class, () -> RunTools.run(bot, idleLog(),
-                new RunTools.Run("Explore map", null, 2, null, null, null)));
+                new RunTools.Run("Explore map", null, 2, null, null, null, null)));
         assertThrows(IllegalArgumentException.class, () -> RunTools.run(bot, idleLog(),
-                new RunTools.Run(null, 30, 2, null, null, null)));
+                new RunTools.Run(null, null, 2, null, null, null, "{\"minutes\": 1}")));
         assertThrows(IllegalArgumentException.class, () -> RunTools.run(bot, idleLog(),
-                new RunTools.Run(null, null, 2, null, null, List.of("5:Sdk#instance=x"))));
+                new RunTools.Run(null, 30, 2, null, null, null, null)));
+        assertThrows(IllegalArgumentException.class, () -> RunTools.run(bot, idleLog(),
+                new RunTools.Run(null, null, 2, null, null, List.of("5:Sdk#instance=x"), null)));
         // A dry run, all or none and pins are a start of several runs' only.
         assertThrows(IllegalArgumentException.class, () -> RunTools.run(bot, idleLog(),
-                new RunTools.Run(null, null, null, true, null, null)));
+                new RunTools.Run(null, null, null, true, null, null, null)));
         assertThrows(IllegalArgumentException.class, () -> RunTools.run(bot, idleLog(),
-                new RunTools.Run(null, null, null, null, null, List.of("Sdk#instance=x"))));
+                new RunTools.Run(null, null, null, null, null, List.of("Sdk#instance=x"), null)));
+        // The bot's main takes no arguments.
+        assertThrows(IllegalArgumentException.class, () -> RunTools.run(bot, idleLog(),
+                new RunTools.Run(null, null, null, null, null, null, "{\"minutes\": 1}")));
         assertEquals(null, bot.asked);
     }
 
     @Test
     void aDryRunListsWhatCouldRunWithNoRunIdAndPinsAndAllOrNoneReachTheStart() {
         Fake bot = new Fake();
-        String answer = RunTools.run(bot, idleLog(), new RunTools.Run(null, null, 2, true, null, null));
+        String answer = RunTools.run(bot, idleLog(), new RunTools.Run(null, null, 2, true, null, null, null));
         assertEquals(SeveralAsk.How.COUNT, bot.asked.how());
         assertTrue(answer.startsWith("1 of 2 can run: 1 instance missing.\n- run 1: Sdk#instance = "), answer);
         assertTrue(!answer.contains("read_trace"), "nothing started to read: " + answer);
 
         RunTools.run(bot, idleLog(), new RunTools.Run(null, null, 2, null, true,
-                List.of("2:Sdk#instance=Instance.named(\"ld-2\")")));
+                List.of("2:Sdk#instance=Instance.named(\"ld-2\")"), null));
         assertEquals(new SeveralAsk(2, SeveralAsk.How.ALL_OR_NONE,
                 Map.of(1, Map.of("Sdk#instance", List.of("Instance.named(\"ld-2\")")))), bot.asked);
     }
@@ -149,6 +160,36 @@ class RunToolsTest {
                 () -> RunTools.run(bot, idleLog(), runs(null))).getMessage();
         assertTrue(refused.startsWith("1 run of this bot goes"), refused);
         assertEquals("Stopped 0 runs. run_state says when they have ended.", RunTools.stopped(bot, idleLog(), null));
+    }
+
+    public static final class Explore {
+        public static void main(String[] args) {
+        }
+    }
+
+    record Budget(@Describe(value = "minutes at most", optional = true) Integer minutes,
+                  @Describe("screens at most") int maxScreens) {
+    }
+
+    @Test
+    void anEntrysArgumentsAreCheckedAgainstWhatItTakesAndRefusedInItsWords() {
+        RunEntries.Declared entry = new RunEntries.Declared(PluginCoordinate.parse("com.example:sdk"), "sdk", null,
+                RunEntry.of("Keep exploring", Explore::main).takes(Budget.class));
+        assertEquals("Keep exploring (minutes: integer, optional — minutes at most; maxScreens: integer — screens "
+                + "at most)", entry.described());
+        assertFalse(entry.onBar(), "a required parameter keeps it off the bar");
+
+        String text = RunTools.arguments(entry, "{\"minutes\": 1, \"maxScreens\": 3}");
+        assertEquals("{\"minutes\":1,\"maxScreens\":3}",
+                new String(Base64.getUrlDecoder().decode(text), StandardCharsets.UTF_8));
+
+        String missing = assertThrows(IllegalArgumentException.class,
+                () -> RunTools.arguments(entry, "{\"minutes\": 1}")).getMessage();
+        assertTrue(missing.startsWith("Keep exploring: 'maxScreens' is required. It takes: Keep exploring ("),
+                missing);
+        String notJson = assertThrows(IllegalArgumentException.class,
+                () -> RunTools.arguments(entry, "{minutes")).getMessage();
+        assertTrue(notJson.startsWith("args is a JSON object of Keep exploring ("), notJson);
     }
 
     @Test

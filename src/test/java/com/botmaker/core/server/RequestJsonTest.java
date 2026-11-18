@@ -45,6 +45,7 @@ class RequestJsonTest {
                 new Request.Compile(11),
                 new Request.Run(12),
                 new Request.RunEntry(13, "Explore map", "com.example.ExploreMap"),
+                new Request.RunEntry(32, "Keep exploring", "com.example.KeepExploring", "eyJtaW51dGVzIjoxfQ"),
                 new Request.RunSeveral(30, SeveralAsk.of(3), "5f0c-ab12"),
                 new Request.RunSeveral(31, SeveralAsk.pinned(3, SeveralAsk.How.COUNT,
                         List.of("2:INSTANCE=Instance.named(\"ld-1\")")), "5f0c-ab13"),

@@ -7,6 +7,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- `run_bot` with `entry` takes `args`, a JSON object of what the plugin's run takes (`RunEntry.takes`). They are
+  checked before the start, a refusal naming the field and listing what the run takes, and reach the run as one
+  `-Dbotmaker.run.arguments` property; a refused or unknown entry lists each entry's parameters. An entry with a
+  required parameter stays off the bar, and `Runs.start` refuses it. `Request.RunEntry` carries the arguments.
+
 ### Changed
 
 - Every file states its license and copyright by REUSE (`REUSE.toml`, `LICENSES/`), every Java source starts with

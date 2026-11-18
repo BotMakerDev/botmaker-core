@@ -12,6 +12,9 @@ import com.botmaker.core.run.RunEntries;
 import com.botmaker.core.run.claims.RunRegistry;
 import com.botmaker.core.run.claims.SeveralAsk;
 import com.botmaker.core.run.claims.SeveralRuns;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -52,7 +55,10 @@ final class RunTools {
                Boolean all_or_none,
                @Describe(value = "with runs: fixed picks, pool=value or run:pool=value (run from 1), as a dry run "
                        + "writes them", optional = true)
-               List<String> pins) {
+               List<String> pins,
+               @Describe(value = "with entry: its arguments, a JSON object of the parameters it takes, as an unknown "
+                       + "entry's refusal lists them ({\"minutes\": 5})", optional = true)
+               String args) {
 
         /** What a start of {@code runs} several runs asks; the runs checked by the caller. */
         SeveralAsk several() {
@@ -61,6 +67,8 @@ final class RunTools {
             return SeveralAsk.pinned(runs, how, pins);
         }
     }
+
+    private static final ObjectMapper JSON = new ObjectMapper();
 
     /** A run id, as {@code run_bot}'s answer gives one. */
     private static final String RUN_ID = "a run id run_bot {runs} gave";
@@ -239,7 +247,9 @@ final class RunTools {
             if (call.runs() < 1 || call.runs() > SeveralRuns.MOST) {
                 throw new IllegalArgumentException("runs is 1 to " + SeveralRuns.MOST + ".");
             }
-            if (present(call.entry())) throw new IllegalArgumentException("runs starts the bot's main, not an entry.");
+            if (present(call.entry()) || present(call.args())) {
+                throw new IllegalArgumentException("runs starts the bot's main, not an entry.");
+            }
             if (call.seconds() != null && call.seconds() > 0) {
                 throw new IllegalArgumentException("Several runs are not waited for: read_trace with a run_id reads "
                         + "each.");
@@ -260,9 +270,30 @@ final class RunTools {
             throw new IllegalArgumentException(going.size() + (going.size() == 1 ? " run of this bot goes"
                     : " runs of this bot go") + ": stop them first (stop with run_id all), or wait for them.");
         }
-        if (call.entry() == null || call.entry().isBlank()) return started(log, call.seconds(), driver::runBot);
+        if (call.entry() == null || call.entry().isBlank()) {
+            if (present(call.args())) throw new IllegalArgumentException("args go with entry: the bot's main takes none.");
+            return started(log, call.seconds(), driver::runBot);
+        }
         RunEntries.Declared entry = RunEntries.require(call.entry());
-        return started(log, call.seconds(), () -> driver.runEntry(entry));
+        String arguments = arguments(entry, call.args());
+        return started(log, call.seconds(), () -> driver.runEntry(entry, arguments));
+    }
+
+    /** {@code args}, a JSON object, checked against what {@code entry} takes; refused in the schema's words. */
+    static String arguments(RunEntries.Declared entry, String args) {
+        Map<String, Object> sent;
+        try {
+            sent = present(args) ? JSON.readValue(args, new TypeReference<Map<String, Object>>() {}) : Map.of();
+        } catch (JsonProcessingException e) {
+            throw new IllegalArgumentException("args is a JSON object of " + entry.described() + "'s parameters: "
+                    + e.getOriginalMessage());
+        }
+        try {
+            return entry.entry().arguments(sent);
+        } catch (IllegalArgumentException refused) {
+            throw new IllegalArgumentException(entry.title() + ": " + refused.getMessage() + ". It takes: "
+                    + entry.described() + ".");
+        }
     }
 
     private static String trace(BotRuns driver, RunLog log, Trace call) {

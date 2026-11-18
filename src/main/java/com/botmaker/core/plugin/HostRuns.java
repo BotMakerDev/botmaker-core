@@ -160,6 +160,9 @@ public final class HostRuns implements Runs {
             requests.status("Can't start " + entry.title() + ": a run is going.");
         } else if (!declared.test(entry)) {
             requests.status("Can't start " + entry.title() + ": no loaded plugin declares it.");
+        } else if (entry.needsArguments()) {
+            // Runs.start gives none; the assistant's run_bot and the shell give them.
+            requests.status("Can't start " + entry.title() + " without its arguments: run_bot with args starts it.");
         } else {
             requests.startEntry(entry.title(), entry.mainClass());
         }

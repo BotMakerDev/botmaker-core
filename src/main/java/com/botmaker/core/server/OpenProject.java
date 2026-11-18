@@ -505,7 +505,8 @@ public final class OpenProject implements AutoCloseable {
             case Request.Compile compile -> started(() -> execution.compileCode(state.snapshot()));
             case Request.Run run -> started(() -> execution.runCode(state.snapshot()));
             case Request.RunEntry entry ->
-                    started(() -> execution.runEntry(state.snapshot(), entry.title(), entry.mainClass()));
+                    started(() -> execution.runEntry(state.snapshot(), entry.title(), entry.mainClass(),
+                            entry.arguments()));
             // Never here: ask starts it apart, since its start leaves the project's thread.
             case Request.RunSeveral several -> new EditResult.Refused("Several runs are asked through ask.");
             case Request.Try attempt -> trial(attempt.trial());
