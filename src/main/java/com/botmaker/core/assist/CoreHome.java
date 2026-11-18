@@ -74,7 +74,10 @@ public final class CoreHome {
         return List.of(McpTools.served(json, DeviceTools.tool()));
     }
 
-    /** {@code core_status} and {@code quit_core}: the core itself, served with Studio attached too. */
+    /**
+     * {@code core_status} and {@code quit_core}, the core itself, and {@code operations}, what its bound plugins offer
+     * ({@link Operations}): served with Studio attached too.
+     */
     public static List<SyncToolSpecification> lasting(McpJsonMapper json, Host host) {
         List<AssistantTool<?>> tools = new ArrayList<>();
         tools.add(said("core_status", "BotMaker's core itself: its version and process, whether Studio is attached, "
@@ -83,6 +86,7 @@ public final class CoreHome {
         tools.add(said("quit_core", "End BotMaker's core, so the next call starts a fresh one on the jars built now; "
                 + "refused while a bot runs, and while Studio is attached unless force.", Quit.class,
                 call -> host.quitCore(Boolean.TRUE.equals(call.force()))));
+        tools.add(Operations.tool(host));
         return tools.stream().map(tool -> McpTools.served(json, tool)).toList();
     }
 

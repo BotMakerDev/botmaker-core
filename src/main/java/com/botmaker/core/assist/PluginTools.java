@@ -10,6 +10,7 @@ import com.botmaker.plugin.api.StudioServices;
 import com.botmaker.plugin.api.assist.AgentContext;
 import com.botmaker.plugin.api.assist.AgentReply;
 import com.botmaker.plugin.api.overlay.Area;
+import com.botmaker.plugin.host.PluginCoordinate;
 import io.modelcontextprotocol.json.McpJsonMapper;
 import io.modelcontextprotocol.server.McpServerFeatures.SyncToolSpecification;
 import io.modelcontextprotocol.spec.McpSchema;
@@ -56,13 +57,17 @@ public final class PluginTools {
         return named(true);
     }
 
+    /** The name the MCP serves {@code plugin}'s tool {@code tool} by: {@code <artifactId>_<tool>}, lowercase. */
+    static String mcpName(PluginCoordinate plugin, String tool) {
+        return plugin.artifactId().toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9_]", "_") + "_" + tool;
+    }
+
     /** {@link #named()}, saying a name two plugins share only when {@code warn}: a call's lookup says nothing. */
     private static List<StudioDriver.PluginTool> named(boolean warn) {
         List<StudioDriver.PluginTool> out = new ArrayList<>();
         Set<String> served = new LinkedHashSet<>();
         for (PluginHost.OwnedTool owned : PluginHost.assistantTools()) {
-            String name = owned.plugin().artifactId().toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9_]", "_")
-                    + "_" + owned.tool().name();
+            String name = mcpName(owned.plugin(), owned.tool().name());
             if (!served.add(name)) {
                 if (warn) {
                     System.err.println("Warning: " + owned.plugin() + "'s assistant tool " + name + " is already "

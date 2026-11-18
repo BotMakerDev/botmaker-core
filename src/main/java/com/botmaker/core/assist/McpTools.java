@@ -427,6 +427,11 @@ public final class McpTools {
         }
     }
 
+    /** {@link #schemaOf} as the map it is written from, for an answer that holds schemas ({@link Operations}). */
+    static Map<String, Object> schemaObject(ToolSchema schema) {
+        return objectOf(schema.fields(), schema.actions());
+    }
+
     private static Map<String, Object> objectOf(List<ToolSchema.Field> fields, List<ToolSchema.Action> actions) {
         Map<String, Object> properties = new LinkedHashMap<>();
         List<String> required = new ArrayList<>();

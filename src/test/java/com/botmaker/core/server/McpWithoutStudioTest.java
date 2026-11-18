@@ -112,6 +112,10 @@ class McpWithoutStudioTest {
                         && status.contains("No project is open"), status);
                 assertTrue(status.contains("Its jars are the ones it started on"), status);
 
+                JsonNode operations = JSON.readTree(call(toBridge, "operations", JSON.createObjectNode()));
+                assertTrue(operations.path("project").isNull() && operations.path("plugins").isArray(),
+                        "botmaker tool's listing, served with no Studio: " + operations);
+
                 String quit = call(toBridge, "quit_core", JSON.createObjectNode());
                 assertTrue(quit.contains("quits now"), quit);
                 assertTrue(ended.await(10, TimeUnit.SECONDS), "the core ended after answering");

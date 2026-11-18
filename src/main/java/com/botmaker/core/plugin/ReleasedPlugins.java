@@ -96,7 +96,7 @@ public final class ReleasedPlugins {
     }
 
     /** The version directory a jar sits in, in the Maven repository layout; "" for anything shallower. */
-    static String versionOf(Path jar) {
+    public static String versionOf(Path jar) {
         Path dir = jar.getParent();
         return dir == null || dir.getFileName() == null ? "" : dir.getFileName().toString();
     }

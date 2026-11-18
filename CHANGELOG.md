@@ -9,6 +9,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- `operations`, served with or without Studio: every bound plugin's assistant tools (with the MCP name each is
+  called by) and declared runs, each with its parameters' JSON schema, as one JSON answer, with the open project's
+  folder. `botmaker tool` reads it, so its keys are read by the cli (`assist.Operations`).
 - `run_bot` with `entry` takes `args`, a JSON object of what the plugin's run takes (`RunEntry.takes`). They are
   checked before the start, a refusal naming the field and listing what the run takes, and reach the run as one
   `-Dbotmaker.run.arguments` property; a refused or unknown entry lists each entry's parameters. An entry with a
