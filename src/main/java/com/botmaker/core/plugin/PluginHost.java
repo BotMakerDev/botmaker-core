@@ -153,6 +153,9 @@ public final class PluginHost {
     /** The dev builds the last {@link #bind} bound in dev mode. See {@link #devBuilds()}. */
     private static volatile List<String> devBuilds = List.of();
 
+    /** The classpath the last {@link #bind} loaded, its gate's refusals left out. See {@link #admitted()}. */
+    private static volatile List<String> admittedJars = List.of();
+
     /**
      * The project being bound, handed to every plugin that ends up serving it.
      *
@@ -300,6 +303,7 @@ public final class PluginHost {
         // here would leave the next close with nobody to tell.
         swap(opened, opened == null ? List.of() : opened.plugins());
         devBuilds = bound(released.dev());
+        admittedJars = admitted.loadable();
         loadedJars = loadedJars();
         // After swap, so the grammar it keeps is the one these plugins compose.
         HostFolders.bound(plugins, admitted.loadable());
@@ -405,7 +409,17 @@ public final class PluginHost {
         serving = false;
         failures = List.of();
         devBuilds = List.of();
+        admittedJars = List.of();
         loadedJars = List.of();
+    }
+
+    /**
+     * The classpath the last {@link #bind} loaded: the dev builds dev mode let through, one copy of each artifact,
+     * and no plugin its gate refused. Empty with no project. A dev reload's trial loads exactly this
+     * ({@link DevReloads}), so it constructs no plugin the user did not agree to run.
+     */
+    public static List<String> admitted() {
+        return admittedJars;
     }
 
     /**

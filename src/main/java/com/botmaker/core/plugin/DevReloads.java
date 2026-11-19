@@ -37,7 +37,10 @@ public final class DevReloads {
         /** Whether the project is in dev mode, so its {@code -SNAPSHOT} plugin jars bind. */
         boolean devMode();
 
-        /** The classpath the plugins are bound from now. */
+        /**
+         * The classpath the plugins are bound from now, as the last bind loaded it: past dev mode, duplicates and the
+         * gate ({@link PluginHost#admitted()}), so the trial constructs nothing the gate refused.
+         */
         List<String> classpath();
 
         /** Whether a run, its compile included, has not ended. */
@@ -202,13 +205,12 @@ public final class DevReloads {
     }
 
     /**
-     * {@code classpath}'s plugins loaded as a dev-mode bind would load them, on a loader of their own beside the bound
-     * set, and closed again. The catalog's gate is not asked: a plugin that reloads itself was admitted already.
+     * {@code classpath}'s plugins loaded on a loader of their own beside the bound set, and closed again. The
+     * classpath is what the last bind admitted, so dev mode, duplicates and the gate were applied there and nothing
+     * it refused is constructed here.
      */
     private static Bound trial(List<String> classpath) {
-        ReleasedPlugins.Split released = ReleasedPlugins.split(classpath, true);
-        DuplicatePlugins.Split single = DuplicatePlugins.split(released.loadable());
-        PluginLoader.Loaded loaded = PluginLoader.openReporting(single.loadable());
+        PluginLoader.Loaded loaded = PluginLoader.openReporting(classpath);
         try (PluginLoader loader = loaded.loader()) {
             return Bound.of(loader == null ? List.of() : loader.plugins(), loaded.failures());
         }

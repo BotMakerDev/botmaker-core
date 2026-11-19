@@ -810,7 +810,7 @@ public final class OpenProject implements AutoCloseable {
 
         @Override
         public List<String> classpath() {
-            return resolution.jars();
+            return PluginHost.admitted();
         }
 
         /** The one run a Stop ends: several runs at once are not a plugin's to restart. */
