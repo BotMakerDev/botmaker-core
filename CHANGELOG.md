@@ -7,6 +7,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+
+- A method value of a generic type is written with its arguments (`ManagedMethod.form()`): `List<Launcher>
+  launchTargets()`, not a raw `List`, which the value grammar cannot read, so the Game window left it "written by
+  hand" and a website could not be made the launch target. Bind repairs a raw one it finds, the bot's other code
+  left as it was, in every bot created since 2026-11-04.
+
 ### Added
 
 - `operations`, served with or without Studio: every bound plugin's assistant tools (with the MCP name each is

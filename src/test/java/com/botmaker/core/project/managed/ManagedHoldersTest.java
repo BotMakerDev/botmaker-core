@@ -139,6 +139,23 @@ class ManagedHoldersTest {
         assertTrue(names.contains("@TestValue(TestValue.Id.NAMES)\npublic final class Names {"), names);
     }
 
+    public static List<Integer> noNumbers() {
+        return List.of();
+    }
+
+    /** A generic value is written with its arguments, which a raw return type would lose to every reader. */
+    @Test
+    void aGenericValueIsWrittenWhole() {
+        List<ManagedValue<?>> declared = List.of(ManagedValue.method(TestValue.Id.GREETING).in(TestValue.Holder.VALUES)
+                .startsAs(ManagedHoldersTest::noNumbers).because("Mine."));
+        ProjectConfig config = ProjectConfig.forDirectory(dir.resolve("bot"));
+
+        String values = assertInstanceOf(ManagedHolders.Plan.Write.class, ManagedHolders.plan(config,
+                TEST, declared.getFirst(), declared, TestValues.GRAMMAR)).source();
+        assertTrue(values.contains("public static List<Integer> greeting() {"), values);
+        assertEquals(0, parse(values).getProblems().length, values);
+    }
+
     @Test
     void aValueWithNoHolderIsRefused() {
         assertInstanceOf(ManagedHolders.Plan.Refused.class, plan(TestValue.Id.OPENED_ONLY));

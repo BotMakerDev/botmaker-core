@@ -510,6 +510,37 @@ class ManagedRepairsTest {
                 && after.contains("return \"hello\";"), plan.sentences().toString());
     }
 
+    /** A generic value a holder wrote raw — before ManagedMethod.form — takes its arguments on bind, since no reader edits it raw. */
+    @Test
+    void aGenericValueWrittenRawTakesItsArguments(@TempDir Path dir) {
+        ProjectConfig config = ProjectConfig.forDirectory(dir.resolve("bot"));
+        Path values = holder(config, "Values");
+        BotIndex index = index(config, Map.of(values, """
+                package %s.plugins.test;
+
+                import %s;
+                import java.util.List;
+
+                public final class Values {
+                    @TestValue(TestValue.Id.GREETING)
+                    public static List greeting() {
+                        return List.of();
+                    }
+                }
+                """.formatted(config.mainPackage(), TestValue.class.getCanonicalName())));
+        ManagedValue<List<Integer>> numbers = ManagedValue.method(TestValue.Id.GREETING).in(TestValue.Holder.VALUES)
+                .startsAs(ManagedRepairsTest::noNumbers).because("New.");
+
+        ManagedRepairs.Planned plan = ManagedRepairs.leftoverFields(index, List.of(numbers));
+
+        String after = plan.rewrites().get(values);
+        assertTrue(after != null && after.contains("public static List<Integer> greeting()")
+                && after.contains("return List.of();"), plan.sentences() + "\n" + after);
+        ManagedRepairs.Planned again = ManagedRepairs.leftoverFields(index(config, Map.of(values, after)),
+                List.of(numbers));
+        assertTrue(again.isEmpty(), "typed once: " + again.sentences());
+    }
+
     /** A method value's field the bind cannot carry (no initialiser) is its value's one copy: kept, never removed. */
     @Test
     void anAuthorOnlyFieldItCannotCarryIsKept(@TempDir Path dir) {

@@ -431,7 +431,8 @@ public final class ManagedHolders {
      */
     private static MethodDeclaration method(AST ast, ManagedMethod<?> value, ValueGrammar grammar,
                                             TreeSet<String> imports) {
-        Type type = value.type();
+        // Its whole type: List<Launcher>, which value.type()'s List would write raw and no reader could edit.
+        Type type = value.form();
         JavaValue fresh = (value.initial() != null ? grammar.spell(type, value.initial())
                 : grammar.freshSpelling(type)).orElse(null);
         if (fresh == null) return null;

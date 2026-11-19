@@ -16,6 +16,7 @@ import com.botmaker.core.parser.refactor.ReviewMarker;
 import com.botmaker.java.grammar.JavaValue;
 import com.botmaker.java.grammar.SourceFormatter;
 import com.botmaker.java.grammar.ValueGrammar;
+import com.botmaker.java.grammar.ValueTypes;
 import com.botmaker.java.grammar.BotAnnotation;
 import com.botmaker.java.edit.ImportManager;
 import com.botmaker.java.index.BotIndex;
@@ -151,7 +152,7 @@ public final class ManagedRepairs {
      *                the contract on its classpath, {@link ReviewMarker#available})
      */
     public static Planned plan(BotIndex index, List<ManagedValue<?>> live, ValueGrammar grammar, String note) {
-        return plan(index, live, grammar, note, mark -> true, mark -> true);
+        return plan(index, live, grammar, note, mark -> true, mark -> true, mark -> false);
     }
 
     /**
@@ -160,7 +161,9 @@ public final class ManagedRepairs {
      * whose id a group method also marks — the copy the bind wrote in {@code params/} — is removed, or kept unmarked
      * while the bot names it. A field that is its value's only copy, and every value that is no field, are left to
      * the upgrade. A dev-mode reload of the same {@code -SNAPSHOT} runs no upgrade, so without this the old field
-     * stayed beside its group (SwordXStaff, 2026-11-05).
+     * stayed beside its group (SwordXStaff, 2026-11-05). A generic method value written raw takes its type's arguments
+     * too ({@code List launchTargets()}, every bot created from 2026-11-04 until {@link ManagedMethod#form()},
+     * 2026-11-19), since no reader edits it raw.
      */
     public static Planned leftoverFields(BotIndex index, List<ManagedValue<?>> live) {
         Map<String, ManagedValue<?>> byId = new LinkedHashMap<>();
@@ -178,17 +181,21 @@ public final class ManagedRepairs {
         // value's field is only ever carried, so a field asMethod cannot carry stays, its value's one copy.
         Predicate<Mark> removable = mark -> byId.get(mark.id()) instanceof ManagedParam<?>
                 && onMethods.contains(mark.id());
+        // A generic method value is looked at too: one written raw takes its type's arguments (withArguments).
+        Predicate<Mark> generic = mark -> mark.kind() == Kind.METHOD
+                && byId.get(mark.id()) instanceof ManagedMethod<?> method && method.form() instanceof ParameterizedType;
         // Nothing here resets a value, so no grammar writes one and no @Refactor note is needed.
-        return plan(index, live, ValueGrammar.empty(), null, mark -> mark.kind() == Kind.FIELD
-                && (byId.get(mark.id()) instanceof ManagedMethod<?> || removable.test(mark)), removable);
+        return plan(index, live, ValueGrammar.empty(), null, mark -> generic.test(mark) || mark.kind() == Kind.FIELD
+                && (byId.get(mark.id()) instanceof ManagedMethod<?> || removable.test(mark)), removable, generic);
     }
 
     /**
      * @param repairs   the marks looked at; every other is left as written
      * @param removable of those, the ones that may be removed or unmarked when declared another way now
+     * @param typedOnly of those, the ones only given their type's arguments, never retyped, removed or reset
      */
     private static Planned plan(BotIndex index, List<ManagedValue<?>> live, ValueGrammar grammar, String note,
-                                Predicate<Mark> repairs, Predicate<Mark> removable) {
+                                Predicate<Mark> repairs, Predicate<Mark> removable, Predicate<Mark> typedOnly) {
         Map<String, ManagedValue<?>> byId = new LinkedHashMap<>();
         Set<String> markers = new LinkedHashSet<>();
         Set<String> holders = new LinkedHashSet<>();
@@ -224,6 +231,24 @@ public final class ManagedRepairs {
                     continue;
                 }
             }
+            // A generic value written raw — List launchTargets(), as a holder was written before ManagedMethod.form —
+            // takes its arguments, without which no reader edits it.
+            Optional<String> argued = value == null ? Optional.empty() : withArguments(sources.get(mark.file()), mark, value);
+            if (argued.isPresent()) {
+                Map<Path, String> tried = new LinkedHashMap<>(sources);
+                tried.put(mark.file(), argued.get());
+                BotIndex after = current.replacing(tried);
+                Mark again = marks(after, live, markers).stream().filter(first::same).findFirst().orElse(null);
+                if (again != null && current.firstNewError(after).isEmpty()
+                        && value instanceof ManagedMethod<?> method) {
+                    sources = tried;
+                    current = after;
+                    mark = again;
+                    repaired.add(mark.qualified() + " (" + spelled + ") returned a raw "
+                            + value.type().getSimpleName() + ", so it returns " + method.form().getTypeName() + " now.");
+                }
+            }
+            if (typedOnly.test(first)) continue;
             // A value whose type no longer resolves, while the plugin still declares it: the type moved package. By its
             // simple name and import first; by its whole name when another import of that name is the file's own.
             for (boolean whole : new boolean[] {false, true}) {
@@ -283,7 +308,7 @@ public final class ManagedRepairs {
             if (!(value instanceof ManagedMethod<?> method) || !failsToCompile(current, mark)) continue;
             String text = sources.get(mark.file());
             Optional<JavaValue> initial = method.initial() == null ? Optional.empty()
-                    : grammar.spell(method.type(), method.initial());
+                    : grammar.spell(method.form(), method.initial());
             String className = mark.className();
             String member = mark.member();
             String reset = initial.map(v -> JavaManagedEdits.setValue(text, className, member, v)).orElse(text);
@@ -378,6 +403,39 @@ public final class ManagedRepairs {
         }
         out.add(new Mark(id, kind, enumType, file, className, member, returns, declaration.getStartPosition(),
                 declaration.getLength()));
+    }
+
+    /**
+     * {@code source} with {@code mark}'s method returning {@code value}'s {@link ManagedMethod#form() whole type} where it
+     * returns that type raw: {@code List launchTargets()} as {@code List<Launcher> launchTargets()}, its type arguments
+     * imported. Empty when the mark is no such method, or it already says arguments of its own, which are the author's.
+     */
+    private static Optional<String> withArguments(String source, Mark mark, ManagedValue<?> value) {
+        if (source == null || mark.kind() != Kind.METHOD || !(value instanceof ManagedMethod<?> method)
+                || !(method.form() instanceof ParameterizedType)) {
+            return Optional.empty();
+        }
+        CompilationUnit unit = BotParser.syntax(source);
+        if (!(declaration(unit, mark) instanceof MethodDeclaration declared)) return Optional.empty();
+        String raw = switch (declared.getReturnType2()) {
+            case SimpleType simple -> simple.getName().getFullyQualifiedName();
+            case QualifiedType qualified -> qualified.getName().getIdentifier();
+            case null, default -> null;
+        };
+        // List, java.util.List, Map.Entry: the class's canonical name, whole or its last parts.
+        String canonical = value.type().getCanonicalName();
+        if (raw == null || canonical == null || !(canonical.equals(raw) || canonical.endsWith("." + raw))) {
+            return Optional.empty();
+        }
+        AST ast = unit.getAST();
+        Set<String> imports = new LinkedHashSet<>();
+        Optional<org.eclipse.jdt.core.dom.Type> typed = ValueTypes.node(ast, method.form(), imports);
+        if (typed.isEmpty()) return Optional.empty();
+        ASTRewrite rewrite = ASTRewrite.create(ast);
+        rewrite.replace(declared.getReturnType2(), typed.get(), null);
+        imports.forEach(name -> ImportManager.addImport(unit, rewrite, name));
+        return Optional.of(SourceFormatter.formatChanged(JavaLevel.of(rewrite.getAST()), source,
+                AstRewriteHelper.applyRewrite(rewrite, source)));
     }
 
     /**
