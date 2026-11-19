@@ -27,6 +27,9 @@ import com.botmaker.core.plugin.HostServices;
 import com.botmaker.core.plugin.PluginHost;
 import com.botmaker.core.plugin.PluginWrite;
 import com.botmaker.core.plugin.WriteSteps;
+import com.botmaker.plugin.api.run.DevReload;
+import com.botmaker.plugin.host.LoadedPlugin;
+import com.botmaker.plugin.host.PluginCoordinate;
 import com.botmaker.core.project.ProjectConfig;
 import com.botmaker.core.project.ProjectFile;
 import com.botmaker.core.project.ProjectMode;
@@ -491,6 +494,7 @@ public final class OpenProject implements AutoCloseable {
         return switch (request) {
             case Request.Show show -> show(show.file());
             case Request.Reload reload -> reload();
+            case Request.DevReload asked -> devReload(asked);
             case Request.Apply apply -> editor.apply(apply.request());
             case Request.UserEdit edit -> editor.userEdit(edit.edit());
             case Request.Step step -> editor.step(step.step()) ? new EditResult.Accepted(List.of())
@@ -799,6 +803,28 @@ public final class OpenProject implements AutoCloseable {
         public void status(String message) {
             tell(new CoreEvent.Status(message));
         }
+    }
+
+    /**
+     * A client's plugin restarting its run on its rebuilt jar: the core's own copy of the plugin, bound here, asks it,
+     * so the checks and the restart are the core's as when its copy asks itself.
+     */
+    private EditResult devReload(Request.DevReload asked) {
+        PluginCoordinate coordinate = new PluginCoordinate(asked.groupId(), asked.artifactId());
+        Optional<LoadedPlugin> plugin = PluginHost.plugins().stream()
+                .filter(p -> PluginHost.same(p.coordinate(), coordinate)).findFirst();
+        if (plugin.isEmpty()) {
+            return new EditResult.Refused(asked.groupId() + ":" + asked.artifactId() + " is not bound in the core.");
+        }
+        var entry = plugin.get().plugin().runEntries().stream().filter(e -> e.title().equals(asked.entry()))
+                .findFirst();
+        if (entry.isEmpty()) {
+            return new EditResult.Refused(plugin.get().name() + " declares no run \"" + asked.entry() + "\".");
+        }
+        return switch (DevReloads.reload(plugin, entry.get())) {
+            case DevReload.Started ignored -> new EditResult.Accepted(List.of());
+            case DevReload.Refused refused -> new EditResult.Refused(refused.why());
+        };
     }
 
     /** A plugin's restart of its own run on its rebuilt jar: Stop, Reload and the entry's start, as a client asks them. */

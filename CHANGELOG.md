@@ -9,6 +9,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- A plugin's dev reload (`StudioServices.devReload`) asked from a client's copy of the plugin, as the SDK's
+  `explore reload_sdk` is while Studio is attached, is no longer refused as *not here*: the client forwards it
+  (`DevReloads.installForwarding`, `Request.DevReload`) and the core's own copy reloads, with the same checks.
 - A method value of a generic type is written with its arguments (`ManagedMethod.form()`): `List<Launcher>
   launchTargets()`, not a raw `List`, which the value grammar cannot read, so the Game window left it "written by
   hand" and a website could not be made the launch target. Bind repairs a raw one it finds, the bot's other code

@@ -3,6 +3,7 @@
 
 package com.botmaker.core.plugin;
 
+import com.botmaker.plugin.api.StudioPlugin;
 import com.botmaker.plugin.api.run.DevReload;
 import com.botmaker.plugin.api.run.RunEntry;
 import com.botmaker.plugin.host.PluginCoordinate;
@@ -173,5 +174,25 @@ class DevReloadsTest {
         DevReloads.clear();
 
         assertEquals(DevReload.REFUSED_HERE, DevReloads.reload(Optional.empty(), EXPLORE));
+    }
+
+    @Test
+    void aClientsCopyForwardsItsReloadToTheCore() {
+        DevReloads.clear();
+        List<String> forwarded = new CopyOnWriteArrayList<>();
+        DevReloads.installForwarding((caller, entry) -> {
+            forwarded.add(caller.artifactId() + " " + entry.title());
+            return new DevReload.Started();
+        });
+        try {
+            DevReload answer = DevReloads.reload(
+                    Optional.of(TestPlugins.loaded("sdk", StudioPlugin.declare())), EXPLORE);
+
+            assertInstanceOf(DevReload.Started.class, answer);
+            assertEquals(List.of("sdk Keep exploring"), forwarded);
+            assertEquals(DevReload.REFUSED_HERE, DevReloads.reload(Optional.empty(), EXPLORE));
+        } finally {
+            DevReloads.installForwarding(null);
+        }
     }
 }

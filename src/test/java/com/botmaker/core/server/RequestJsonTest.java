@@ -42,6 +42,7 @@ class RequestJsonTest {
                 new Request.Batch(19, "Record the walk", true),
                 new Request.Batch(20, "", false),
                 new Request.Reload(10),
+                new Request.DevReload(33, "com.github.BotMakerDev", "botmaker-sdk", "Keep exploring"),
                 new Request.Compile(11),
                 new Request.Run(12),
                 new Request.RunEntry(13, "Explore map", "com.example.ExploreMap"),

@@ -102,9 +102,26 @@ public final class DevReloads {
         }
     }
 
+    /**
+     * Where a client's copy of the plugins sends a reload: the core that owns the project, which reloads its own copy
+     * and tells the client what bound (2026-11-20).
+     */
+    public interface Forward {
+        DevReload reload(PluginCoordinate caller, RunEntry entry);
+    }
+
     private static volatile Project current;
+    private static volatile Forward forward;
 
     private DevReloads() {}
+
+    /**
+     * Makes {@code to} where a reload goes while no project is installed here: a client's process, whose plugins are a
+     * copy of the core's. Null takes it away.
+     */
+    public static void installForwarding(Forward to) {
+        forward = to;
+    }
 
     /** Makes {@code project} the one a reload stops, binds and starts; null takes it away. */
     public static void install(Project project) {
@@ -119,7 +136,11 @@ public final class DevReloads {
     /** The reload {@code caller} asks for, of its run {@code entry}, on the open project; refused with none open. */
     public static DevReload reload(Optional<LoadedPlugin> caller, RunEntry entry) {
         Project project = current;
-        if (project == null) return DevReload.REFUSED_HERE;
+        if (project == null) {
+            Forward to = forward;
+            if (to == null || entry == null || caller.isEmpty()) return DevReload.REFUSED_HERE;
+            return to.reload(caller.get().coordinate(), entry);
+        }
         return reload(project, caller.map(LoadedPlugin::coordinate), entry, DevReloads::trial, work -> {
             Thread thread = new Thread(work, "dev-reload");
             thread.setDaemon(true);

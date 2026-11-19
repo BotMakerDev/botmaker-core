@@ -141,6 +141,11 @@ public final class CoreClient implements AutoCloseable {
         return ask(new Request.Reload(ids.incrementAndGet()), OPEN_TIMEOUT);
     }
 
+    /** A client's plugin restarts its run {@code entry} on its rebuilt jar; see {@link Request.DevReload}. */
+    public EditResult devReload(String groupId, String artifactId, String entry) throws IOException {
+        return ask(new Request.DevReload(ids.incrementAndGet(), groupId, artifactId, entry), OPEN_TIMEOUT);
+    }
+
     public EditResult compile() throws IOException {
         return ask(new Request.Compile(ids.incrementAndGet()), ANSWER_TIMEOUT);
     }

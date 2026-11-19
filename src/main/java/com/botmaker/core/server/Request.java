@@ -35,6 +35,7 @@ import java.util.Set;
         @JsonSubTypes.Type(value = Request.PluginWriting.class, name = "pluginWriting"),
         @JsonSubTypes.Type(value = Request.Batch.class, name = "batch"),
         @JsonSubTypes.Type(value = Request.Reload.class, name = "reload"),
+        @JsonSubTypes.Type(value = Request.DevReload.class, name = "devReload"),
         @JsonSubTypes.Type(value = Request.Compile.class, name = "compile"),
         @JsonSubTypes.Type(value = Request.Run.class, name = "run"),
         @JsonSubTypes.Type(value = Request.RunEntry.class, name = "runEntry"),
@@ -229,6 +230,14 @@ public sealed interface Request {
      * plugins again and writes a holder a new plugin brings; it tells {@code LibrariesResolved} before it answers.
      */
     record Reload(long id) implements Request {
+    }
+
+    /**
+     * A client's plugin {@code groupId:artifactId} restarts its own run {@code entry}, by title, on its rebuilt jar
+     * ({@code StudioServices.devReload}, 2026-11-20): the core's copy of the plugin reloads, as when it asks itself.
+     * Accepted once the reload started; refused, nothing stopped, with why.
+     */
+    record DevReload(long id, String groupId, String artifactId, String entry) implements Request {
     }
 
     /**
