@@ -9,7 +9,9 @@ import com.botmaker.plugin.api.PluginLog;
 import com.botmaker.plugin.api.Runs;
 import com.botmaker.plugin.api.StudioServices;
 import com.botmaker.plugin.api.Theme;
+import com.botmaker.plugin.api.run.DevReload;
 import com.botmaker.plugin.api.run.LiveRuns;
+import com.botmaker.plugin.api.run.RunEntry;
 import com.botmaker.plugin.api.run.SideRuns;
 import com.botmaker.plugin.api.source.PluginValues;
 import com.botmaker.core.project.ProjectConfig;
@@ -210,6 +212,15 @@ public final class HostServices implements StudioServices {
     @Override
     public PluginLog log() {
         return PluginLogs.CALLER;
+    }
+
+    /**
+     * The calling plugin's run {@code entry} started again on its rebuilt jar ({@link DevReloads}): the open project's,
+     * read at the call for the reason {@link #runs()} is; refused between projects and in a process that serves none.
+     */
+    @Override
+    public DevReload devReload(RunEntry entry) {
+        return DevReloads.reload(PluginHost.calling(), entry);
     }
 
     // CaptureAdapter stood here from the day this class was written until 2026-08-31, implementing the

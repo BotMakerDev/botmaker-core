@@ -19,6 +19,7 @@ import com.botmaker.core.events.FileEdit;
 import com.botmaker.core.index.TypeSummaryManager;
 import com.botmaker.core.parser.EditorOutput;
 import com.botmaker.core.parser.refactor.FunctionRestore;
+import com.botmaker.core.plugin.DevReloads;
 import com.botmaker.core.plugin.HostHistory;
 import com.botmaker.core.plugin.HostPluginValues;
 import com.botmaker.core.plugin.HostRuns;
@@ -248,6 +249,7 @@ public final class OpenProject implements AutoCloseable {
         HostPluginValues.installForwarding(config, state, services, this::written);
         this.runs = HostRuns.install(new PluginRuns(), execution::runningBotPid, new RunProperties());
         HostHistory.install(new PluginHistory());
+        DevReloads.install(new PluginReloads());
     }
 
     /**
@@ -799,6 +801,61 @@ public final class OpenProject implements AutoCloseable {
         }
     }
 
+    /** A plugin's restart of its own run on its rebuilt jar: Stop, Reload and the entry's start, as a client asks them. */
+    private final class PluginReloads implements DevReloads.Project {
+        @Override
+        public boolean devMode() {
+            return StudioProjectSettings.devModeIn(config.projectPath());
+        }
+
+        @Override
+        public List<String> classpath() {
+            return resolution.jars();
+        }
+
+        /** The one run a Stop ends: several runs at once are not a plugin's to restart. */
+        @Override
+        public boolean running() {
+            return runningOne();
+        }
+
+        @Override
+        public void stop() {
+            ask(new Request.Stop(0));
+        }
+
+        @Override
+        public DevReloads.Bound rebind() {
+            EditResult answer;
+            try {
+                answer = ask(new Request.Reload(0)).get(CoreClient.OPEN_TIMEOUT.toSeconds(), TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("interrupted while the plugins reloaded", e);
+            } catch (ExecutionException | TimeoutException e) {
+                throw new IllegalStateException("the plugins did not reload: " + e, e);
+            }
+            if (answer instanceof EditResult.Refused(String reason)) throw new IllegalStateException(reason);
+            return DevReloads.Bound.of(PluginHost.plugins(), PluginHost.failures());
+        }
+
+        @Override
+        public void start(String title, String mainClass) {
+            ask(new Request.RunEntry(0, title, mainClass)).thenAccept(answer -> {
+                if (answer instanceof EditResult.Refused(String reason)) {
+                    status("Dev reload: the plugins reloaded, but " + title + " did not start: " + reason);
+                }
+            });
+        }
+
+        /** On the status line and in the core's log, where a run's own words go: the caller was answered already. */
+        @Override
+        public void status(String message) {
+            System.err.println(message);
+            tell(new CoreEvent.Status(message));
+        }
+    }
+
     /** The checkout's run properties, read and written in its settings file. */
     private final class RunProperties implements HostRuns.Properties {
         @Override
@@ -1057,6 +1114,7 @@ public final class OpenProject implements AutoCloseable {
         HostPluginValues.clear();
         HostRuns.clear();
         HostHistory.clear();
+        DevReloads.clear();
         try {
             debugger.stopDebugging();
             execution.close();

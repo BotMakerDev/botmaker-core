@@ -16,6 +16,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- `StudioServices.devReload`, served for the open project in dev mode (`plugin.DevReloads`): a plugin restarts its
+  own run on its rebuilt jar. Its jar is loaded first on a loader of its own; a jar that does not construct, or no
+  longer declares the run, is refused with the loader's words and nothing is stopped. Then the run is stopped (30 s
+  at most), the plugins are bound again as *Reload plugins* binds them, and the run is started with no arguments.
 - `operations`, served with or without Studio: every bound plugin's assistant tools (with the MCP name each is
   called by) and declared runs, each with its parameters' JSON schema, as one JSON answer, with the open project's
   folder. `botmaker tool` reads it, so its keys are read by the cli (`assist.Operations`).
