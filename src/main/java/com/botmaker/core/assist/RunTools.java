@@ -56,8 +56,8 @@ final class RunTools {
                @Describe(value = "with runs: fixed picks, pool=value or run:pool=value (run from 1), as a dry run "
                        + "writes them", optional = true)
                List<String> pins,
-               @Describe(value = "with entry: its arguments, a JSON object of the parameters it takes, as an unknown "
-                       + "entry's refusal lists them ({\"minutes\": 5})", optional = true)
+               @Describe(value = "with entry: its parameters as JSON, listed by a bad entry's "
+                       + "refusal ({\"minutes\": 5})", optional = true)
                String args) {
 
         /** What a start of {@code runs} several runs asks; the runs checked by the caller. */
