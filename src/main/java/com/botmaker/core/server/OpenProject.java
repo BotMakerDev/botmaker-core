@@ -28,6 +28,7 @@ import com.botmaker.core.plugin.PluginHost;
 import com.botmaker.core.plugin.PluginWrite;
 import com.botmaker.core.plugin.WriteSteps;
 import com.botmaker.plugin.api.run.DevReload;
+import com.botmaker.plugin.api.run.RunEntry;
 import com.botmaker.plugin.host.LoadedPlugin;
 import com.botmaker.plugin.host.PluginCoordinate;
 import com.botmaker.core.project.ProjectConfig;
@@ -42,6 +43,7 @@ import com.botmaker.core.project.vcs.ProjectVcs;
 import com.botmaker.core.run.CodeExecutionService;
 import com.botmaker.core.run.DebuggingService;
 import com.botmaker.core.run.RunCheck;
+import com.botmaker.core.run.RunEntries;
 import com.botmaker.core.run.RunTelemetry;
 import com.botmaker.core.run.claims.PooledRuns;
 import com.botmaker.core.run.claims.SeveralAsk;
@@ -212,6 +214,8 @@ public final class OpenProject implements AutoCloseable {
     private final HostPluginValues values;
     /** What this process's plugins are told of a run. */
     private final HostRuns runs;
+    /** The companions of the entry that runs: this process alone starts them, one set per run. */
+    private final RunEntries.Companions companions;
     /** The thread {@link #owner} runs on, so a write made on it is not queued behind itself. */
     private volatile Thread ownerThread;
     /** The batch open now and how many opened it, on the owner thread; null when none is ({@link Request.Batch}). */
@@ -248,7 +252,8 @@ public final class OpenProject implements AutoCloseable {
         // The plugins of this process reach the project as Studio's did (plan phase 10c): their writes, a client's
         // too, land on the project's thread; a run, the history and the run properties are this project's.
         HostServices services = HostServices.forProject(config);
-        this.values = HostPluginValues.writing(config, state, services, new PluginEdits());
+        this.companions = RunEntries.Companions.bound(services);
+        this.values =HostPluginValues.writing(config, state, services, new PluginEdits());
         HostPluginValues.installForwarding(config, state, services, this::written);
         this.runs = HostRuns.install(new PluginRuns(), execution::runningBotPid, new RunProperties());
         HostHistory.install(new PluginHistory());
@@ -393,7 +398,11 @@ public final class OpenProject implements AutoCloseable {
                 || request instanceof Request.Debugging debugging && debugging.step() == Request.Debugging.Step.STOP) {
             stops.incrementAndGet();
         }
-        if (request instanceof Request.RunSeveral several) return runSeveral(several, stopsBefore);
+        if (request instanceof Request.RunSeveral several) {
+            // Several runs of the bot: no companion serves them, whatever an earlier ask left.
+            companions.asked(null);
+            return runSeveral(several, stopsBefore);
+        }
         try {
             return CompletableFuture.supplyAsync(() -> {
                 try {
@@ -509,19 +518,36 @@ public final class OpenProject implements AutoCloseable {
                 yield new EditResult.Accepted(List.of());
             }
             case Request.Compile compile -> started(() -> execution.compileCode(state.snapshot()));
-            case Request.Run run -> started(() -> execution.runCode(state.snapshot()));
-            case Request.RunEntry entry ->
-                    started(() -> execution.runEntry(state.snapshot(), entry.title(), entry.mainClass(),
-                            entry.arguments()));
+            case Request.Run run -> {
+                companions.asked(null);
+                yield started(() -> execution.runCode(state.snapshot()));
+            }
+            case Request.RunEntry entry -> {
+                companions.asked(declaredEntry(entry.title(), entry.mainClass()));
+                yield started(() -> execution.runEntry(state.snapshot(), entry.title(), entry.mainClass(),
+                        entry.arguments()));
+            }
             // Never here: ask starts it apart, since its start leaves the project's thread.
             case Request.RunSeveral several -> new EditResult.Refused("Several runs are asked through ask.");
-            case Request.Try attempt -> trial(attempt.trial());
-            case Request.Debug debug -> started(() -> debugger.startDebugging(debug.follow(), breakpoints(debug)));
+            case Request.Try attempt -> {
+                companions.asked(null);
+                yield trial(attempt.trial());
+            }
+            case Request.Debug debug -> {
+                companions.asked(null);
+                yield started(() -> debugger.startDebugging(debug.follow(), breakpoints(debug)));
+            }
             case Request.Control steer -> steer(steer);
             case Request.Open open -> new EditResult.Refused("The project is open already.");
             case Request.Close close -> new EditResult.Refused("A close is the core's to handle.");
             case Request.Tools _, Request.Called _, Request.WatchCalls _ -> new EditResult.Refused("A client's tools are the core's to handle.");
         };
+    }
+
+    /** The declared entry an ask to run {@code title} starts, by title and main class; null for one no plugin declares. */
+    private static RunEntry declaredEntry(String title, String mainClass) {
+        return RunEntries.all().stream().map(RunEntries.Declared::entry)
+                .filter(e -> e.title().equals(title) && e.mainClass().equals(mainClass)).findFirst().orElse(null);
     }
 
     private static boolean startsABot(Request request) {
@@ -1063,8 +1089,14 @@ public final class OpenProject implements AutoCloseable {
     private void heardByPlugins(CoreEvent event) {
         switch (event) {
             case CoreEvent.HistoryChanged history -> HostHistory.told(history);
-            case CoreEvent.RunState run when run.phase() == CoreEvent.RunState.Phase.RUNNING -> runs.ran(true);
-            case CoreEvent.RunState run when run.phase() == CoreEvent.RunState.Phase.ENDED -> runs.ran(false);
+            case CoreEvent.RunState run when run.phase() == CoreEvent.RunState.Phase.RUNNING -> {
+                runs.ran(true);
+                companions.started();
+            }
+            case CoreEvent.RunState run when run.phase() == CoreEvent.RunState.Phase.ENDED -> {
+                runs.ran(false);
+                companions.ended();
+            }
             case CoreEvent.RunFrame frame -> runs.telemetry(frame.payload());
             case CoreEvent.RunTraced traced -> runs.trace(traced.traceLine());
             default -> {
@@ -1137,6 +1169,7 @@ public final class OpenProject implements AutoCloseable {
             Thread.currentThread().interrupt();
         }
         control.shutdown();
+        companions.ended();
         HostPluginValues.clear();
         HostRuns.clear();
         HostHistory.clear();

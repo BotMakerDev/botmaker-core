@@ -19,6 +19,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- The core starts a plugin's run companions (`RunEntries.Companions`): when a run of a declared `RunEntry` starts,
+  each companion that serves it starts once, however many clients are attached, and stops when the run ends or the
+  project closes. A bot's own run, a try or a debug run starts none.
 - `StudioServices.devReload`, served for the open project in dev mode (`plugin.DevReloads`): a plugin restarts its
   own run on its rebuilt jar. Its jar is loaded first on a loader of its own, over only what the last bind admitted
   (`PluginHost.admitted()`), so no plugin the gate refused is constructed; a jar that does not construct, or no
