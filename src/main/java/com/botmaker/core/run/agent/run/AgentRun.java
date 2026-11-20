@@ -13,7 +13,6 @@ import com.botmaker.core.run.agent.RunLines;
 import com.botmaker.core.run.agent.RunPlan;
 import com.botmaker.core.run.agent.TracePlan;
 import com.botmaker.core.run.claims.RunRegistry;
-import com.botmaker.plugin.api.params.Claims;
 
 import java.io.IOException;
 import java.io.PrintWriter;
@@ -106,7 +105,7 @@ public final class AgentRun implements RunLines {
             // Before anything else: a run that cannot have its claims checked must not start (RunAgent stops it).
             Path live = plan.registry().orElseThrow(
                     () -> new IllegalStateException("one of several runs was given no live runs to check"));
-            Claims.serve(new RunClaims(new RunRegistry(live, RunRegistry.Alive.PROCESSES), plan.runId().get()));
+            RunClaims.serve(new RunRegistry(live, RunRegistry.Alive.PROCESSES), plan.runId().get());
         }
         plan.hostValues().ifPresent(AgentRun::serveHostValues);
         Path folder = null;

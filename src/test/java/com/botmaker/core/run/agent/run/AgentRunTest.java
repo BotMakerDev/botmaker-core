@@ -23,6 +23,7 @@ import java.util.OptionalInt;
 import java.util.Set;
 import java.util.stream.IntStream;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -148,5 +149,40 @@ class AgentRunTest {
     @Test
     void aFolderWithNeitherBotJsonNorGitSaysNothing(@TempDir Path bot) {
         assertTrue(BotFacts.source(bot).isEmpty());
+    }
+
+    /** A bot that names no plugin runs without the contract: the inner half must still link, or it keeps no log. */
+    @Test
+    void theInnerHalfLinksWithoutTheContract() {
+        ClassLoader noContract = new NoContractLoader(AgentRunTest.class.getClassLoader());
+        Class<?> linked = assertDoesNotThrow(() -> Class.forName(AgentRun.class.getName(), true, noContract));
+        assertEquals(noContract, linked.getClassLoader());
+    }
+
+    /** Defines the inner half's package itself, as the agent's own loader does, and has no contract class. */
+    private static final class NoContractLoader extends ClassLoader {
+
+        private static final String INNER = AgentRun.class.getPackageName() + ".";
+
+        NoContractLoader(ClassLoader parent) {
+            super(parent);
+        }
+
+        @Override
+        protected Class<?> loadClass(String name, boolean resolve) throws ClassNotFoundException {
+            synchronized (getClassLoadingLock(name)) {
+                if (name.startsWith("com.botmaker.plugin.api.")) throw new ClassNotFoundException(name);
+                if (!name.startsWith(INNER)) return super.loadClass(name, resolve);
+                Class<?> found = findLoadedClass(name);
+                if (found != null) return found;
+                try (var in = getParent().getResourceAsStream(name.replace('.', '/') + ".class")) {
+                    if (in == null) throw new ClassNotFoundException(name);
+                    byte[] bytes = in.readAllBytes();
+                    return defineClass(name, bytes, 0, bytes.length);
+                } catch (IOException e) {
+                    throw new ClassNotFoundException(name, e);
+                }
+            }
+        }
     }
 }

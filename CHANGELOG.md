@@ -9,6 +9,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- A bot that names no plugin keeps its run log and its wire to Studio again. Since run claims (2026-11-15) the run's
+  inner half (`AgentRun`) failed to link without the contract on the bot's classpath, and every such run printed
+  `this run keeps no log: java.lang.NoClassDefFoundError: …Claims$Service`. The call that serves claims now sits in
+  `RunClaims`, which loads only for one of several runs.
 - A plugin's dev reload (`StudioServices.devReload`) asked from a client's copy of the plugin, as the SDK's
   `explore reload_sdk` is while Studio is attached, is no longer refused as *not here*: the client forwards it
   (`DevReloads.installForwarding`, `Request.DevReload`) and the core's own copy reloads, with the same checks.

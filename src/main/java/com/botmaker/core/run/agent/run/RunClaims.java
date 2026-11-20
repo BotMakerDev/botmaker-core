@@ -21,6 +21,14 @@ final class RunClaims implements Claims.Service {
         this.runId = runId;
     }
 
+    /**
+     * Serves {@code runId}'s claims. Here, not in {@link AgentRun}: verifying a call that passes this class as a
+     * {@link Claims.Service} loads the contract, which a bot naming no plugin does not have.
+     */
+    static void serve(RunRegistry registry, String runId) {
+        Claims.serve(new RunClaims(registry, runId));
+    }
+
     @Override
     public boolean claim(String key) {
         try {
