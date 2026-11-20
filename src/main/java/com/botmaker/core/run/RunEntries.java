@@ -137,11 +137,11 @@ public final class RunEntries {
 
         /**
          * The next run to start is {@code entry}'s, as an ask to run it said; null when it is the bot's {@code main} or
-         * a try, which no companion serves. An ask while a run goes is refused by the run's start ("already running"), so
-         * it changes nothing here.
+         * a try, which no companion serves. An ask while a run goes, {@code busy} from its claim on, so while it still
+         * compiles too, is refused by the run's start ("already running"), so it changes nothing here.
          */
-        public synchronized void asked(RunEntry entry) {
-            if (running == null) asked = entry;
+        public synchronized void asked(RunEntry entry, boolean busy) {
+            if (running == null && !busy) asked = entry;
         }
 
         /**

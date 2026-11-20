@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -81,7 +82,7 @@ class RunEntriesTest {
     void aCompanionStartsAndStopsWithItsRun() {
         RunEntries.Companions companions = companions();
 
-        companions.asked(EXPLORE);
+        companions.asked(EXPLORE, false);
         assertTrue(HEARD.isEmpty(), "nothing before the run's process is up");
         companions.started();
         companions.ended();
@@ -97,7 +98,7 @@ class RunEntriesTest {
     void twoClientsStartOneCompanion() {
         RunEntries.Companions companions = companions();
 
-        companions.asked(EXPLORE);
+        companions.asked(EXPLORE, false);
         // Studio and an MCP session both hear the run start; the core's one set starts once.
         companions.started();
         companions.started();
@@ -111,10 +112,10 @@ class RunEntriesTest {
     void theBotsOwnRunStartsNoCompanion() {
         RunEntries.Companions companions = companions();
 
-        companions.asked(RunEntry.of("Check", Main::main));
+        companions.asked(RunEntry.of("Check", Main::main), false);
         companions.started();
         companions.ended();
-        companions.asked(null);
+        companions.asked(null, false);
         companions.started();
 
         assertTrue(HEARD.isEmpty(), HEARD.toString());
@@ -123,15 +124,32 @@ class RunEntriesTest {
     @Test
     void anAskWhileARunGoesStartsNothingLater() {
         RunEntries.Companions companions = companions();
-        companions.asked(null);
+        companions.asked(null, false);
         companions.started();
 
         // Refused by the start ("already running"): the bot's run ends and the next start is not Explore's.
-        companions.asked(EXPLORE);
+        companions.asked(EXPLORE, true);
         companions.ended();
         companions.started();
 
         assertTrue(HEARD.isEmpty(), HEARD.toString());
+    }
+
+    @Test
+    void anAskWhileARunCompilesChangesNothing() {
+        RunEntries.Companions companions = companions();
+        // The bot's main claimed, still compiling: an ask for Explore is refused by the start.
+        companions.asked(null, false);
+        companions.asked(EXPLORE, true);
+        companions.started();
+        assertTrue(HEARD.isEmpty(), HEARD.toString());
+        companions.ended();
+
+        // Explore claimed, still compiling: an ask for the bot's main is refused, Explore's companion still starts.
+        companions.asked(EXPLORE, false);
+        companions.asked(null, true);
+        companions.started();
+        assertFalse(HEARD.isEmpty(), "Explore's companion started");
     }
 
     @Test

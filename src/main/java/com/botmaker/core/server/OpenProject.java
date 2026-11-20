@@ -400,7 +400,7 @@ public final class OpenProject implements AutoCloseable {
         }
         if (request instanceof Request.RunSeveral several) {
             // Several runs of the bot: no companion serves them, whatever an earlier ask left.
-            companions.asked(null);
+            companions.asked(null, execution.isRunning());
             return runSeveral(several, stopsBefore);
         }
         try {
@@ -519,22 +519,23 @@ public final class OpenProject implements AutoCloseable {
             }
             case Request.Compile compile -> started(() -> execution.compileCode(state.snapshot()));
             case Request.Run run -> {
-                companions.asked(null);
+                companions.asked(null, execution.isRunning());
                 yield started(() -> execution.runCode(state.snapshot()));
             }
             case Request.RunEntry entry -> {
-                companions.asked(declaredEntry(entry.title(), entry.mainClass()));
+                // Busy from the run's claim on, while it still compiles too: a start then is refused, its ask kept out.
+                companions.asked(declaredEntry(entry.title(), entry.mainClass()), execution.isRunning());
                 yield started(() -> execution.runEntry(state.snapshot(), entry.title(), entry.mainClass(),
                         entry.arguments()));
             }
             // Never here: ask starts it apart, since its start leaves the project's thread.
             case Request.RunSeveral several -> new EditResult.Refused("Several runs are asked through ask.");
             case Request.Try attempt -> {
-                companions.asked(null);
+                companions.asked(null, execution.isRunning());
                 yield trial(attempt.trial());
             }
             case Request.Debug debug -> {
-                companions.asked(null);
+                companions.asked(null, execution.isRunning());
                 yield started(() -> debugger.startDebugging(debug.follow(), breakpoints(debug)));
             }
             case Request.Control steer -> steer(steer);
