@@ -64,7 +64,7 @@ public final class CatalogListing {
      * request that would change it is then closed.
      */
     public ListingStatus open(CatalogPr.Change change, String login, String token) throws IOException {
-        String path = change.path().path();
+        String path = change.file();
         Optional<String> main = textOnMain(path, token);
         Optional<JsonNode> pr = openPullRequest(change.branch(), login, token);
         if (main.equals(change.content())) {
@@ -142,7 +142,7 @@ public final class CatalogListing {
             String headOwner = push ? GitHubConfig.CATALOG_OWNER : login;
             String headApi = push ? catalogApi() : fork(login, token);
             String branch = change.branch();
-            String path = change.path().path();
+            String path = change.file();
             prepareBranch(headApi, branch, token);
             String sha = fileSha(contentsUrl(headApi, path), branch, token);
             if (change.content().isPresent()) {

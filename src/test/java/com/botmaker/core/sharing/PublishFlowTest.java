@@ -159,8 +159,8 @@ class PublishFlowTest {
     void aBotsPullRequestIsTheClisChangeOnTheBranchStudioReads() throws Exception {
         BotEntry v1 = new BotEntry("Alice/koala-bot", List.of(ApprovedRelease.ofBot("1.0.0", "a".repeat(40))), false);
         CatalogPr.Change add = CatalogPr.Change.put(v1, BotPublisher.COMMAND);
-        assertEquals("bots/Alice__koala-bot.json", add.path().path());
-        assertEquals(CatalogListing.path("Alice/koala-bot"), add.path().path());
+        assertEquals("bots/Alice__koala-bot.json", add.file());
+        assertEquals(CatalogListing.path("Alice/koala-bot"), add.file());
         assertEquals(CatalogListing.branch(CatalogListing.path("Alice/koala-bot")), add.branch());
         assertEquals("bot: Alice/koala-bot 1.0.0", add.title());
 

@@ -51,6 +51,10 @@ import com.botmaker.core.run.debug.DebugSnapshot;
 import com.botmaker.core.run.debug.DebugView;
 import com.botmaker.core.run.debug.FollowPacer;
 import com.botmaker.core.run.trial.TrialAsk;
+import com.botmaker.cli.bmk.BotJson;
+import com.botmaker.core.sharing.Advisories;
+import com.botmaker.core.sharing.CatalogClient;
+import com.botmaker.core.sharing.UnpackedBots;
 import com.botmaker.core.services.BotSources;
 import com.botmaker.core.runtime.JavacRelease;
 import com.botmaker.core.services.ContractDependency;
@@ -500,6 +504,14 @@ public final class OpenProject implements AutoCloseable {
 
     private EditResult answer(Request request) {
         readDiskAgain();
+        Optional<BotJson> runCopy = startsABot(request) ? UnpackedBots.at(directory()) : Optional.empty();
+        if (runCopy.isPresent()) {
+            // A run copy whose release an advisory names runs only after this computer's Run anyway (spec 2026-11-21
+            // § 5), checked against the last verified catalog, so it holds offline. Studio asks before it sends.
+            Optional<Advisories.Refused> advised = Advisories.here().refusingRun(runCopy,
+                    CatalogClient.session().kept());
+            if (advised.isPresent()) return new EditResult.Refused(advised.get().text());
+        }
         return switch (request) {
             case Request.Show show -> show(show.file());
             case Request.Reload reload -> reload();

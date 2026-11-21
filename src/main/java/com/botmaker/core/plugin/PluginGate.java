@@ -4,10 +4,12 @@
 package com.botmaker.core.plugin;
 
 import com.botmaker.cli.bmk.BotJson;
+import com.botmaker.cli.catalog.Advisory;
 import com.botmaker.cli.catalog.Catalog;
 import com.botmaker.plugin.host.PluginLoader;
 import com.botmaker.shared.github.GitHubAuth;
 import com.botmaker.core.services.MavenService;
+import com.botmaker.core.sharing.Advisories;
 import com.botmaker.core.sharing.CatalogClient;
 import com.botmaker.core.sharing.CatalogIndex;
 import com.botmaker.core.sharing.PluginRegistry;
@@ -78,10 +80,25 @@ public final class PluginGate {
      * @param jar        the jar, as {@code <artifact> <version>}
      * @param row        its catalog row, empty when the catalog does not list it
      */
-    public record Asked(String coordinate, String jar, Optional<PluginRegistry.Plugin> row) {
+    public record Asked(String coordinate, String jar, Optional<PluginRegistry.Plugin> row,
+                        Optional<String> advisory) {
+
+        /** A plugin asked about for its rank or listing, no advisory naming its release. */
+        public Asked(String coordinate, String jar, Optional<PluginRegistry.Plugin> row) {
+            this(coordinate, jar, row, Optional.empty());
+        }
+
+        /** Whether it asks to run a release despite a security advisory: a yes names the severity it accepts. */
+        public boolean advised() {
+            return advisory.isPresent();
+        }
 
         /** The question, in words: whose plugin, why it is asked, what a yes does. */
         public String question() {
+            if (advisory.isPresent()) {
+                return advisory.get() + "\n\nRun it anyway on this computer? Only this release is let through; Studio"
+                        + " asks again for any other.";
+            }
             String what = row.map(r -> "“" + (r.name().isBlank() ? r.repo() : r.name()) + "” (" + jar + ") by "
                             + r.repo().substring(0, Math.max(0, r.repo().indexOf('/')))
                             + (r.rank() == PublisherRank.COMMUNITY ? " is a community plugin."
@@ -127,6 +144,7 @@ public final class PluginGate {
     private final Pins pins;
     /** A run copy's packed jar's {@code bot.json} line ({@link UnpackedBots#libOf}), empty for any other jar. */
     private final Function<Path, Optional<BotJson.Lib>> packed;
+    private final Advisories advisories;
 
     /** What the catalog says of a jar at a version ({@link ReleasePins#check}). */
     @FunctionalInterface
@@ -154,6 +172,16 @@ public final class PluginGate {
                Supplier<CommunityConsent> consent, Consumer<CommunityConsent> keep, Asker asker,
                Predicate<Path> declaresPlugin, Predicate<Path> builtHere, Pins pins,
                Function<Path, Optional<BotJson.Lib>> packed) {
+        this(catalog, repository, login, consent, keep, asker, declaresPlugin, builtHere, pins, packed,
+                Advisories.here());
+    }
+
+    /** @param advisories where this computer's <i>Run anyway</i> answers to advisories are kept */
+    PluginGate(Supplier<CatalogIndex> catalog, Path repository, Supplier<String> login,
+               Supplier<CommunityConsent> consent, Consumer<CommunityConsent> keep, Asker asker,
+               Predicate<Path> declaresPlugin, Predicate<Path> builtHere, Pins pins,
+               Function<Path, Optional<BotJson.Lib>> packed, Advisories advisories) {
+        this.advisories = advisories;
         this.packed = packed;
         this.catalog = catalog;
         this.repository = repository.toAbsolutePath().normalize();
@@ -260,6 +288,18 @@ public final class PluginGate {
                 refused.add(new PluginLoader.PluginFailure(describe(entry),
                         new IllegalStateException(refusal.get())));
                 continue;
+            }
+            // An advisory naming this release refuses it until the user runs it anyway, for this release alone
+            // (spec 2026-11-21 § 5); the rank and listing questions still follow.
+            Optional<Advisory> advised = row.flatMap(r -> advisories.refusing(listed, r.repo(), version));
+            if (advised.isPresent()) {
+                String slug = row.get().repo();
+                String why = Advisories.refusal(listed, advised.get(), slug, version);
+                if (!asks(new Asked(coordinate, describe(entry), row, Optional.of(why)))) {
+                    refused.add(new PluginLoader.PluginFailure(describe(entry), new IllegalStateException(why)));
+                    continue;
+                }
+                advisories.override(advised.get(), slug, version);
             }
             if (!CommunityConsent.needsAsking(coordinate, version, row, !listed.isEmpty(), who, dev.contains(jar),
                     () -> verdict == ReleasePins.Verdict.APPROVED)) {

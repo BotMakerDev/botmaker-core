@@ -9,6 +9,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Security advisories (catalog trust, phase 5): a plugin release or a run copy a catalog advisory names is refused
+  until the user says *Run anyway* for that release alone, kept in `advisory-overrides.json` of the config folder;
+  the check reads the last verified catalog, so it holds offline. Pickers leave affected releases out, each pulled
+  with the advisory as its reason (`Advisories`, `CatalogIndex.advisories`).
 - The catalog is signed (catalog trust, phase 4): `CatalogClient` reads `catalog.signed.json` and uses only a catalog
   whose Ed25519 signature `CatalogSignature` verifies against `catalog-keys.txt`. It keeps only a verified catalog on
   disk, as the signed file. A catalog that fails is treated like no answer: the kept one serves, `Reply.trust()`

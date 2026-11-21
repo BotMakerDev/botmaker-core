@@ -3,6 +3,7 @@
 
 package com.botmaker.core.sharing;
 
+import com.botmaker.cli.catalog.Advisory;
 import com.botmaker.cli.catalog.ApprovedRelease;
 import com.botmaker.cli.catalog.Catalog;
 import com.botmaker.cli.catalog.CatalogJson;
@@ -15,8 +16,10 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
@@ -33,7 +36,7 @@ import java.util.Optional;
  * release (the single {@code tag} of schema 3 is not read) is skipped. A bot's plugin repo that names no plugin row
  * (a plugin unlisted since the catalog was built) is kept as a pin; it simply matches no row.
  */
-public record CatalogIndex(List<PluginRegistry.Plugin> plugins, List<GalleryEntry> bots) {
+public record CatalogIndex(List<PluginRegistry.Plugin> plugins, List<GalleryEntry> bots, List<Advisory> advisories) {
 
     public static final CatalogIndex EMPTY = new CatalogIndex(List.of(), List.of());
 
@@ -42,6 +45,12 @@ public record CatalogIndex(List<PluginRegistry.Plugin> plugins, List<GalleryEntr
     public CatalogIndex {
         plugins = List.copyOf(plugins);
         bots = List.copyOf(bots);
+        advisories = List.copyOf(advisories);
+    }
+
+    /** A catalog with no advisory. */
+    public CatalogIndex(List<PluginRegistry.Plugin> plugins, List<GalleryEntry> bots) {
+        this(plugins, bots, List.of());
     }
 
     public boolean isEmpty() {
@@ -77,17 +86,57 @@ public record CatalogIndex(List<PluginRegistry.Plugin> plugins, List<GalleryEntr
             return Optional.empty();
         }
         if (root == null || !root.isObject()) return Optional.empty();
+        List<Advisory> advisories = new ArrayList<>();
+        for (JsonNode row : root.path("advisories")) {
+            row(row, Advisory.class).filter(a -> a.active() && a.id() != null && a.repo() != null
+                    && a.summary() != null && !a.summary().isBlank()).ifPresent(advisories::add);
+        }
         List<PluginRegistry.Plugin> plugins = new ArrayList<>();
         for (JsonNode row : root.path("plugins")) {
-            row(row, Catalog.Plugin.class).flatMap(CatalogIndex::plugin).ifPresent(plugins::add);
+            row(row, Catalog.Plugin.class).map(p -> advised(p, advisories)).flatMap(CatalogIndex::plugin)
+                    .ifPresent(plugins::add);
         }
         Map<String, PublisherRank> rankByRepo = new HashMap<>();
         for (PluginRegistry.Plugin plugin : plugins) rankByRepo.putIfAbsent(plugin.repo(), plugin.rank());
         List<GalleryEntry> bots = new ArrayList<>();
         for (JsonNode row : root.path("bots")) {
-            row(row, Catalog.Bot.class).flatMap(bot -> bot(bot, rankByRepo)).ifPresent(bots::add);
+            row(row, Catalog.Bot.class).map(b -> advised(b, advisories)).flatMap(bot -> bot(bot, rankByRepo))
+                    .ifPresent(bots::add);
         }
-        return Optional.of(new CatalogIndex(plugins, bots));
+        return Optional.of(new CatalogIndex(plugins, bots, advisories));
+    }
+
+    /**
+     * A release an advisory names is pulled as a yanked one is (spec § 5: pickers leave it out and mark it): its
+     * {@code yanked} says the advisory, unless the release was already yanked for a reason of its own.
+     */
+    private static Optional<ApprovedRelease.Yanked> advisory(String repo, List<String> formerly, String tag,
+                                                             List<Advisory> advisories) {
+        return advisories.stream().filter(a -> a.affects(repo, tag) || formerly.stream().anyMatch(s -> a.affects(s, tag)))
+                .max(Comparator.comparing(Advisory::severity))
+                .map(a -> new ApprovedRelease.Yanked("security advisory " + a.id() + " ("
+                        + a.severity().displayName().toLowerCase(Locale.ROOT) + "): " + a.summary().strip(),
+                        a.published()));
+    }
+
+    private static Catalog.Plugin advised(Catalog.Plugin row, List<Advisory> advisories) {
+        if (advisories.isEmpty() || row.repo() == null) return row;
+        List<Catalog.Plugin.Release> releases = row.releases().stream().map(r -> r == null || r.yanked() != null ? r
+                : advisory(row.repo(), row.formerly(), r.tag(), advisories).map(why -> new Catalog.Plugin.Release(
+                r.tag(), r.commit(), r.jarSha256(), r.pomSha256(), r.minContractVersion(), r.editorDependencies(),
+                r.plugins(), r.publishedAt(), why)).orElse(r)).toList();
+        return new Catalog.Plugin(row.repo(), row.rank(), row.coordinate(), row.name(), row.description(), row.tags(),
+                row.stars(), releases, row.updatedAt(), row.formerly());
+    }
+
+    private static Catalog.Bot advised(Catalog.Bot row, List<Advisory> advisories) {
+        if (advisories.isEmpty() || row.repo() == null) return row;
+        List<Catalog.Bot.Release> releases = row.releases().stream().map(r -> r == null || r.yanked() != null ? r
+                : advisory(row.repo(), row.formerly(), r.tag(), advisories).map(why -> new Catalog.Bot.Release(
+                r.tag(), r.commit(), r.plugins(), r.bmkSha256(), r.publishedAt(), r.downloads(), r.platforms(), why))
+                .orElse(r)).toList();
+        return new Catalog.Bot(row.repo(), row.rank(), row.description(), row.tags(), row.stars(), row.forkOf(),
+                releases, row.updatedAt(), row.downloads(), row.formerly());
     }
 
     /** One row as the cli's record, empty when it does not read as one. */
