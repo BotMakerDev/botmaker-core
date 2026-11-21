@@ -5,7 +5,7 @@ All notable changes to `botmaker-core`.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this module uses
 [semantic versioning](https://semver.org/). `release.sh` refuses to cut a version with no section here.
 
-## [Unreleased]
+## [0.3.0] — 2026-11-21
 
 ### Fixed
 
@@ -47,6 +47,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   its SPDX header, and the `reuse` workflow checks both on each push.
 - Licensed under PolyForm Noncommercial 1.0.0, copyright LiQiyeDev: free for any noncommercial use, commercial use
   needs a license from LiQiyeDev. Releases up to v0.2.1 stay CC0 1.0.
+- Built against botmaker-sdk 1.12.0 (was 1.11.0).
+- Built against botmaker-shared 0.10.0 (was 0.9.0).
+- Built against botmaker-session 0.9.0 (was 0.8.0).
+- Built against botmaker-studio-api 0.19.0 (was 0.18.0).
+- Built against botmaker-plugin-host 0.14.0 (was 0.13.0).
+- Built against botmaker-cli 0.14.0 (was 0.13.1).
+- Built against botmaker-runlog 0.2.0 (was 0.1.0).
+- Built against botmaker-java 0.4.0 (was 0.3.0).
 
 ## [0.2.1] — 2026-11-16
 
