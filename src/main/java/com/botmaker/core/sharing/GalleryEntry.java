@@ -3,6 +3,7 @@
 
 package com.botmaker.core.sharing;
 
+import com.botmaker.cli.catalog.ApprovedRelease;
 import com.botmaker.cli.catalog.Catalog;
 import com.botmaker.cli.catalog.Platform;
 import com.botmaker.shared.github.SemVer;
@@ -85,9 +86,32 @@ public record GalleryEntry(String name, String owner, String repo, String descri
                 releases);
     }
 
-    /** The tags the catalog approved, newest first: what <i>Get vX.Y</i> picks from. */
+    /** The tags the catalog approved and nobody yanked, newest first: what <i>Get vX.Y</i> picks from. */
     public List<String> approvedTags() {
-        return releases.stream().map(Catalog.Bot.Release::tag).toList();
+        return releases.stream().filter(r -> r.yanked() == null).map(Catalog.Bot.Release::tag).toList();
+    }
+
+    /** Why the catalog's release {@code tag} was pulled; empty when it was not, or is not listed (spec § 4). */
+    public Optional<ApprovedRelease.Yanked> yanked(String tag) {
+        return releases.stream().filter(r -> r.tag().equals(tag)).map(Catalog.Bot.Release::yanked)
+                .filter(Objects::nonNull).findFirst();
+    }
+
+    /** The banner for a copy on {@code installed}, when that release was pulled; empty otherwise. */
+    public Optional<String> pulledLine(String installed) {
+        return yanked(installed).map(why -> CatalogIndex.pulledLine(installed, why, tag));
+    }
+
+    /** Whether the catalog lists releases but every one was pulled, so none is offered. */
+    public boolean allPulled() {
+        return !releases.isEmpty() && tag.isBlank();
+    }
+
+    /** "Every release was pulled: <newest's reason>." when {@link #allPulled}; empty otherwise. */
+    public Optional<String> allPulledLine() {
+        if (!allPulled()) return Optional.empty();
+        return Optional.of("Every release was pulled"
+                + yanked(releases.getFirst().tag()).map(why -> ": " + CatalogIndex.sentence(why)).orElse("."));
     }
 
     /**
@@ -132,16 +156,21 @@ public record GalleryEntry(String name, String owner, String repo, String descri
 
     /** Whether its newest release runs on {@code os}: it names that system, or names none (2026-11-21). */
     public boolean runsHere(Os os) {
-        return releases.isEmpty() || releases.getFirst().runsOn(Platform.fromId(os.id()));
+        return offered().map(r -> r.runsOn(Platform.fromId(os.id()))).orElse(true);
     }
 
-    /** "Windows", "Linux and macOS": the systems its newest release names, every known one when it names none. */
+    /** "Windows", "Linux and macOS": the systems its offered release names, every known one when it names none. */
     public String systemsLine() {
-        List<Platform> named = releases.isEmpty() || releases.getFirst().platforms().isEmpty()
-                ? Platform.known() : releases.getFirst().platforms();
+        List<Platform> named = offered().map(Catalog.Bot.Release::platforms).filter(p -> !p.isEmpty())
+                .orElse(Platform.known());
         List<String> names = named.stream().map(Platform::displayName).toList();
         return names.size() == 1 ? names.getFirst()
                 : String.join(", ", names.subList(0, names.size() - 1)) + " and " + names.getLast();
+    }
+
+    /** The release {@link #tag} names, the one offered; empty when none is. */
+    private Optional<Catalog.Bot.Release> offered() {
+        return releases.stream().filter(r -> r.tag().equals(tag)).findFirst();
     }
 
     /** How far this bot is trusted: its publisher's rank, or its plugins' when one of theirs is lower. */

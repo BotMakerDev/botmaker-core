@@ -3,6 +3,7 @@
 
 package com.botmaker.core.sharing;
 
+import com.botmaker.cli.catalog.ApprovedRelease;
 import com.botmaker.cli.catalog.Catalog;
 import com.botmaker.cli.catalog.CatalogJson;
 import com.botmaker.cli.catalog.DerivedFacts;
@@ -93,11 +94,15 @@ public record CatalogIndex(List<PluginRegistry.Plugin> plugins, List<GalleryEntr
         List<Catalog.Plugin.Release> releases = row.releases().stream()
                 .filter(r -> r != null && !trim(r.tag()).isEmpty()).toList();
         if (!isSlug(repo) || releases.isEmpty()) return Optional.empty();
-        Catalog.Plugin.Release newest = releases.getFirst();
+        // What is offered is the newest release not yanked; a row whose every release was pulled offers none
+        // (2026-11-21, spec § 4) and stays listed, so a project on one still finds its row and its reason.
+        Optional<Catalog.Plugin.Release> offered = releases.stream().filter(r -> r.yanked() == null).findFirst();
+        Catalog.Plugin.Release newest = offered.orElse(releases.getFirst());
         String name = trim(row.name());
         return Optional.of(new PluginRegistry.Plugin(name.isEmpty() ? repoName(repo) : name,
                 trim(row.coordinate()), repo, row.description(), row.tags(), trim(newest.minContractVersion()),
-                newest.editorDependencies(), "", newest.tag(), rank(row.rank()), row.stars(), releases));
+                newest.editorDependencies(), "", offered.map(Catalog.Plugin.Release::tag).orElse(""),
+                rank(row.rank()), row.stars(), releases));
     }
 
     private static Optional<GalleryEntry> bot(Catalog.Bot row, Map<String, PublisherRank> rankByRepo) {
@@ -105,7 +110,9 @@ public record CatalogIndex(List<PluginRegistry.Plugin> plugins, List<GalleryEntr
         List<Catalog.Bot.Release> releases = row.releases().stream()
                 .filter(r -> r != null && !trim(r.tag()).isEmpty()).toList();
         if (!isSlug(repo) || releases.isEmpty()) return Optional.empty();
-        Catalog.Bot.Release newest = releases.getFirst();
+        // As for a plugin: the newest release not yanked is the one offered, and none when every one was pulled.
+        Optional<Catalog.Bot.Release> offered = releases.stream().filter(r -> r.yanked() == null).findFirst();
+        Catalog.Bot.Release newest = offered.orElse(releases.getFirst());
         List<PublishedBotPlugins.Pin> pins = new ArrayList<>();
         // A plugin no row lists vouches for nothing, as an unknown rank does.
         PublisherRank pluginsRank = PublisherRank.ADMIN;
@@ -117,7 +124,8 @@ public record CatalogIndex(List<PluginRegistry.Plugin> plugins, List<GalleryEntr
         }
         String name = repoName(repo);
         return Optional.of(new GalleryEntry(name, repo.substring(0, repo.indexOf('/')), name, row.description(),
-                row.tags(), trim(row.forkOf()), newest.tag(), rank(row.rank()), row.stars(), pins, pluginsRank,
+                row.tags(), trim(row.forkOf()), offered.map(Catalog.Bot.Release::tag).orElse(""), rank(row.rank()),
+                row.stars(), pins, pluginsRank,
                 releases));
     }
 
@@ -133,6 +141,21 @@ public record CatalogIndex(List<PluginRegistry.Plugin> plugins, List<GalleryEntr
         } catch (DateTimeParseException e) {
             return Optional.empty();
         }
+    }
+
+    /**
+     * The banner over a project or run copy on a yanked release (spec § 4): "v1.2.0 was pulled: Deletes saves.
+     * Newest: v1.1.0", the last part "No release is offered now." when every release was pulled.
+     */
+    public static String pulledLine(String tag, ApprovedRelease.Yanked why, String offered) {
+        return tag + " was pulled: " + sentence(why)
+                + (offered == null || offered.isBlank() ? " No release is offered now." : " Newest: " + offered);
+    }
+
+    /** A yank's reason as a sentence: stripped, ending in a stop. */
+    static String sentence(ApprovedRelease.Yanked why) {
+        String reason = why.reason().strip();
+        return reason.isEmpty() || ".!?".indexOf(reason.charAt(reason.length() - 1)) >= 0 ? reason : reason + ".";
     }
 
     /** "updated today", "updated 3 days ago", "updated 2 months ago": how a list says when a row last changed. */

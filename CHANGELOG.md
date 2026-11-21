@@ -9,6 +9,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- A yanked release (catalog trust, phase 2) is offered by no picker. A row's `tag` and `version` are its newest
+  release not yanked, and are blank when every release was pulled. The row is still listed. `approvedTags()` skips
+  yanked releases, and the home plugins never bind one. `GalleryEntry` and `PluginRegistry.Plugin` gain
+  `yanked(tag)` and `pulledLine(installed)`, which give "v3 was pulled: <reason>. Newest: v2". `GalleryEntry` also
+  gains `allPulled()`. Nothing is refused: when every release of a side-run bot was pulled, the copy kept before
+  still serves.
 - New methods read catalog schema 6: `GalleryEntry.downloads()`, `updatedAt()`, `runsHere(Os)`, `systemsLine()`
   and `factsLine(Instant)`, plus `PluginRegistry.Plugin.updatedAt()` and `CatalogIndex.updatedAgo`. A cached
   schema-5 catalog still reads; it has no counts or times, and every system is allowed.

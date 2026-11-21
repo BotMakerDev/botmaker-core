@@ -120,6 +120,19 @@ public final class CatalogCopies {
                 throw new IOException(slug + " is not one of BotMaker's own bots in the catalog, so it is not run "
                         + "without you getting it from the bot list.");
             }
+            // A yank refuses nothing (spec § 4): a copy got before on a release since pulled still serves, rather than
+            // being swapped for an older one (a newer release replaces it); with none kept, every release pulled is
+            // said as such.
+            if (kept.isPresent()) {
+                String keptTag = kept.get().getFileName().toString();
+                if (entry.yanked(keptTag).isPresent()
+                        && (entry.tag().isBlank() || byVersion(entry.tag(), keptTag) < 0)) return kept.get();
+            }
+            Optional<String> allPulled = entry.allPulledLine();
+            if (allPulled.isPresent()) {
+                if (kept.isPresent()) return kept.get();
+                throw new IOException(slug + ": " + allPulled.get());
+            }
             Optional<String> pinned = entry.bmkShaOf(entry.tag());
             if (!BmkDownload.ready(entry) || pinned.isEmpty()) {
                 throw new IOException("The catalog lists no ready-to-run release of " + slug + " yet.");

@@ -3,6 +3,7 @@
 
 package com.botmaker.core.sharing;
 
+import com.botmaker.cli.catalog.ApprovedRelease;
 import com.botmaker.cli.catalog.Catalog;
 import com.botmaker.cli.catalog.DerivedFacts;
 import com.botmaker.core.project.UserLibrary;
@@ -133,9 +134,19 @@ public final class PluginRegistry {
                     .filter(repo -> repo != null && !repo.isBlank()).map(String::trim).distinct().toList();
         }
 
-        /** The tags the catalog approved, newest first: what Plugins & Libraries offers. */
+        /** The tags the catalog approved and nobody yanked, newest first: what Plugins & Libraries offers. */
         public List<String> approvedTags() {
-            return releases.stream().map(Catalog.Plugin.Release::tag).toList();
+            return releases.stream().filter(r -> r.yanked() == null).map(Catalog.Plugin.Release::tag).toList();
+        }
+
+        /** Why the catalog's release {@code version} was pulled; empty when it was not, or is not listed. */
+        public Optional<ApprovedRelease.Yanked> yanked(String version) {
+            return release(version).map(Catalog.Plugin.Release::yanked);
+        }
+
+        /** The banner for a project on {@code installed}, when that release was pulled; empty otherwise. */
+        public Optional<String> pulledLine(String installed) {
+            return yanked(installed).map(why -> CatalogIndex.pulledLine(installed, why, tag));
         }
 
         public String groupId() {
@@ -166,9 +177,12 @@ public final class PluginRegistry {
                     .toList();
         }
 
-        /** A plugin with no resolvable coordinate cannot be installed, whatever else the entry says. */
+        /**
+         * A plugin with no resolvable coordinate cannot be installed, whatever else the entry says; nor one whose
+         * every release was pulled, which offers no version (2026-11-21).
+         */
         public boolean isInstallable() {
-            return !groupId().isBlank() && !artifactId().isBlank();
+            return !groupId().isBlank() && !artifactId().isBlank() && !version.isBlank();
         }
 
         public String htmlUrl() {

@@ -95,6 +95,38 @@ class CatalogCopiesTest {
         assertEquals("v0.2.0", copies.copyOf(SLUG).getFileName().toString());
     }
 
+    /** A yank refuses nothing: a copy on a pulled release serves until a newer release is listed. */
+    @Test
+    void aCopyOnAPulledReleaseServesUntilANewerOne() throws Exception {
+        Path kept = checked("v0.2.0", SHA_2);
+        shelf.fresh = true;
+        shelf.catalog = CatalogIndex.parse(pulled("""
+                {"tag": "v0.2.0", "commit": "c2", "bmkSha256": "%s", "yanked": {"reason": "Breaks", "at": "2026-11-21T00:00:00Z"}},
+                {"tag": "v0.1.0", "commit": "c1", "bmkSha256": "%s"}""".formatted(SHA_2, SHA_1)));
+        assertEquals(kept, copies.copyOf(SLUG), "not swapped for the older v0.1.0");
+        assertEquals(List.of(), downloaded);
+
+        shelf.catalog = CatalogIndex.parse(pulled("""
+                {"tag": "v0.3.0", "commit": "c3", "bmkSha256": "%s"},
+                {"tag": "v0.2.0", "commit": "c2", "bmkSha256": "%s", "yanked": {"reason": "Breaks", "at": "2026-11-21T00:00:00Z"}}"""
+                .formatted(SHA_1, SHA_2)));
+        assertEquals("v0.3.0", copies.copyOf(SLUG).getFileName().toString(), "a newer release replaces it");
+    }
+
+    @Test
+    void everyReleasePulledAndNoneKeptSaysWhy() {
+        shelf.fresh = true;
+        shelf.catalog = CatalogIndex.parse(pulled("""
+                {"tag": "v0.1.0", "commit": "c1", "bmkSha256": "%s", "yanked": {"reason": "Bans accounts", "at": "2026-11-21T00:00:00Z"}}"""
+                .formatted(SHA_1)));
+        IOException refused = assertThrows(IOException.class, () -> copies.copyOf(SLUG));
+        assertEquals(SLUG + ": Every release was pulled: Bans accounts.", refused.getMessage());
+    }
+
+    private static String pulled(String releases) {
+        return "{\"bots\": [{\"repo\": \"" + SLUG + "\", \"rank\": \"admin\", \"releases\": [" + releases + "]}]}";
+    }
+
     @Test
     void offlineTheLastCopyServes() throws Exception {
         Path old = checked("v0.1.0", SHA_1);

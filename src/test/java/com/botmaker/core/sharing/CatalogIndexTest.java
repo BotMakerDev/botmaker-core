@@ -113,6 +113,44 @@ class CatalogIndexTest {
         assertEquals("", CatalogIndex.parse(SPEC).bots().getFirst().factsLine(Instant.EPOCH), "schema 5 says neither");
     }
 
+    /** Spec § 4: a yanked release is offered by no picker, a copy on one gets a banner, a row all pulled stays. */
+    @Test
+    void aYankedReleaseIsNotOfferedAndACopyOnItIsTold() {
+        CatalogIndex index = CatalogIndex.parse("""
+                {"schemaVersion": 6,
+                 "plugins": [{"repo": "o/sdk", "coordinate": "com.github.o:sdk",
+                              "releases": [{"tag": "v3", "yanked": {"reason": "Breaks saves", "at": "2026-11-21T00:00:00Z"}},
+                                           {"tag": "v2"}]},
+                             {"repo": "o/gone", "coordinate": "com.github.o:gone",
+                              "releases": [{"tag": "v1", "yanked": {"reason": "Malware.", "at": "2026-11-21T00:00:00Z"}}]}],
+                 "bots": [{"repo": "o/miner",
+                           "releases": [{"tag": "v3", "commit": "c3", "platforms": ["windows"],
+                                         "yanked": {"reason": "Bans accounts.", "at": "2026-11-21T00:00:00Z"}},
+                                        {"tag": "v2", "commit": "c2"}]},
+                          {"repo": "o/pulled",
+                           "releases": [{"tag": "v1", "commit": "c1",
+                                         "yanked": {"reason": "Bans accounts.", "at": "2026-11-21T00:00:00Z"}}]}]}""");
+        PluginRegistry.Plugin sdk = index.plugins().getFirst();
+        assertEquals("v2", sdk.version(), "the newest release not yanked is offered");
+        assertEquals(List.of("v2"), sdk.approvedTags());
+        assertEquals(Optional.of("v3 was pulled: Breaks saves. Newest: v2"), sdk.pulledLine("v3"));
+        assertEquals(Optional.empty(), sdk.pulledLine("v2"));
+        PluginRegistry.Plugin gone = index.plugins().get(1);
+        assertFalse(gone.isInstallable(), "every release pulled: nothing to install");
+        assertEquals(Optional.of("v1 was pulled: Malware. No release is offered now."), gone.pulledLine("v1"));
+
+        GalleryEntry miner = index.bots().getFirst();
+        assertEquals("v2", miner.tag());
+        assertEquals(List.of("v2"), miner.approvedTags());
+        assertTrue(miner.runsHere(Os.LINUX), "the offered release names no system, not the yanked one");
+        assertEquals(Optional.of("v3 was pulled: Bans accounts. Newest: v2"), miner.pulledLine("v3"));
+        assertFalse(miner.allPulled());
+        GalleryEntry pulled = index.bots().get(1);
+        assertEquals("", pulled.tag(), "the row is still listed, offering nothing");
+        assertTrue(pulled.allPulled());
+        assertFalse(BmkDownload.ready(pulled));
+    }
+
     @Test
     void notForThisComputer() {
         GalleryEntry bot = CatalogIndex.parse("""

@@ -147,7 +147,8 @@ public final class HomePlugins {
                 picked.add(new Choice(row, build.get().version(), true));
                 continue;
             }
-            row.releases().stream().filter(r -> served(r, contract) && r.jarSha256() != null && r.pomSha256() != null)
+            row.releases().stream().filter(r -> r.yanked() == null && served(r, contract) && r.jarSha256() != null
+                            && r.pomSha256() != null)
                     .filter(r -> PART.matcher(r.tag()).matches()).findFirst()
                     .ifPresent(r -> picked.add(new Choice(row, r.tag(), false)));
         }
