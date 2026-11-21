@@ -32,6 +32,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   which parses the whole bot with bindings. Each later write checks on that one file that the class is still there and
   still marked, then writes. The old lookup was two thirds of each write in the Screens map's ⋯ ▸ *Tidy* (63 writes).
   A write that creates a class forgets what was found. `NestedClasses.setupSetIn` is the one-file write.
+- Reading a class's setup (`PluginValues.open` on a set of classes) checks first the one file its holder was last found
+  in (`NestedClasses.namedIn`), and asks the whole bot only when the holder is no longer there, marked or a set. Each
+  write changes the bot, so every read between a run of writes built the whole-bot index again.
+- A value is matched against the bot's constants by the last lookup while the constants are equal and the grammar the
+  same. A lookup spells each constant once, and a new one for each write spelled every constant again. With both
+  changes, *Tidy* of 63 cards went from 10.4 s to 5.8 s.
 
 ## [0.3.0] — 2026-11-21
 

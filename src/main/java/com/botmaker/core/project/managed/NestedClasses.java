@@ -118,16 +118,43 @@ public final class NestedClasses {
             if (nested == null) return List.of();
             // One instance per class: a declaration of two constants of one class is no member of the set.
             if (field.fragments().size() != 1) continue;
-            VariableDeclarationFragment fragment = (VariableDeclarationFragment) field.fragments().getFirst();
-            String constant = fragment.getName().getIdentifier();
-            out.add(new Nested(file, holder, constant, fragment.getName().getStartPosition(),
-                    nested.getName().getIdentifier(), nested.getName().getStartPosition(),
-                    nested.getStartPosition(), nested.getStartPosition() + nested.getLength(),
-                    field.getStartPosition(), field.getStartPosition() + field.getLength(),
-                    fields(file, source, holder, constant, nested, grammar),
-                    setupText(source, nested, setupName)));
+            out.add(nested(file, source, holder, field, nested, grammar, setupName));
         }
         return List.copyOf(out);
+    }
+
+    /** The class of the constant {@code field}, declared alone, holds. */
+    private static Nested nested(Path file, String source, String holder, FieldDeclaration field, TypeDeclaration nested,
+                                 ValueGrammar grammar, String setupName) {
+        VariableDeclarationFragment fragment = (VariableDeclarationFragment) field.fragments().getFirst();
+        String constant = fragment.getName().getIdentifier();
+        return new Nested(file, holder, constant, fragment.getName().getStartPosition(),
+                nested.getName().getIdentifier(), nested.getName().getStartPosition(),
+                nested.getStartPosition(), nested.getStartPosition() + nested.getLength(),
+                field.getStartPosition(), field.getStartPosition() + field.getLength(),
+                fields(file, source, holder, constant, nested, grammar),
+                setupText(source, nested, setupName));
+    }
+
+    /**
+     * {@code constant}'s class read from {@code source}, the one file of {@code holderName}, as {@link #named} reads it
+     * off the whole bot, when that class is still the one marked {@code id} ({@code known} declares the markers) and
+     * still a set of classes; else empty, and the whole bot is asked (2026-11-21: a run of 63 reads parsed it each time).
+     */
+    public static Optional<Nested> namedIn(Path file, String source, String id, String holderName, String constant,
+                                           ValueGrammar grammar, String setupName, Collection<ManagedValue<?>> known) {
+        CompilationUnit unit = BotParser.syntax(source);
+        if (!(ManagedSets.topLevel(unit, holderName) instanceof TypeDeclaration type)
+                || !id.equals(ManagedIds.idOf(ManagedIds.on(type, known), known)) || !stillASet(type, constant)) {
+            return Optional.empty();
+        }
+        for (FieldDeclaration field : type.getFields()) {
+            if (!isConstant(field) || field.fragments().size() != 1 || !((VariableDeclarationFragment) field.fragments()
+                    .getFirst()).getName().getIdentifier().equals(constant)) continue;
+            TypeDeclaration nested = memberClass(type, ((SimpleType) field.getType()).getName().getFullyQualifiedName());
+            return Optional.of(nested(file, source, holderName, field, nested, grammar, setupName));
+        }
+        return Optional.empty();
     }
 
     /** The classes of the set {@code id}, in the order their constants are written; empty when none is marked so. */

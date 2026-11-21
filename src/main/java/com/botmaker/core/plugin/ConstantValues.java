@@ -71,8 +71,25 @@ public final class ConstantValues {
                 + ": it does not fit the field, or no loaded plugin says how to write it. The field keeps what it had.";
     }
 
+    /** The last lookup built, with what it was built from. */
+    private record Built(List<ManagedConstants.Constant> constants, ValueGrammar grammar,
+                         ManagedConstants.Lookup lookup) {}
+
+    private static volatile Built last;
+
+    /**
+     * A lookup over {@code constants}, the last one again while the bot's constants are equal and the grammar the same
+     * (2026-11-21). A lookup reads and spells each constant once and keeps it, so a new one for each of a run of writes
+     * spelled every constant of the bot again for each: most of the Screens map's ⋯ ▸ <i>Tidy</i>, 63 setup writes
+     * that change no constant.
+     */
     private static ManagedConstants.Lookup lookup(ValueGrammar grammar,
                                                   Supplier<List<ManagedConstants.Constant>> constants) {
-        return new ManagedConstants.Lookup(constants == null ? List.of() : constants.get(), grammar);
+        List<ManagedConstants.Constant> now = constants == null ? List.of() : constants.get();
+        Built seen = last;
+        if (seen != null && seen.grammar() == grammar && seen.constants().equals(now)) return seen.lookup();
+        ManagedConstants.Lookup lookup = new ManagedConstants.Lookup(now, grammar);
+        last = new Built(List.copyOf(now), grammar, lookup);
+        return lookup;
     }
 }

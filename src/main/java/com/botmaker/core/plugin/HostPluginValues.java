@@ -56,6 +56,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 
 /**
@@ -98,6 +99,8 @@ public final class HostPluginValues implements PluginValues {
     private final Edits edits;
     /** Where each write goes instead of the bot; null when this instance writes the bot itself. */
     private final Forward forward;
+    /** Where each set of classes' holder was last found, by the set's id; checked on its file at each use. */
+    private final Map<String, WriteSteps.HolderAt> holdersSeen = new ConcurrentHashMap<>();
 
     /** What a write here tells the host: the undo step it made, and the open file's new text to redraw. */
     public interface Edits extends WriteSteps.Recorded {
@@ -666,11 +669,31 @@ public final class HostPluginValues implements PluginValues {
     /** What the setup of the class whose constant is {@code constant} returns, as a value of the setup's type. */
     private Optional<ValueContext> openSetup(ManagedClasses<?> set, String constant) {
         String setup = set.setup().getName();
-        return NestedClasses.named(index(), set.id(), constant, PluginHost.grammar(), setup)
+        // A class found without a setup of one return is found all the same: the whole bot would say no setup too.
+        return seenSetup(set.id(), constant, setup)
+                .or(() -> NestedClasses.named(index(), set.id(), constant, PluginHost.grammar(), setup)
+                        .map(nested -> {
+                            holdersSeen.put(set.id(), new WriteSteps.HolderAt(
+                                    nested.file().toAbsolutePath().normalize(), nested.holder()));
+                            return nested;
+                        }))
                 .filter(nested -> nested.setup() != null)
                 .map(nested -> HostValueContext.of(set.setup().getGenericReturnType(), nested.setup(), services,
                         expression -> changed(new PluginWrite.SetSetup(set.id(), constant, expression),
                                 () -> setSetup(nested, setup, expression)), this::constants));
+    }
+
+    /**
+     * {@code constant}'s class read from the one file its set's holder was last found in, while that holder is still
+     * there, marked and a set of classes; else empty. Each write changes the bot, so the whole-bot index was built
+     * again for every read of a run of writes: half of the Screens map's ⋯ ▸ <i>Tidy</i> (2026-11-21).
+     */
+    private Optional<NestedClasses.Nested> seenSetup(String id, String constant, String setup) {
+        WriteSteps.HolderAt at = holdersSeen.get(id);
+        if (at == null) return Optional.empty();
+        return BotSources.sourceOf(config, state, at.file())
+                .flatMap(source -> NestedClasses.namedIn(at.file(), source, id, at.holder(), constant,
+                        PluginHost.grammar(), setup, PluginHost.managedValues()));
     }
 
     /** What the setup of {@code constant}'s class returns, written. */

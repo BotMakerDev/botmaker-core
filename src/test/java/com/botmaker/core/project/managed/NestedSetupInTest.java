@@ -7,6 +7,7 @@ import com.botmaker.java.grammar.JavaValue;
 import com.botmaker.plugin.api.source.ManagedValue;
 import org.junit.jupiter.api.Test;
 
+import java.nio.file.Path;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -69,6 +70,21 @@ class NestedSetupInTest {
                 value, KNOWN), "a helper constant makes it a plain set");
         assertNull(NestedClasses.setupSetIn(SCREENS.replace("HOME = new Home();", "HOME = new Home(), AWAY = new Home();"),
                 ID, "Screens", "HOME", "setup", value, KNOWN), "a constant declared with another");
+    }
+
+    @Test
+    void theClassIsReadOffItsOneFileWhileItsHolderIsStillTheSet() {
+        Path file = Path.of("Screens.java");
+
+        NestedClasses.Nested home = NestedClasses.namedIn(file, SCREENS, ID, "Screens", "HOME", null, "setup", KNOWN)
+                .orElseThrow();
+
+        assertEquals("Setup.of()", home.setup());
+        assertEquals("Home", home.className());
+        assertTrue(NestedClasses.namedIn(file, SCREENS.replace("@TestValue(TestValue.Id.SCREENS)", ""), ID, "Screens",
+                "HOME", null, "setup", KNOWN).isEmpty(), "the mark taken off");
+        assertTrue(NestedClasses.namedIn(file, SCREENS, ID, "Screens", "GONE", null, "setup", KNOWN).isEmpty(),
+                "a constant gone");
     }
 
     @Test

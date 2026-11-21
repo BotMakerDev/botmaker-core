@@ -56,6 +56,25 @@ class HostValueContextConstantsTest {
         assertEquals(List.of("Pictures.ORE", "com.bot.Pictures"), written);
     }
 
+    /** A constant changed between two writes is matched as it is now, not as the last lookup read it (2026-11-21). */
+    @Test
+    void aConstantChangedBetweenWritesIsMatchedAsItIsNow() {
+        List<String> written = new ArrayList<>();
+        List<List<ManagedConstants.Constant>> now = new ArrayList<>(List.of(CONSTANTS));
+        HostValueContext context = HostValueContext.of(FORM, GRAMMAR, "", null,
+                value -> written.add(value.source()), () -> now.getFirst());
+
+        context.set(new Picture("images/ore.png"));
+        now.set(0, List.of(new ManagedConstants.Constant("com.bot.Pictures", "ORE",
+                "new " + JavaNames.canonical(Picture.class) + "(\"images/ore-recut.png\")")));
+        context.set(new Picture("images/ore.png"));
+        context.set(new Picture("images/ore-recut.png"));
+
+        assertEquals("Pictures.ORE", written.getFirst());
+        assertTrue(written.get(1).contains("images/ore.png"), written.get(1));
+        assertEquals("Pictures.ORE", written.get(2));
+    }
+
     /** Of two equal constants, the one written by name is the one the row names afterwards. */
     @Test
     void aMemberWrittenByNameIsTheOneTheRowNames() {
