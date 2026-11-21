@@ -8,6 +8,7 @@ import com.botmaker.core.services.BotSources;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -38,6 +39,9 @@ public final class WriteSteps {
 
     private static final ThreadLocal<Step> OPEN = new ThreadLocal<>();
 
+    /** A set of classes' holder: the file it is in and the top-level class's name. */
+    record HolderAt(Path file, String holder) {}
+
     /** One step being recorded: its label and the files it rewrote. */
     static final class Step implements BotSources.Recorder {
 
@@ -46,6 +50,7 @@ public final class WriteSteps {
         private final Map<Path, String> after = new LinkedHashMap<>();
         private boolean checkpointed;
         private List<String> types;
+        private final Map<String, HolderAt> holders = new HashMap<>();
 
         private Step(String label) {
             this.label = label;
@@ -77,9 +82,23 @@ public final class WriteSteps {
             return types;
         }
 
-        /** A class was created: the next write reads the types again. */
+        /** A class was created: the next write reads the types again, and finds each holder again. */
         void typesChanged() {
             types = null;
+            holders.clear();
+        }
+
+        /**
+         * Where the set {@code id}'s holder was found earlier in this step, or null (2026-11-21): finding it parsed
+         * the whole bot with bindings, two thirds of each of Tidy's 63 setup writes. A hint, checked on the file
+         * before it is written to.
+         */
+        HolderAt holder(String id) {
+            return holders.get(id);
+        }
+
+        void holder(String id, HolderAt at) {
+            holders.put(id, at);
         }
 
         /** The files that changed, as the history records them; a file written back to what it was is not one. */

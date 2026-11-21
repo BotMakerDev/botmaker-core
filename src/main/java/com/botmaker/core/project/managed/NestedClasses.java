@@ -18,6 +18,7 @@ import com.botmaker.core.project.params.JavaParameterSource;
 import com.botmaker.java.index.BotIndex;
 import com.botmaker.java.parse.BotParser;
 import com.botmaker.java.index.ValueTypeResolver;
+import com.botmaker.plugin.api.source.ManagedValue;
 import org.eclipse.jdt.core.dom.AST;
 import org.eclipse.jdt.core.dom.ASTNode;
 import org.eclipse.jdt.core.dom.AbstractTypeDeclaration;
@@ -41,6 +42,7 @@ import java.lang.reflect.Method;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -383,8 +385,45 @@ public final class NestedClasses {
     public static String setupSet(String source, String holderName, String constant, String setupName,
                                   JavaValue value) {
         CompilationUnit unit = BotParser.syntax(source);
-        ReturnStatement returns = singleReturn(classOf(ManagedSets.topLevel(unit, holderName), constant), setupName);
-        if (returns == null || value == null) return source;
+        String written = setupSet(unit, source, ManagedSets.topLevel(unit, holderName), constant, setupName, value);
+        return written == null ? source : written;
+    }
+
+    /**
+     * {@code source} with the class's setup returning {@code value}, when its top-level class {@code holderName} is
+     * still the one marked {@code id}, as {@code known} declares the markers, and the class has a setup of one return;
+     * else null. A batch's writes find the holder once and check it here, on its one file, instead of parsing the
+     * whole bot again for each.
+     */
+    public static String setupSetIn(String source, String id, String holderName, String constant, String setupName,
+                                    JavaValue value, Collection<ManagedValue<?>> known) {
+        CompilationUnit unit = BotParser.syntax(source);
+        AbstractTypeDeclaration holder = ManagedSets.topLevel(unit, holderName);
+        if (!(holder instanceof TypeDeclaration type) || !id.equals(ManagedIds.idOf(ManagedIds.on(holder, known), known))
+                || !stillASet(type, constant)) return null;
+        return setupSet(unit, source, holder, constant, setupName, value);
+    }
+
+    /**
+     * Whether {@code holder} is still a set of classes as {@link #of} reads one, every constant one of its classes, with
+     * {@code constant} declared alone; a holder that became a plain set, or a constant shared, is left to the full lookup.
+     */
+    private static boolean stillASet(TypeDeclaration holder, String constant) {
+        boolean alone = false;
+        for (FieldDeclaration field : holder.getFields()) {
+            if (!isConstant(field)) continue;
+            if (!(field.getType() instanceof SimpleType declared)
+                    || memberClass(holder, declared.getName().getFullyQualifiedName()) == null) return false;
+            if (field.fragments().size() == 1 && ((VariableDeclarationFragment) field.fragments().getFirst())
+                    .getName().getIdentifier().equals(constant)) alone = true;
+        }
+        return alone;
+    }
+
+    private static String setupSet(CompilationUnit unit, String source, AbstractTypeDeclaration holder,
+                                   String constant, String setupName, JavaValue value) {
+        ReturnStatement returns = singleReturn(classOf(holder, constant), setupName);
+        if (returns == null || value == null) return null;
         AST ast = unit.getAST();
         ASTRewrite rewrite = ASTRewrite.create(ast);
         rewrite.set(returns, ReturnStatement.EXPRESSION_PROPERTY, value.copyInto(ast), null);

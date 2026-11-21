@@ -676,11 +676,34 @@ public final class HostPluginValues implements PluginValues {
     /** What the setup of {@code constant}'s class returns, written. */
     private Optional<String> setSetup(ManagedClasses<?> set, String constant, JavaValue expression) {
         String setup = set.setup().getName();
+        // Inside a batch, the holder found by the first write serves the next ones, checked on its file (Tidy).
+        WriteSteps.Step open = WriteSteps.open();
+        WriteSteps.HolderAt at = open == null ? null : open.holder(set.id());
+        if (at != null && setSetup(at, set.id(), constant, setup, expression)) return Optional.empty();
         Optional<NestedClasses.Nested> nested = NestedClasses.named(index(), set.id(), constant, PluginHost.grammar(),
                 setup).filter(found -> found.setup() != null);
         if (nested.isEmpty()) return Optional.of(missing(set.id(), constant));
+        if (open != null) {
+            open.holder(set.id(), new WriteSteps.HolderAt(nested.get().file().toAbsolutePath().normalize(),
+                    nested.get().holder()));
+        }
         setSetup(nested.get(), setup, expression);
         return Optional.empty();
+    }
+
+    /** The setup written in the holder {@code at}; false, and nothing written, when the holder is not there as it was. */
+    private boolean setSetup(WriteSteps.HolderAt at, String id, String constant, String setup, JavaValue expression) {
+        Optional<String> source = BotSources.sourceOf(config, state, at.file());
+        if (source.isEmpty()) return false;
+        String written = NestedClasses.setupSetIn(source.get(), id, at.holder(), constant, setup, imported(expression),
+                PluginHost.managedValues());
+        if (written == null) return false;
+        recorded(() -> {
+            snapshot();
+            BotSources.forEach(config, state, (visited, text) -> visited.equals(at.file()) ? written : null);
+        });
+        redraw(Set.of(at.file()));
+        return true;
     }
 
     private void setSetup(NestedClasses.Nested nested, String setup, JavaValue expression) {
@@ -691,7 +714,7 @@ public final class HostPluginValues implements PluginValues {
                     ? NestedClasses.setupSet(source, nested.holder(), nested.constant(), setup,
                     imported(expression)) : null);
         });
-        redraw(java.util.Set.of(file));
+        redraw(Set.of(file));
     }
 
     @Override
@@ -963,7 +986,7 @@ public final class HostPluginValues implements PluginValues {
             } catch (java.io.UncheckedIOException e) {
                 return new MethodWrite(null, "Could not write " + className + ".java: " + e.getCause().getMessage());
             }
-            redraw(java.util.Set.of(file.toAbsolutePath().normalize()));
+            redraw(Set.of(file.toAbsolutePath().normalize()));
             return new MethodWrite(className + "::" + method, null);
         }
         Optional<String> refused = apply(planned);
@@ -1195,7 +1218,7 @@ public final class HostPluginValues implements PluginValues {
                     : ManagedMigrations.unmarked(JavaParameterEdits.setValue(source, member.className(),
                             member.name(), expression), member.className(), member.name()));
         });
-        redraw(java.util.Set.of(file));
+        redraw(Set.of(file));
     }
 
     // ── a during-a-run parameter ─────────────────────────────────────────────────────────────────────────

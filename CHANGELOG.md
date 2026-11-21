@@ -26,6 +26,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - `PublishRequest.platforms` carries the systems the Publish sheet ticked. `StudioPublishHost.commitFiles` saves
   the pom as a *Published* version before the tag.
 
+### Changed
+
+- A batch of setup writes on one set of classes finds the set's holder once. The first write finds it the old way,
+  which parses the whole bot with bindings. Each later write checks on that one file that the class is still there and
+  still marked, then writes. The old lookup was two thirds of each write in the Screens map's ⋯ ▸ *Tidy* (63 writes).
+  A write that creates a class forgets what was found. `NestedClasses.setupSetIn` is the one-file write.
+
 ## [0.3.0] — 2026-11-21
 
 ### Fixed

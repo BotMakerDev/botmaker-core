@@ -71,6 +71,11 @@ public class EventBus {
         this.uiThread = uiThread;
     }
 
+    /** The thread a UI-bound handler runs on, for a handler that puts off work of its own there. */
+    public UiThread uiThread() {
+        return uiThread;
+    }
+
     /**
      * A registered subscription, kept so it can be undone. Most subscribers live as long as the project and
      * ignore the returned handle; a subscriber with a shorter life than the bus — a dialog or overlay that is
