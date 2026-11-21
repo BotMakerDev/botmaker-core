@@ -128,6 +128,19 @@ public final class CoreClient implements AutoCloseable {
         return ask(new Request.PluginWriting(ids.incrementAndGet(), write), ANSWER_TIMEOUT);
     }
 
+    /** A plugin's writes made in the core as one step, or none; see {@link Request.Together}. */
+    public EditResult together(String label, List<PluginWrite> writes) throws IOException {
+        return ask(new Request.Together(ids.incrementAndGet(), label, writes), togetherTimeout(writes.size()));
+    }
+
+    /**
+     * How long a together of {@code writes} may take to answer: a write's minute, and a second more for each, so a
+     * long one is not given up on while the core still makes it.
+     */
+    public static Duration togetherTimeout(int writes) {
+        return ANSWER_TIMEOUT.plusSeconds(Math.max(0, writes));
+    }
+
     /** Opens ({@code open}) or ends a plugin's batch; see {@link Request.Batch}. */
     public EditResult batch(String label, boolean open) throws IOException {
         return ask(new Request.Batch(ids.incrementAndGet(), label, open), ANSWER_TIMEOUT);

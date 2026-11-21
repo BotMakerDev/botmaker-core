@@ -34,6 +34,7 @@ import java.util.Set;
         @JsonSubTypes.Type(value = Request.Called.class, name = "called"),
         @JsonSubTypes.Type(value = Request.PluginWriting.class, name = "pluginWriting"),
         @JsonSubTypes.Type(value = Request.Batch.class, name = "batch"),
+        @JsonSubTypes.Type(value = Request.Together.class, name = "together"),
         @JsonSubTypes.Type(value = Request.Reload.class, name = "reload"),
         @JsonSubTypes.Type(value = Request.DevReload.class, name = "devReload"),
         @JsonSubTypes.Type(value = Request.Compile.class, name = "compile"),
@@ -127,6 +128,16 @@ public sealed interface Request {
      * one step of the history. A client that leaves ends the batches it opened.
      */
     record Batch(long id, String label, boolean open) implements Request {
+    }
+
+    /**
+     * A plugin's together (2026-11-21, {@code History.together}): {@code writes} made in order as one step named
+     * {@code label}, part of the batch open if one is, or none of them; answered with the first refusal.
+     */
+    record Together(long id, String label, List<PluginWrite> writes) implements Request {
+        public Together {
+            writes = writes == null ? List.of() : List.copyOf(writes);
+        }
     }
 
     /**

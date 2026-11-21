@@ -18,6 +18,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   disk, as the signed file. A catalog that fails is treated like no answer: the kept one serves, `Reply.trust()`
   `UNVERIFIED`. A verified catalog built before the kept one never replaces it. The unsigned `catalog.json` kept before
   is deleted. `Reply` holds `Trust` (`VERIFIED`, `CACHED`, `UNVERIFIED`) in place of `fresh`, which stays as a method.
+- A plugin's together (`History.together`, 2026-11-21): `HostPluginValues.queued` queues every write a plugin asks on
+  the thread instead of making it, and `performAll` makes the queue as one step, or none of it. At the first refused
+  write, `project.FileJournal` puts back every file the together touched (open buffer and disk), deletes a class it
+  created, and the step records only what stayed, inside a held batch too. A client sends the whole queue as one
+  `Request.Together` (`CoreClient.together`); `OpenProject` redraws the open file once at its end. `NestedClasses.namedIn`
+  parses an unchanged holder once across a run of reads.
 
 - A catalog row is found by a slug its repository had before a rename or a transfer (catalog trust, phase 3):
   `GalleryEntry` and `PluginRegistry.Plugin` carry `formerly` and `answersTo`, `CatalogIndex.botAt`,

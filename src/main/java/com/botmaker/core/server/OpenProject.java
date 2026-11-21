@@ -225,6 +225,9 @@ public final class OpenProject implements AutoCloseable {
     /** The batch open now and how many opened it, on the owner thread; null when none is ({@link Request.Batch}). */
     private WriteSteps.Held batch;
     private int batchDepth;
+    /** A together runs on the owner thread: each write's redraw waits for its end ({@link #together}). */
+    private boolean redrawHeld;
+    private boolean redrawAsked;
     private volatile MavenService.Resolution resolution;
 
     private OpenProject(ProjectConfig config, ProjectState state, ProjectLock lock, Libraries libraries,
@@ -524,6 +527,8 @@ public final class OpenProject implements AutoCloseable {
             case Request.Restore asked -> restore(asked);
             case Request.PluginWriting writing -> perform(writing.write())
                     .<EditResult>map(EditResult.Refused::new).orElseGet(() -> new EditResult.Accepted(List.of()));
+            case Request.Together together -> together(together.label(), together.writes())
+                    .<EditResult>map(EditResult.Refused::new).orElseGet(() -> new EditResult.Accepted(List.of()));
             case Request.Batch batched -> {
                 if (batched.open()) openBatch(batched.label());
                 else if (batch != null) closeBatch();
@@ -760,6 +765,26 @@ public final class OpenProject implements AutoCloseable {
         return touching(() -> open != null ? open.during(() -> values.perform(write)) : values.perform(write));
     }
 
+    /**
+     * {@code writes} made whole or not at all, as part of the batch open now if one is (2026-11-21). The open file is
+     * redrawn once at the end, not after each write, and not at all when the together was taken back: its text is
+     * then what every client already has.
+     */
+    private Optional<String> together(String label, List<PluginWrite> writes) {
+        WriteSteps.Held open = batch;
+        redrawHeld = true;
+        redrawAsked = false;
+        Optional<String> refused;
+        try {
+            refused = touching(() -> open != null ? open.during(() -> values.performAll(label, writes))
+                    : values.performAll(label, writes));
+        } finally {
+            redrawHeld = false;
+        }
+        if (redrawAsked && refused.isEmpty()) openFileRead();
+        return refused;
+    }
+
     private void openBatch(String label) {
         if (batchDepth++ == 0) batch = WriteSteps.hold(label);
     }
@@ -794,10 +819,14 @@ public final class OpenProject implements AutoCloseable {
 
     /** {@code work} on the project's thread, waited for; at once when this is that thread. */
     private <T> T onOwner(Supplier<T> work) {
+        return onOwner(work, CoreClient.ANSWER_TIMEOUT);
+    }
+
+    /** {@code work} on the project's thread, waited for up to {@code timeout}; at once when this is that thread. */
+    private <T> T onOwner(Supplier<T> work, Duration timeout) {
         if (Thread.currentThread() == ownerThread) return work.get();
         try {
-            return CompletableFuture.supplyAsync(work, owner).get(CoreClient.ANSWER_TIMEOUT.toSeconds(),
-                    TimeUnit.SECONDS);
+            return CompletableFuture.supplyAsync(work, owner).get(timeout.toSeconds(), TimeUnit.SECONDS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("Interrupted while the project wrote.", e);
@@ -817,7 +846,8 @@ public final class OpenProject implements AutoCloseable {
 
         @Override
         public void redraw(String content) {
-            openFileRead();
+            if (redrawHeld) redrawAsked = true;
+            else openFileRead();
         }
     }
 
@@ -972,6 +1002,16 @@ public final class OpenProject implements AutoCloseable {
                     return null;
                 });
             }
+        }
+
+        @Override
+        public Optional<String> together(String label, Runnable writes) {
+            List<PluginWrite> queued = HostPluginValues.queued(writes);
+            if (queued.isEmpty()) return Optional.empty();
+            return onOwner(() -> {
+                readDiskAgain();
+                return OpenProject.this.together(label, queued);
+            }, CoreClient.togetherTimeout(queued.size()));
         }
     }
 

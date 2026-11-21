@@ -7,6 +7,7 @@ import com.botmaker.core.event.CoreEvent;
 import com.botmaker.plugin.api.History;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
@@ -36,6 +37,14 @@ public final class HostHistory implements History {
                 writes.run();
                 return null;
             }, this);
+        }
+
+        /**
+         * {@code writes} queued, then made whole as one step or none (2026-11-21, {@link History#together}); the
+         * first refusal, else empty. A client whose writes land in the core sends them there in one request.
+         */
+        default Optional<String> together(String label, Runnable writes) {
+            return HostPluginValues.together(label, writes);
         }
     }
 
@@ -162,5 +171,10 @@ public final class HostHistory implements History {
     @Override
     public void batch(String label, Runnable writes) {
         if (writes != null) requests.batch(label, writes);
+    }
+
+    @Override
+    public Optional<String> together(String label, Runnable writes) {
+        return writes == null ? Optional.empty() : requests.together(label, writes);
     }
 }

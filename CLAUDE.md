@@ -107,7 +107,10 @@ per user.
   project's thread (`Request.PluginWriting`, `Request.Batch`). Studio's copy forwards over the channel
   (`HostPluginValues.installForwarding`), and the core's performs (`perform`). The core shows no window: its `hasUi()` is
   false, and a plugin's windows are Studio's copy's. A new contract write needs a `PluginWrite` record, registered by
-  `CoreJson` and round-tripped in `RequestJsonTest`.
+  `CoreJson` and round-tripped in `RequestJsonTest`. Every write leaves a copy through `HostPluginValues.send`, which a
+  together (`History.together`, 2026-11-21) turns into a queue (`queued`); the queue goes whole as `Request.Together`
+  and `performAll` makes it as one step or, at the first refusal, puts back every file `project.FileJournal` heard. A
+  new way a write touches a file (a create, a delete) tells `FileJournal.heard` first, or a refused together leaves it.
 - JavaFX stays `provided` because the contract's signatures name it: `PluginHost` binds slot editors that return a
   `Node`, and `HostServices` implements `StudioServices`, whose `Theme` and `Dialogs` name `Scene` and `Window`.
   Import no javafx and construct no Node here.

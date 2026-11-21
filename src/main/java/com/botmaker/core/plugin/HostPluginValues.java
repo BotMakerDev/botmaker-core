@@ -19,6 +19,7 @@ import com.botmaker.java.index.nav.Refactor;
 import com.botmaker.core.parser.refactor.ReviewMarker;
 import com.botmaker.java.grammar.JavaValue;
 import com.botmaker.java.grammar.ShortNames;
+import com.botmaker.core.project.FileJournal;
 import com.botmaker.core.project.ProjectConfig;
 import com.botmaker.core.project.ProjectFile;
 import com.botmaker.core.project.ProjectState;
@@ -181,7 +182,99 @@ public final class HostPluginValues implements PluginValues {
      * writes, or made here by {@link #perform}. Empty when written, else why not.
      */
     private Optional<String> send(PluginWrite write) {
+        List<PluginWrite> queue = QUEUE.get();
+        if (queue != null) {
+            queue.add(write);
+            return Optional.empty();
+        }
         return forward != null ? forward.write(write) : perform(write);
+    }
+
+    /** The writes of the together open on this thread, queued rather than made; null when none is. */
+    private static final ThreadLocal<List<PluginWrite>> QUEUE = new ThreadLocal<>();
+
+    /**
+     * Runs {@code writes} and answers every write they asked of the installed values on this thread, queued in order and
+     * not made: each answered empty, as taken (2026-11-21, {@code History.together}). Inside a run already queuing they
+     * join it, and this answers empty. When {@code writes} throws, nothing queued is kept and the exception is the
+     * caller's.
+     */
+    public static List<PluginWrite> queued(Runnable writes) {
+        if (writes == null) return List.of();
+        if (QUEUE.get() != null) {
+            writes.run();
+            return List.of();
+        }
+        List<PluginWrite> queue = new ArrayList<>();
+        QUEUE.set(queue);
+        try {
+            writes.run();
+        } finally {
+            QUEUE.remove();
+        }
+        return List.copyOf(queue);
+    }
+
+    /**
+     * {@code writes} made as one step named {@code label}, or part of the step open on this thread, or none of them: at
+     * the first refused, every file they touched is put back as it was, a file they created deleted, and that refusal
+     * is the answer. A write that throws is taken back the same way, and the exception is the caller's. On the
+     * project's one thread, as {@link #perform} is.
+     */
+    public Optional<String> performAll(String label, List<PluginWrite> writes) {
+        if (writes == null || writes.isEmpty()) return Optional.empty();
+        return WriteSteps.step(label, () -> {
+            FileJournal journal = new FileJournal();
+            Optional<String> refused;
+            try {
+                refused = journal.keeping(() -> {
+                    for (PluginWrite write : writes) {
+                        Optional<String> refusal = perform(write);
+                        if (refusal.isPresent()) return refusal;
+                    }
+                    return Optional.<String>empty();
+                });
+            } catch (RuntimeException | Error failed) {
+                takeBack(journal);
+                throw failed;
+            }
+            if (refused.isEmpty()) return refused;
+            List<String> notPutBack = takeBack(journal);
+            return Optional.of(refused.get() + (notPutBack.isEmpty() ? ""
+                    : " The writes before it could not all be taken back: " + String.join(", ", notPutBack)
+                    + " still hold them."));
+        }, (named, changed) -> {
+            if (edits != null) edits.step(named, changed);
+        });
+    }
+
+    /**
+     * A together's files put back as {@code journal} heard them, the open step told so it records only what stayed, and
+     * the open file redrawn when it was one of them; the files that could not be put back, by name.
+     */
+    private List<String> takeBack(FileJournal journal) {
+        List<String> notPutBack = journal.restore(state);
+        WriteSteps.Step step = WriteSteps.open();
+        if (step != null) step.restored(journal.before());
+        redraw(journal.before().keySet());
+        return notPutBack;
+    }
+
+    /**
+     * {@code writes} as the installed values' together (2026-11-21): queued, then made whole by values that write the
+     * bot, or sent one by one, up to the first refused, by values that forward. Empty when every write was made.
+     */
+    public static Optional<String> together(String label, Runnable writes) {
+        List<PluginWrite> queued = queued(writes);
+        if (queued.isEmpty()) return Optional.empty();
+        HostPluginValues live = current;
+        if (live == null) return Optional.of(NO_SOURCE_TREE);
+        if (live.forward == null) return live.performAll(label, queued);
+        for (PluginWrite write : queued) {
+            Optional<String> refused = live.forward.write(write);
+            if (refused.isPresent()) return refused;
+        }
+        return Optional.empty();
     }
 
     /**
@@ -559,6 +652,7 @@ public final class HostPluginValues implements PluginValues {
                 continue;
             }
             try {
+                if (Files.isRegularFile(file)) FileJournal.heard(file, Files.readString(file), false);
                 if (Files.deleteIfExists(file)) changed.add(file);
             } catch (IOException e) {
                 System.err.println("Warning: could not delete " + file + ": " + e.getMessage());

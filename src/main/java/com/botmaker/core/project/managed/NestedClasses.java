@@ -136,6 +136,24 @@ public final class NestedClasses {
                 setupText(source, nested, setupName));
     }
 
+    /** The last source {@link #namedIn} parsed, and its tree, which it only reads. */
+    private record Parsed(String source, CompilationUnit unit) {}
+
+    /** Per thread: a JDT tree is not safe to walk from two threads at once. */
+    private static final ThreadLocal<Parsed> LAST_PARSED = new ThreadLocal<>();
+
+    /**
+     * {@code source}'s tree, this thread's last one reused while the text is the same (2026-11-21): Tidy's 63 reads of
+     * one unchanged holder each parsed it, a second of Studio's time.
+     */
+    private static CompilationUnit parsedOnce(String source) {
+        Parsed last = LAST_PARSED.get();
+        if (last != null && (last.source() == source || last.source().equals(source))) return last.unit();
+        CompilationUnit unit = BotParser.syntax(source);
+        LAST_PARSED.set(new Parsed(source, unit));
+        return unit;
+    }
+
     /**
      * {@code constant}'s class read from {@code source}, the one file of {@code holderName}, as {@link #named} reads it
      * off the whole bot, when that class is still the one marked {@code id} ({@code known} declares the markers) and
@@ -143,7 +161,7 @@ public final class NestedClasses {
      */
     public static Optional<Nested> namedIn(Path file, String source, String id, String holderName, String constant,
                                            ValueGrammar grammar, String setupName, Collection<ManagedValue<?>> known) {
-        CompilationUnit unit = BotParser.syntax(source);
+        CompilationUnit unit = parsedOnce(source);
         if (!(ManagedSets.topLevel(unit, holderName) instanceof TypeDeclaration type)
                 || !id.equals(ManagedIds.idOf(ManagedIds.on(type, known), known)) || !stillASet(type, constant)) {
             return Optional.empty();

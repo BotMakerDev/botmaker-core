@@ -119,6 +119,13 @@ class RequestJsonTest {
                 Map.of("ore", value), Set.of()));
         String json = CoreJson.write(trial);
         assertEquals(json, CoreJson.write(CoreJson.read(json, Request.class)));
+
+        // A together carries its writes in order (2026-11-21).
+        Request together = new Request.Together(34, "Tidy the map", List.of(
+                new PluginWrite.SetSetup("sdk:SCREENS", "Home", value), new PluginWrite.SetValue("sdk:FLOW", value)));
+        String togetherJson = CoreJson.write(together);
+        assertEquals(togetherJson, CoreJson.write(CoreJson.read(togetherJson, Request.class)));
+        assertEquals(List.of(), new Request.Together(35, "", null).writes());
     }
 
     @Test

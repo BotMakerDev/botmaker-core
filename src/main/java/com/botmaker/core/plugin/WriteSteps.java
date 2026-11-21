@@ -101,6 +101,23 @@ public final class WriteSteps {
             holders.put(id, at);
         }
 
+        /**
+         * A together taken back (2026-11-21): each file it touched says again what it said before it ({@code before},
+         * null for a file it created and has deleted), so this step records only the writes that stayed. A class it
+         * made is gone: the next write reads the types again.
+         */
+        void restored(Map<Path, String> taken) {
+            taken.forEach((file, was) -> {
+                if (was == null) {
+                    before.remove(file);
+                    after.remove(file);
+                } else if (after.containsKey(file)) {
+                    after.put(file, was);
+                }
+            });
+            typesChanged();
+        }
+
         /** The files that changed, as the history records them; a file written back to what it was is not one. */
         List<FileEdit> edits() {
             List<FileEdit> edits = new ArrayList<>();

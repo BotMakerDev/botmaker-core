@@ -67,6 +67,7 @@ public final class ProjectWrites {
     private static void write(ProjectConfig config, Path file, String source, String label) {
         ReviewMarker.snapshot(config, label);
         try {
+            FileJournal.heard(file, Files.isRegularFile(file) ? Files.readString(file) : null, false);
             Files.createDirectories(file.getParent());
             Files.writeString(file, source);
         } catch (IOException notWritten) {

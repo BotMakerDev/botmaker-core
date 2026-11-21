@@ -3,6 +3,7 @@
 
 package com.botmaker.core.services;
 
+import com.botmaker.core.project.FileJournal;
 import com.botmaker.core.project.ProjectConfig;
 import com.botmaker.core.project.ProjectFile;
 import com.botmaker.core.project.ProjectState;
@@ -110,13 +111,16 @@ public final class BotSources {
             if (source == null) continue;
             String rewritten = rewrite.apply(file, source);
             if (rewritten == null) continue;
+            if (!rewritten.equals(source)) FileJournal.heard(file, source, buffer != null);
             if (buffer != null) buffer.setContent(rewritten);
             write(file, rewritten);
         }
         for (Map.Entry<Path, ProjectFile> entry : open.entrySet()) {
             if (entry.getKey().equals(generated) || !seen.add(entry.getKey())) continue;
-            String rewritten = rewrite.apply(entry.getKey(), entry.getValue().getContent());
+            String was = entry.getValue().getContent();
+            String rewritten = rewrite.apply(entry.getKey(), was);
             if (rewritten == null) continue;
+            if (!rewritten.equals(was)) FileJournal.heard(entry.getKey(), was, true);
             entry.getValue().setContent(rewritten);
             if (Files.isRegularFile(entry.getKey())) write(entry.getKey(), rewritten);
         }
