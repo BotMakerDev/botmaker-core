@@ -9,6 +9,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- A catalog row is found by a slug its repository had before a rename or a transfer (catalog trust, phase 3):
+  `GalleryEntry` and `PluginRegistry.Plugin` carry `formerly` and `answersTo`, `CatalogIndex.botAt`,
+  `GitHubGallery.find`, `PluginRegistry.entryFor` (by the old coordinate), a run copy's `CatalogCopies.copyOf` and
+  `BmkOpen` (a `.bmk` naming the old slug) match by it; a row listed at the slug wins over another's former one.
+  Plugins & Libraries offers no version for a project on the old coordinate.
 - A yanked release (catalog trust, phase 2) is offered by no picker. A row's `tag` and `version` are its newest
   release not yanked, and are blank when every release was pulled. The row is still listed. `approvedTags()` skips
   yanked releases, and the home plugins never bind one. `GalleryEntry` and `PluginRegistry.Plugin` gain

@@ -41,12 +41,14 @@ import java.util.OptionalInt;
  *                    plugins' code too, so it is trusted no further than they are ({@link #trust})
  * @param releases    every release the catalog approved, newest first, each pinned to its commit (2026-10-24):
  *                    {@code tag} and {@code plugins} are the newest one's; empty for a row that is not the catalog's
+ * @param formerly    the {@code owner/repo} slugs its repository had before GitHub renamed or transferred it, oldest
+ *                    first (2026-11-21, spec § 3): a run copy or an {@code upstream} at one still finds this row
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record GalleryEntry(String name, String owner, String repo, String description, List<String> tags,
                            String basedOn, String tag, PublisherRank rank, int stars,
                            List<PublishedBotPlugins.Pin> plugins, PublisherRank pluginsRank,
-                           List<Catalog.Bot.Release> releases) {
+                           List<Catalog.Bot.Release> releases, List<String> formerly) {
 
     // TEMPLATE_TAG went on 2026-10-23, with the template concept: every published bot is a starting point, and
     // New Project clones it linked to its author as Browse Bots' Install does. An entry still tagged "template"
@@ -65,6 +67,23 @@ public record GalleryEntry(String name, String owner, String repo, String descri
         plugins = plugins == null ? List.of() : List.copyOf(plugins);
         pluginsRank = pluginsRank == null ? PublisherRank.COMMUNITY : pluginsRank;
         releases = releases == null ? List.of() : List.copyOf(releases);
+        formerly = formerly == null ? List.of() : List.copyOf(formerly);
+    }
+
+    /** A row never moved. */
+    public GalleryEntry(String name, String owner, String repo, String description, List<String> tags,
+                        String basedOn, String tag, PublisherRank rank, int stars,
+                        List<PublishedBotPlugins.Pin> plugins, PublisherRank pluginsRank,
+                        List<Catalog.Bot.Release> releases) {
+        this(name, owner, repo, description, tags, basedOn, tag, rank, stars, plugins, pluginsRank, releases,
+                List.of());
+    }
+
+    /** Whether {@code slug} names this row: its {@link #slug()} or one it had {@link #formerly()}, without case. */
+    public boolean answersTo(String slug) {
+        if (slug == null) return false;
+        String wanted = slug.strip();
+        return slug().equalsIgnoreCase(wanted) || formerly.stream().anyMatch(wanted::equalsIgnoreCase);
     }
 
     /** A row with no pinned releases: a test's. */
@@ -83,7 +102,7 @@ public record GalleryEntry(String name, String owner, String repo, String descri
     /** This listing, read as a fork of {@code slug}, or as nothing's when it is blank. */
     public GalleryEntry withBasedOn(String slug) {
         return new GalleryEntry(name, owner, repo, description, tags, slug, tag, rank, stars, plugins, pluginsRank,
-                releases);
+                releases, formerly);
     }
 
     /** The tags the catalog approved and nobody yanked, newest first: what <i>Get vX.Y</i> picks from. */

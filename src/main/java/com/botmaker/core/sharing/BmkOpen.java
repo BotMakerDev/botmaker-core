@@ -131,16 +131,16 @@ public final class BmkOpen {
                                Optional<GalleryEntry> got, Path root, Fetcher fetch) {
         try {
             BotJson bot = BotFile.peek(bmk);
-            Optional<GalleryEntry> entry = catalog.bots().stream()
-                    .filter(e -> (e.owner() + "/" + e.repo()).toLowerCase(Locale.ROOT).equals(trustKey(bot)))
-                    .findFirst();
+            // By the slug the file names, which a release approved before a rename or a transfer holds as it was
+            // (2026-11-21): the row's formerly slugs answer too, and the pinned sha256 still proves the bytes.
+            Optional<GalleryEntry> entry = catalog.botAt(trustKey(bot));
             Optional<String> pinned = entry.flatMap(e -> e.bmkShaOf(bot.tag()));
             String sha = BotFiles.sha256(bmk);
             if (pinned.isPresent() && !pinned.get().equalsIgnoreCase(sha)) {
                 return new Refused("This file is not the one the catalog lists for " + bot.name() + " " + bot.tag()
                         + ": it was changed, or made from another commit.");
             }
-            if (got.isPresent() && !(trustKey(bot).equals((got.get().slug()).toLowerCase(Locale.ROOT))
+            if (got.isPresent() && !(got.get().answersTo(trustKey(bot))
                     && bot.tag().equals(got.get().tag()) && pinned.isPresent())) {
                 return new Refused("The file downloaded for " + got.get().slug() + " " + got.get().tag() + " is "
                         + bot.owner() + "/" + bot.repo() + " " + bot.tag() + ", not the one the catalog lists. It was "

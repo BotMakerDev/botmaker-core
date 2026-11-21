@@ -62,14 +62,17 @@ public final class PluginRegistry {
      * @param releases every release the catalog approved, newest first, each pinned to its commit and the sha256
      *                 of its jar and pom (2026-10-24); {@code minContractVersion} and {@code editorDependencies}
      *                 are the newest one's
+     * @param formerly the {@code owner/repo} slugs its repository had before GitHub renamed or transferred it,
+     *                 oldest first (2026-11-21, spec § 3): a project pinning the old coordinate still finds this row
      */
     public record Plugin(String name, String coordinate, String repo, String description,
                          List<String> tags, String minContractVersion,
                          List<String> editorDependencies, String version, String tag, PublisherRank rank,
-                         int stars, List<Catalog.Plugin.Release> releases) {
+                         int stars, List<Catalog.Plugin.Release> releases, List<String> formerly) {
 
         public Plugin {
             releases = releases == null ? List.of() : List.copyOf(releases);
+            formerly = formerly == null ? List.of() : List.copyOf(formerly);
             editorDependencies = editorDependencies == null ? List.of() : List.copyOf(editorDependencies);
             name = name == null ? "" : name.trim();
             coordinate = coordinate == null ? "" : coordinate.trim();
@@ -89,6 +92,27 @@ public final class PluginRegistry {
         public static final Comparator<Plugin> RANKED = Comparator.comparing(Plugin::rank)
                 .thenComparing(Comparator.comparingInt(Plugin::stars).reversed())
                 .thenComparing(Plugin::name, String.CASE_INSENSITIVE_ORDER);
+
+        /** A row never moved. */
+        public Plugin(String name, String coordinate, String repo, String description,
+                      List<String> tags, String minContractVersion, List<String> editorDependencies,
+                      String version, String tag, PublisherRank rank, int stars,
+                      List<Catalog.Plugin.Release> releases) {
+            this(name, coordinate, repo, description, tags, minContractVersion, editorDependencies, version, tag,
+                    rank, stars, releases, List.of());
+        }
+
+        /** Whether {@code slug} names this row: its {@link #repo()} or one it had {@link #formerly()}, without case. */
+        public boolean answersTo(String slug) {
+            if (slug == null) return false;
+            String wanted = slug.strip();
+            return repo.equalsIgnoreCase(wanted) || formerly.stream().anyMatch(wanted::equalsIgnoreCase);
+        }
+
+        /** The coordinates JitPack served it as before each move, {@code com.github.<owner>:<repo>}. */
+        public List<String> formerCoordinates() {
+            return formerly.stream().map(slug -> "com.github." + slug.replace('/', ':')).toList();
+        }
 
         /** A row the catalog did not rank — a dev build, a test's: community, installing {@code version}. */
         public Plugin(String name, String coordinate, String repo, String description,
@@ -111,7 +135,7 @@ public final class PluginRegistry {
         /** This entry installing {@code newVersion}. */
         public Plugin withVersion(String newVersion) {
             return new Plugin(name, coordinate, repo, description, tags, minContractVersion, editorDependencies,
-                    newVersion, tag, rank, stars, releases);
+                    newVersion, tag, rank, stars, releases, formerly);
         }
 
         /** When its newest release was published (catalog schema 6, 2026-11-21); empty when the catalog does not say. */
@@ -215,13 +239,16 @@ public final class PluginRegistry {
     /**
      * The entry of {@code entries} for {@code library}: the one at its exact coordinate, else one naming the same
      * artifact under BotMaker's other groupId (2026-10-07) — an entry still at {@code com.github.LiQiyeDev}
-     * accounts for the {@code com.github.BotMakerDev} copy. Empty when none does.
+     * accounts for the {@code com.github.BotMakerDev} copy — else one whose repository had that coordinate before
+     * GitHub renamed or transferred it ({@link Plugin#formerCoordinates}, 2026-11-21). Empty when none does.
      */
     public static java.util.Optional<Plugin> entryFor(List<Plugin> entries, UserLibrary library) {
         String coordinate = library.groupId() + ":" + library.artifactId();
         return entries.stream().filter(e -> e.isInstallable() && e.coordinate().equals(coordinate)).findFirst()
                 .or(() -> entries.stream().filter(e -> e.isInstallable() && e.isInstalledIn(List.of(library)))
-                        .findFirst());
+                        .findFirst())
+                .or(() -> entries.stream().filter(e -> e.isInstallable()
+                        && e.formerCoordinates().stream().anyMatch(coordinate::equalsIgnoreCase)).findFirst());
     }
 
     /** Every listed plugin, each at its catalog tag. Empty when no catalog can be read. */

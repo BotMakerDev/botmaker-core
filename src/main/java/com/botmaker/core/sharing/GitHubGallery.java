@@ -51,11 +51,15 @@ public final class GitHubGallery {
         return catalog.fetch().thenApply(CatalogIndex::bots);
     }
 
-    /** The listing for {@code owner/repo} in {@code catalog}, compared as GitHub does, without case. */
+    /**
+     * The listing for {@code owner/repo} in {@code catalog}, compared as GitHub does, without case; else the one
+     * whose repository was {@code owner/repo} before GitHub renamed or transferred it (2026-11-21).
+     */
     public static Optional<GalleryEntry> find(List<GalleryEntry> catalog, String owner, String repo) {
         return catalog.stream()
                 .filter(e -> e.owner().equalsIgnoreCase(owner) && e.repo().equalsIgnoreCase(repo))
-                .findFirst();
+                .findFirst()
+                .or(() -> catalog.stream().filter(e -> e.answersTo(owner + "/" + repo)).findFirst());
     }
 
     /**

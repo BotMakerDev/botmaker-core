@@ -102,7 +102,7 @@ public record CatalogIndex(List<PluginRegistry.Plugin> plugins, List<GalleryEntr
         return Optional.of(new PluginRegistry.Plugin(name.isEmpty() ? repoName(repo) : name,
                 trim(row.coordinate()), repo, row.description(), row.tags(), trim(newest.minContractVersion()),
                 newest.editorDependencies(), "", offered.map(Catalog.Plugin.Release::tag).orElse(""),
-                rank(row.rank()), row.stars(), releases));
+                rank(row.rank()), row.stars(), releases, slugs(row.formerly())));
     }
 
     private static Optional<GalleryEntry> bot(Catalog.Bot row, Map<String, PublisherRank> rankByRepo) {
@@ -126,7 +126,21 @@ public record CatalogIndex(List<PluginRegistry.Plugin> plugins, List<GalleryEntr
         return Optional.of(new GalleryEntry(name, repo.substring(0, repo.indexOf('/')), name, row.description(),
                 row.tags(), trim(row.forkOf()), offered.map(Catalog.Bot.Release::tag).orElse(""), rank(row.rank()),
                 row.stars(), pins, pluginsRank,
-                releases));
+                releases, slugs(row.formerly())));
+    }
+
+    /** The {@code owner/repo} slugs of {@code formerly} that read as one, the rest dropped. */
+    private static List<String> slugs(List<String> formerly) {
+        return formerly.stream().map(CatalogIndex::trim).filter(CatalogIndex::isSlug).toList();
+    }
+
+    /**
+     * The bot row {@code slug} names, by its repository now or one it had before a rename or a transfer
+     * ({@link GalleryEntry#answersTo}); its current slug wins over another row's former one.
+     */
+    public Optional<GalleryEntry> botAt(String slug) {
+        return bots.stream().filter(e -> e.slug().equalsIgnoreCase(trim(slug))).findFirst()
+                .or(() -> bots.stream().filter(e -> e.answersTo(slug)).findFirst());
     }
 
     private static PublisherRank rank(Rank rank) {

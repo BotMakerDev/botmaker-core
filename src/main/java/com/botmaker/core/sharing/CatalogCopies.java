@@ -103,8 +103,9 @@ public final class CatalogCopies {
         }
         synchronized (GETTING) {
             CatalogClient.Reply reply = shelf.catalog();
-            Optional<GalleryEntry> listed = reply.index().bots().stream()
-                    .filter(e -> e.slug().equalsIgnoreCase(slug)).findFirst();
+            // A run copy got before its repository was renamed or transferred still finds its row (2026-11-21),
+            // and stays in the folder of the slug it was got by.
+            Optional<GalleryEntry> listed = reply.index().botAt(slug);
             Optional<Path> bot = folder(parts[0], parts[1]);
             Optional<Path> kept = bot.flatMap(this::newest);
             if (listed.isEmpty()) {

@@ -101,8 +101,9 @@ public record InstalledPlugin(UserLibrary artifact, String displayName, String i
 
             if (entry != null) {
                 // The entry's version is a tag under the entry's groupId; offered under the other one, it
-                // would pin a coordinate that tag was never released at.
-                boolean sameGroup = entry.groupId().equals(library.groupId());
+                // would pin a coordinate that tag was never released at — so too under the coordinate it had
+                // before its repository was renamed or transferred (2026-11-21), an artifactId of its own.
+                boolean sameGroup = entry.coordinate().equals(library.groupId() + ":" + library.artifactId());
                 rows.add(new InstalledPlugin(library, entry.name(), library.version(),
                         sameGroup ? entry.version() : "", Source.REGISTRY, entry.editorLibraries(),
                         sameGroup ? entry.approvedTags() : List.of()));

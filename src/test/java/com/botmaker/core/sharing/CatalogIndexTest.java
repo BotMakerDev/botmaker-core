@@ -3,6 +3,7 @@
 
 package com.botmaker.core.sharing;
 
+import com.botmaker.core.project.UserLibrary;
 import com.botmaker.shared.github.GitHubClient;
 import com.botmaker.shared.platform.Os;
 import com.sun.net.httpserver.HttpServer;
@@ -114,6 +115,34 @@ class CatalogIndexTest {
     }
 
     /** Spec § 4: a yanked release is offered by no picker, a copy on one gets a banner, a row all pulled stays. */
+    private static final String MOVED = """
+            {"schemaVersion": 6,
+             "plugins": [{"repo": "newdev/sdk2", "coordinate": "com.github.newdev:sdk2",
+                          "formerly": ["olddev/sdk", "not a slug"], "releases": [{"tag": "v2"}]}],
+             "bots": [{"repo": "newdev/miner2", "formerly": ["olddev/miner"],
+                       "releases": [{"tag": "v1", "commit": "c1"}]},
+                      {"repo": "olddev/miner", "releases": [{"tag": "v1", "commit": "c1"}]}]}""";
+
+    @Test
+    void findsByFormerSlug() {
+        CatalogIndex index = CatalogIndex.parse(MOVED);
+        assertEquals(List.of("olddev/sdk"), index.plugins().getFirst().formerly(), "a non-slug is dropped");
+        assertTrue(index.plugins().getFirst().answersTo("OldDev/SDK"));
+        assertFalse(index.plugins().getFirst().answersTo("olddev/other"));
+        assertEquals("newdev/sdk2", PluginRegistry.entryFor(index.plugins(),
+                new UserLibrary("com.github.olddev", "sdk", "v1")).orElseThrow().repo(),
+                "a project pinning the old coordinate finds the moved row");
+    }
+
+    @Test
+    void findsByCurrentSlug() {
+        CatalogIndex index = CatalogIndex.parse(MOVED);
+        assertEquals("newdev/miner2", index.botAt("newdev/MINER2").orElseThrow().slug());
+        assertEquals("olddev/miner", index.botAt("olddev/miner").orElseThrow().slug(),
+                "a row listed at a slug wins over another row's former one");
+        assertTrue(index.bots().getFirst().answersTo(" olddev/miner "));
+    }
+
     @Test
     void aYankedReleaseIsNotOfferedAndACopyOnItIsTold() {
         CatalogIndex index = CatalogIndex.parse("""
