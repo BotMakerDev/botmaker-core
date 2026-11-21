@@ -13,9 +13,13 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -44,6 +48,19 @@ class PublishPushTest {
         vcs.checkpoint(VersionOrigin.PUBLISH, "1.0.0 published");
         vcs.setRemote(Remote.MINE, mine.toUri().toString());
         return vcs;
+    }
+
+    /** The pom Publish rewrites is the version's only file: a stray untracked one is never tagged (2026-11-21). */
+    @Test
+    void aPublishCommitHoldsOnlyTheFilesItWrote(@TempDir Path root) throws Exception {
+        ProjectVcs vcs = project(root, bare(root, "mine"));
+        Path dir = root.resolve("Bot");
+        Files.writeString(dir.resolve("pom.xml"), "<project/>");
+        Files.writeString(dir.resolve("notes.txt"), "private");
+
+        assertNotNull(vcs.checkpointOnly(VersionOrigin.PUBLISH, "systems", List.of("pom.xml")));
+        assertEquals(Set.of("notes.txt"), vcs.status().untracked());
+        assertNull(vcs.checkpointOnly(VersionOrigin.PUBLISH, "again", List.of("pom.xml")), "nothing of its own changed");
     }
 
     private static ObjectId resolve(Path repo, String rev) throws Exception {

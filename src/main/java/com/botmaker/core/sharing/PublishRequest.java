@@ -3,8 +3,11 @@
 
 package com.botmaker.core.sharing;
 
+import com.botmaker.cli.catalog.Platform;
+import com.botmaker.cli.catalog.PomFacts;
 import com.botmaker.core.project.UserLibrary;
 
+import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -24,9 +27,10 @@ import java.util.Set;
  * @param description  the repository's description, which is what Browse Bots shows
  * @param tags         added to the repository's topics, which the catalog shows as the bot's tags
  * @param listed       whether the bot is listed in the catalog at all (its pull request)
+ * @param platforms    the systems the sheet ticked, written to the pom before the tag; empty leaves the pom
  */
 public record PublishRequest(Path projectDir, String botName, String repoName, String description, String version,
-                             List<String> tags, boolean listed) {
+                             List<String> tags, boolean listed, List<Platform> platforms) {
 
     public PublishRequest {
         botName = botName == null ? "" : botName.trim();
@@ -34,6 +38,22 @@ public record PublishRequest(Path projectDir, String botName, String repoName, S
         description = description == null ? "" : description.trim();
         version = version == null ? "" : version.trim();
         tags = tags == null ? List.of() : List.copyOf(tags);
+        platforms = platforms == null ? List.of() : List.copyOf(platforms);
+    }
+
+    /** The systems the project's pom names, which the sheet ticks first; every known one when it names none or does not read. */
+    public static List<Platform> pomPlatforms(Path projectDir) {
+        try {
+            return PomFacts.platforms(projectDir.resolve("pom.xml"));
+        } catch (IOException e) {
+            return Platform.known();
+        }
+    }
+
+    /** A publish that leaves the pom's systems as they are. */
+    public PublishRequest(Path projectDir, String botName, String repoName, String description, String version,
+                          List<String> tags, boolean listed) {
+        this(projectDir, botName, repoName, description, version, tags, listed, List.of());
     }
 
     /**

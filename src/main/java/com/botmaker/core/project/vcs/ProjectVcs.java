@@ -5,6 +5,8 @@ package com.botmaker.core.project.vcs;
 
 import com.botmaker.core.project.ProjectConfig;
 import org.eclipse.jgit.api.AddCommand;
+import org.eclipse.jgit.api.CommitCommand;
+import org.eclipse.jgit.api.StatusCommand;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.ResetCommand.ResetType;
 import org.eclipse.jgit.api.RmCommand;
@@ -40,6 +42,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Optional;
@@ -259,6 +262,32 @@ public final class ProjectVcs {
             RevCommit c = git.commit().setAuthor(now()).setCommitter(now())
                     .setMessage(origin.stamp(first)).call();
             return c.abbreviate(7).name();
+        } catch (Exception e) {
+            throw new IOException("Commit failed: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Commits only {@code paths} (relative to the project), as a version of {@code origin}: whatever else changed or is
+     * untracked stays out, so a publish never tags a stray file (2026-11-21). Returns the new commit's short SHA, or
+     * {@code null} when none of them changed.
+     */
+    public String checkpointOnly(VersionOrigin origin, String label, Collection<String> paths) throws IOException {
+        ensureInitialized();
+        if (merging()) throw new IOException("An update is in progress — finish or cancel it in the Versions window.");
+        try (Git git = open()) {
+            StatusCommand asked = git.status();
+            paths.forEach(asked::addPath);
+            if (asked.call().isClean()) return null;
+            AddCommand add = git.add();
+            paths.forEach(add::addFilepattern);
+            add.call();
+            String first = label == null || label.isBlank() ? origin.displayName() : label;
+            CommitCommand commit = git.commit().setAuthor(now()).setCommitter(now()).setMessage(origin.stamp(first));
+            paths.forEach(commit::setOnly);
+            return commit.call().abbreviate(7).name();
+        } catch (IOException e) {
+            throw e;
         } catch (Exception e) {
             throw new IOException("Commit failed: " + e.getMessage(), e);
         }

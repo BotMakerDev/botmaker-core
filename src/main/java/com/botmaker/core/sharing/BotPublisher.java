@@ -208,7 +208,7 @@ public final class BotPublisher {
             try {
                 outcome = publish.run(new com.botmaker.cli.publish.PublishRequest(request.projectDir(),
                         EntryPath.Kind.BOT, Level.DEFAULT, Optional.of(request.version()), Optional.of(fullName),
-                        false, COMMAND), QUIET, host);
+                        false, COMMAND, request.platforms()), QUIET, host);
             } catch (RuntimeException e) {
                 // GitHub answering with an error the library does not expect (a rate limit, a 5xx): the row it was
                 // on fails, never stays running.

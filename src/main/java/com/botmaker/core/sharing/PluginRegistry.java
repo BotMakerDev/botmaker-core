@@ -7,6 +7,7 @@ import com.botmaker.cli.catalog.Catalog;
 import com.botmaker.cli.catalog.DerivedFacts;
 import com.botmaker.core.project.UserLibrary;
 
+import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
@@ -110,6 +111,11 @@ public final class PluginRegistry {
         public Plugin withVersion(String newVersion) {
             return new Plugin(name, coordinate, repo, description, tags, minContractVersion, editorDependencies,
                     newVersion, tag, rank, stars, releases);
+        }
+
+        /** When its newest release was published (catalog schema 6, 2026-11-21); empty when the catalog does not say. */
+        public Optional<Instant> updatedAt() {
+            return releases.isEmpty() ? Optional.empty() : CatalogIndex.time(releases.getFirst().publishedAt());
         }
 
         /** The release the catalog approved as {@code version}, spelled as git has it; empty when it approved none. */

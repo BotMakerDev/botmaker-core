@@ -5,6 +5,16 @@ All notable changes to `botmaker-core`.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this module uses
 [semantic versioning](https://semver.org/). `release.sh` refuses to cut a version with no section here.
 
+## [Unreleased]
+
+### Added
+
+- New methods read catalog schema 6: `GalleryEntry.downloads()`, `updatedAt()`, `runsHere(Os)`, `systemsLine()`
+  and `factsLine(Instant)`, plus `PluginRegistry.Plugin.updatedAt()` and `CatalogIndex.updatedAgo`. A cached
+  schema-5 catalog still reads; it has no counts or times, and every system is allowed.
+- `PublishRequest.platforms` carries the systems the Publish sheet ticked. `StudioPublishHost.commitFiles` saves
+  the pom as a *Published* version before the tag.
+
 ## [0.3.0] — 2026-11-21
 
 ### Fixed

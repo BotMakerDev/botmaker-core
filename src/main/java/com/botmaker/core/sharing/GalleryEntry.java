@@ -4,13 +4,19 @@
 package com.botmaker.core.sharing;
 
 import com.botmaker.cli.catalog.Catalog;
+import com.botmaker.cli.catalog.Platform;
 import com.botmaker.shared.github.SemVer;
+import com.botmaker.shared.platform.Os;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalInt;
 
 /**
  * One bot Browse Bots lists: a row of {@code catalog.json} ({@link CatalogIndex}, 2026-10-23), a pointer to a
@@ -100,6 +106,42 @@ public record GalleryEntry(String name, String owner, String repo, String descri
     public Optional<String> bmkShaOf(String tag) {
         return releases.stream().filter(r -> r.tag().equals(tag)).map(Catalog.Bot.Release::bmkSha256)
                 .filter(s -> s != null && !s.isBlank()).findFirst();
+    }
+
+    /**
+     * How often its releases' {@code .bmk}s were downloaded, summed; empty when none has a count (no {@code .bmk}, or
+     * a catalog older than schema 6, 2026-11-21).
+     */
+    public OptionalInt downloads() {
+        return releases.stream().map(Catalog.Bot.Release::downloads).filter(Objects::nonNull)
+                .mapToInt(Integer::intValue).reduce(Integer::sum);
+    }
+
+    /** When its newest release was published; empty when the catalog does not say or says it unreadably. */
+    public Optional<Instant> updatedAt() {
+        return releases.isEmpty() ? Optional.empty() : CatalogIndex.time(releases.getFirst().publishedAt());
+    }
+
+    /** "42 downloads · updated 3 days ago", either half left out when the catalog does not say; blank for neither. */
+    public String factsLine(Instant now) {
+        List<String> parts = new ArrayList<>();
+        downloads().ifPresent(n -> parts.add(n == 1 ? "1 download" : n + " downloads"));
+        updatedAt().ifPresent(when -> parts.add(CatalogIndex.updatedAgo(when, now)));
+        return String.join(" · ", parts);
+    }
+
+    /** Whether its newest release runs on {@code os}: it names that system, or names none (2026-11-21). */
+    public boolean runsHere(Os os) {
+        return releases.isEmpty() || releases.getFirst().runsOn(Platform.fromId(os.id()));
+    }
+
+    /** "Windows", "Linux and macOS": the systems its newest release names, every known one when it names none. */
+    public String systemsLine() {
+        List<Platform> named = releases.isEmpty() || releases.getFirst().platforms().isEmpty()
+                ? Platform.known() : releases.getFirst().platforms();
+        List<String> names = named.stream().map(Platform::displayName).toList();
+        return names.size() == 1 ? names.getFirst()
+                : String.join(", ", names.subList(0, names.size() - 1)) + " and " + names.getLast();
     }
 
     /** How far this bot is trusted: its publisher's rank, or its plugins' when one of theirs is lower. */

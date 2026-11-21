@@ -10,6 +10,9 @@ import com.botmaker.cli.catalog.Rank;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import java.time.Duration;
+import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -120,6 +123,26 @@ public record CatalogIndex(List<PluginRegistry.Plugin> plugins, List<GalleryEntr
 
     private static PublisherRank rank(Rank rank) {
         return PublisherRank.fromId(rank == null ? "" : rank.id());
+    }
+
+    /** A catalog time ({@code publishedAt}, ISO-8601), or empty for none or one that does not read. */
+    static Optional<Instant> time(String text) {
+        if (text == null || text.isBlank()) return Optional.empty();
+        try {
+            return Optional.of(Instant.parse(text));
+        } catch (DateTimeParseException e) {
+            return Optional.empty();
+        }
+    }
+
+    /** "updated today", "updated 3 days ago", "updated 2 months ago": how a list says when a row last changed. */
+    public static String updatedAgo(Instant when, Instant now) {
+        long days = Math.max(0, Duration.between(when, now).toDays());
+        if (days == 0) return "updated today";
+        if (days == 1) return "updated yesterday";
+        if (days < 60) return "updated " + days + " days ago";
+        if (days < 730) return "updated " + days / 30 + " months ago";
+        return "updated " + days / 365 + " years ago";
     }
 
     /** {@code owner/repo}: one slash, neither side blank. */

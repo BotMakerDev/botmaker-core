@@ -11,10 +11,12 @@ import com.botmaker.shared.github.GitHubClient;
 import com.botmaker.shared.github.GitHubConfig;
 import com.botmaker.core.project.vcs.ProjectVcs;
 import com.botmaker.core.project.vcs.Remote;
+import com.botmaker.core.project.vcs.VersionOrigin;
 import com.botmaker.core.services.MavenService;
 import com.fasterxml.jackson.databind.JsonNode;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -138,6 +140,22 @@ final class StudioPublishHost implements PublishHost {
     @Override
     public boolean releaseExists(String repo, String tag) {
         return client.get(GitHubConfig.API_BASE + "/repos/" + repo + "/releases/tags/" + tag, token).join() != null;
+    }
+
+    /**
+     * A bot's pom with the systems the sheet ticked (2026-11-21): written, then saved as a version of its own, which
+     * is the commit the tag goes on. It holds these files only: an untracked file beside them is never published.
+     */
+    @Override
+    public void commitFiles(String message, Map<String, String> files) throws Refusal {
+        try {
+            for (Map.Entry<String, String> each : files.entrySet()) {
+                Files.writeString(request.projectDir().resolve(each.getKey()), each.getValue());
+            }
+            vcs.checkpointOnly(VersionOrigin.PUBLISH, message, files.keySet());
+        } catch (IOException e) {
+            throw new Refusal("could not save " + String.join(", ", files.keySet()) + ": " + e.getMessage());
+        }
     }
 
     @Override

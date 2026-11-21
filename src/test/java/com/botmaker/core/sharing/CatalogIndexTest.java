@@ -4,6 +4,7 @@
 package com.botmaker.core.sharing;
 
 import com.botmaker.shared.github.GitHubClient;
+import com.botmaker.shared.platform.Os;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -11,12 +12,15 @@ import org.junit.jupiter.api.io.TempDir;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -75,6 +79,50 @@ class CatalogIndexTest {
         assertEquals(List.of("v1.2.0", "v1.1.0"), bot.approvedTags());
         assertEquals(COMMIT_V120, bot.commitOf("v1.2.0"), "what Install and Get vX.Y take");
         assertEquals("", bot.commitOf("v9.9.9"));
+    }
+
+    /** RF1: a schema-5 catalog (a cache from before 2026-11-21) still reads, with no count, no time and every system. */
+    @Test
+    void readsSchemaFive() {
+        CatalogIndex index = CatalogIndex.parse(SPEC);
+        GalleryEntry bot = index.bots().getFirst();
+        assertEquals(OptionalInt.empty(), bot.downloads());
+        assertEquals(Optional.empty(), bot.updatedAt());
+        assertTrue(bot.runsHere(Os.LINUX) && bot.runsHere(Os.WINDOWS) && bot.runsHere(Os.MAC));
+        assertEquals(Optional.empty(), index.plugins().getFirst().updatedAt());
+    }
+
+    @Test
+    void readsSchemaSix() {
+        CatalogIndex index = CatalogIndex.parse("""
+                {"schemaVersion": 6,
+                 "plugins": [{"repo": "o/sdk", "updatedAt": "2026-11-20T10:00:00Z",
+                              "releases": [{"tag": "v2", "publishedAt": "2026-11-20T10:00:00Z"}]}],
+                 "bots": [{"repo": "o/miner", "updatedAt": "2026-11-02T00:00:00Z", "downloads": 42,
+                           "releases": [{"tag": "v2", "commit": "c2", "publishedAt": "2026-11-02T00:00:00Z",
+                                         "downloads": 30, "platforms": ["linux", "macos"]},
+                                        {"tag": "v1", "commit": "c1", "downloads": 12},
+                                        {"tag": "v0", "commit": "c0"}]}]}""");
+        GalleryEntry bot = index.bots().getFirst();
+        assertEquals(OptionalInt.of(42), bot.downloads());
+        assertEquals(Optional.of(Instant.parse("2026-11-02T00:00:00Z")), bot.updatedAt());
+        assertEquals(Optional.of(Instant.parse("2026-11-20T10:00:00Z")), index.plugins().getFirst().updatedAt());
+        assertEquals("42 downloads · updated 3 days ago", bot.factsLine(Instant.parse("2026-11-05T12:00:00Z")));
+        assertEquals("updated 2 months ago", CatalogIndex.updatedAgo(Instant.parse("2026-09-01T00:00:00Z"),
+                Instant.parse("2026-11-05T00:00:00Z")));
+        assertEquals("", CatalogIndex.parse(SPEC).bots().getFirst().factsLine(Instant.EPOCH), "schema 5 says neither");
+    }
+
+    @Test
+    void notForThisComputer() {
+        GalleryEntry bot = CatalogIndex.parse("""
+                {"bots": [{"repo": "o/miner", "releases": [{"tag": "v2", "commit": "c2", "platforms": ["windows"]},
+                                                           {"tag": "v1", "commit": "c1"}]}]}""").bots().getFirst();
+        assertFalse(bot.runsHere(Os.LINUX), "the newest release says windows only");
+        assertTrue(bot.runsHere(Os.WINDOWS));
+        assertFalse(bot.runsHere(Os.UNKNOWN));
+        assertEquals("Windows", bot.systemsLine());
+        assertEquals("Linux, Windows and macOS", CatalogIndex.parse(SPEC).bots().getFirst().systemsLine());
     }
 
     /** What a plugin brings is its newest release's {@code plugins}: New Project locks those cards. */
