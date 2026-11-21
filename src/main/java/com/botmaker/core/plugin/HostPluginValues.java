@@ -173,15 +173,23 @@ public final class HostPluginValues implements PluginValues {
     public static Optional<String> applyRename(Refactor.Planned plan) {
         HostPluginValues live = current;
         if (live == null) return Optional.of(NO_SOURCE_TREE);
-        return live.forward != null ? live.forward.write(PluginWrite.ApplyPlan.of(plan)) : live.apply(plan);
+        return live.send(PluginWrite.ApplyPlan.of(plan));
+    }
+
+    /**
+     * Every write a plugin asks this instance for, the one way out (2026-11-21): sent where this instance sends its
+     * writes, or made here by {@link #perform}. Empty when written, else why not.
+     */
+    private Optional<String> send(PluginWrite write) {
+        return forward != null ? forward.write(write) : perform(write);
     }
 
     /**
      * {@code write}, which another copy of the plugins asked for, made on the bot by this instance, as the contract's
-     * operation it stands for; empty when written, else why not. On the project's one thread.
+     * operation it stands for; empty when written, else why not. On the project's one thread. The only code that
+     * writes the bot for a plugin: this instance's own writes reach it through {@link #send}.
      */
     public Optional<String> perform(PluginWrite write) {
-        if (forward != null) return forward.write(write);
         return switch (write) {
             case PluginWrite.SetValue set -> {
                 Optional<ManagedMethod> found = JavaManagedValues.find(config, state, set.id());
@@ -199,7 +207,7 @@ public final class HostPluginValues implements PluginValues {
             case PluginWrite.SetSetup set -> classes(set.id())
                     .map(classes -> setSetup(classes, set.constant(), set.value()))
                     .orElseGet(() -> Optional.of(notClasses(set.id())));
-            case PluginWrite.Create create -> create(create.id());
+            case PluginWrite.Create create -> createHere(create.id());
             case PluginWrite.AddClass add -> classes(add.id())
                     .map(classes -> apply(NestedClasses.add(index(), classes.id(), add.member(), classes.type(),
                             classes.setup(), imported(add.setup()), PluginHost.grammar())))
@@ -215,22 +223,22 @@ public final class HostPluginValues implements PluginValues {
                 }
                 yield apply(ManagedSets.add(index(), add.id(), add.member(), type, imported(add.value())));
             }
-            case PluginWrite.Rename rename -> rename(rename.id(), rename.member(), rename.newName());
-            case PluginWrite.Repoint repoint -> repoint(repoint.id(), repoint.member(), repoint.replacement(),
+            case PluginWrite.Rename rename -> renameHere(rename.id(), rename.member(), rename.newName());
+            case PluginWrite.Repoint repoint -> repointHere(repoint.id(), repoint.member(), repoint.replacement(),
                     repoint.note());
-            case PluginWrite.Remove remove -> remove(remove.id(), remove.member());
-            case PluginWrite.MoveBefore move -> moveBefore(move.id(), move.member(), move.before());
-            case PluginWrite.AddGroup add -> addGroup(add.id(), add.group(), add.constants());
+            case PluginWrite.Remove remove -> removeHere(remove.id(), remove.member());
+            case PluginWrite.MoveBefore move -> moveBeforeHere(move.id(), move.member(), move.before());
+            case PluginWrite.AddGroup add -> addGroupHere(add.id(), add.group(), add.constants());
             case PluginWrite.RenameGroup rename -> declared(rename.id())
-                    .map(set -> renameGroup(set, rename.group(), rename.newName()))
+                    .map(set -> renameGroupHere(set, rename.group(), rename.newName()))
                     .orElseGet(() -> renameGroup(rename.id(), rename.group(), rename.newName()));
             case PluginWrite.RemoveGroup remove -> declared(remove.id())
-                    .map(set -> removeGroup(set, remove.group()))
+                    .map(set -> removeGroupHere(set, remove.group()))
                     .orElseGet(() -> removeGroup(remove.id(), remove.group()));
             case PluginWrite.CreateMethod create -> Optional.ofNullable(
-                    createMethod(create.id(), create.group(), create.className(), create.method()).refusal());
-            case PluginWrite.CreateBooleanMethod create -> Optional.ofNullable(
-                    createMethod(MethodShape.BOOLEAN, create.className(), create.method()).refusal());
+                    createMethodHere(create.id(), create.group(), create.className(), create.method()).refusal());
+            case PluginWrite.CreateBooleanMethod create -> Optional.ofNullable(written(index(), create.className(),
+                    create.method(), BotMethods.BOOLEAN, null, null).refusal());
             case PluginWrite.AppendCall call -> apply(BotMethods.appendCall(index(), call.method(), call.owner(),
                     call.name(), call.arguments().stream().map(this::imported).toList()));
             case PluginWrite.AddRunParameter add -> {
@@ -244,9 +252,11 @@ public final class HostPluginValues implements PluginValues {
                 } catch (IllegalArgumentException e) {
                     yield Optional.of(e.getMessage());
                 }
-                yield addRunParameter(parameter);
+                yield written(() -> JavaParameters.addDuringRun(config, state, parameter, this::classNamed,
+                        PluginHost.grammar()));
             }
-            case PluginWrite.ForgetRunParameter forget -> forgetRunParameter(forget.group(), forget.name());
+            case PluginWrite.ForgetRunParameter forget -> written(() -> JavaParameters.forgetDuringRun(config, state,
+                    forget.group(), forget.name(), PluginHost.grammar()));
             case PluginWrite.ApplyPlan plan -> apply(plan.plan());
         };
     }
@@ -270,13 +280,9 @@ public final class HostPluginValues implements PluginValues {
         return "The bot has no " + ManagedIds.spelled(id, PluginHost.managedValues()) + " a plugin may change.";
     }
 
-    /** A value a plugin's window changed: written, or sent where this instance sends its writes, a refusal said. */
-    private void changed(PluginWrite write, Runnable here) {
-        if (forward == null) {
-            here.run();
-            return;
-        }
-        forward.write(write).ifPresent(HostRuns::status);
+    /** A value a plugin's window changed, sent as every write is; a refusal said. */
+    private void changed(PluginWrite write) {
+        send(write).ifPresent(HostRuns::status);
     }
 
     private static MethodWrite methodWrite(Optional<String> refused, String className, String method) {
@@ -310,8 +316,7 @@ public final class HostPluginValues implements PluginValues {
         if (found.isEmpty() || !found.get().editable()) return Optional.empty();
         ManagedMethod value = found.get();
         return Optional.of(HostValueContext.of(value.form(), value.expression(), services,
-                expression -> changed(new PluginWrite.SetValue(id, expression),
-                        () -> write(value, imported(expression))), this::constants));
+                expression -> changed(new PluginWrite.SetValue(id, expression)), this::constants));
     }
 
     /**
@@ -322,8 +327,13 @@ public final class HostPluginValues implements PluginValues {
      */
     public Optional<String> create(String id) {
         if (id == null || id.isBlank()) return Optional.of("No value was named.");
+        // Already there: nothing to send.
         if (JavaManagedValues.find(config, state, id).isPresent()) return Optional.empty();
-        if (forward != null) return forward.write(new PluginWrite.Create(id));
+        return send(new PluginWrite.Create(id));
+    }
+
+    private Optional<String> createHere(String id) {
+        if (JavaManagedValues.find(config, state, id).isPresent()) return Optional.empty();
         for (LoadedPlugin plugin : PluginHost.plugins()) {
             List<ManagedValue<?>> declared;
             try {
@@ -679,8 +689,8 @@ public final class HostPluginValues implements PluginValues {
                         }))
                 .filter(nested -> nested.setup() != null)
                 .map(nested -> HostValueContext.of(set.setup().getGenericReturnType(), nested.setup(), services,
-                        expression -> changed(new PluginWrite.SetSetup(set.id(), constant, expression),
-                                () -> setSetup(nested, setup, expression)), this::constants));
+                        expression -> changed(new PluginWrite.SetSetup(set.id(), constant, expression)),
+                        this::constants));
     }
 
     /**
@@ -756,9 +766,7 @@ public final class HostPluginValues implements PluginValues {
             return Optional.of("No plugin in this project declares " + type.getSimpleName() + ", so " + member
                     + " cannot be written.");
         }
-        if (forward != null) return forward.write(new PluginWrite.AddClass(set.id(), member, written.get()));
-        return apply(NestedClasses.add(index(), set.id(), member, set.type(), set.setup(), imported(written.get()),
-                PluginHost.grammar()));
+        return send(new PluginWrite.AddClass(set.id(), member, written.get()));
     }
 
     @Override
@@ -814,7 +822,10 @@ public final class HostPluginValues implements PluginValues {
     @Override
     public Optional<String> renameGroup(ManagedValue<?> set, String group, String newName) {
         if (set == null) return Optional.of("No set was named.");
-        if (forward != null) return forward.write(new PluginWrite.RenameGroup(set.id(), group, newName));
+        return send(new PluginWrite.RenameGroup(set.id(), group, newName));
+    }
+
+    private Optional<String> renameGroupHere(ManagedValue<?> set, String group, String newName) {
         if (set instanceof ManagedClasses<?>) {
             BotIndex index = index();
             return NestedClasses.named(index, set.id(), group, PluginHost.grammar(), null)
@@ -827,7 +838,10 @@ public final class HostPluginValues implements PluginValues {
     @Override
     public Optional<String> removeGroup(ManagedValue<?> set, String group) {
         if (set == null) return Optional.of("No set was named.");
-        if (forward != null) return forward.write(new PluginWrite.RemoveGroup(set.id(), group));
+        return send(new PluginWrite.RemoveGroup(set.id(), group));
+    }
+
+    private Optional<String> removeGroupHere(ManagedValue<?> set, String group) {
         if (set instanceof ManagedClasses<?>) {
             BotIndex index = index();
             return NestedClasses.named(index, set.id(), group, PluginHost.grammar(), null)
@@ -866,10 +880,8 @@ public final class HostPluginValues implements PluginValues {
     public MethodWrite createMethod(MethodShape shape, String className, String method) {
         return switch (shape) {
             case VOID -> createMethod((String) null, null, className, method);
-            case BOOLEAN -> forward != null
-                    ? methodWrite(forward.write(new PluginWrite.CreateBooleanMethod(className, method)), className,
-                    method)
-                    : written(index(), className, method, BotMethods.BOOLEAN, null, null);
+            case BOOLEAN -> methodWrite(send(new PluginWrite.CreateBooleanMethod(className, method)), className,
+                    method);
             case null -> new MethodWrite(null, "No kind of method was named.");
         };
     }
@@ -913,7 +925,7 @@ public final class HostPluginValues implements PluginValues {
         }
         PluginWrite.AppendCall append = new PluginWrite.AppendCall(method,
                 target.getDeclaringClass().getCanonicalName(), target.getName(), written);
-        return forward != null ? forward.write(append) : perform(append);
+        return send(append);
     }
 
     // ── an open set: ManagedSets planned, written here ────────────────────────────────────────────────────
@@ -930,21 +942,25 @@ public final class HostPluginValues implements PluginValues {
     }
 
     public Optional<String> addGroup(String id, String group, List<String> constants) {
-        if (forward != null) return forward.write(new PluginWrite.AddGroup(id, group, constants));
+        return send(new PluginWrite.AddGroup(id, group, constants));
+    }
+
+    private Optional<String> addGroupHere(String id, String group, List<String> constants) {
         Optional<ManagedOpenSet<?>> set = openSet(PluginHost.managedValues(), id)
                 .filter(ManagedOpenSet.EnumGroups.class::isInstance);
         if (set.isEmpty()) return Optional.of(notGrouped(id));
         return apply(ManagedSets.addGroup(index(), id, group, constants, set.get().type()));
     }
 
-    public Optional<String> renameGroup(String id, String group, String newName) {
+    /** A group of a set of nested enums renamed; {@link #perform}'s, for a set no bound plugin declares. */
+    private Optional<String> renameGroup(String id, String group, String newName) {
         BotIndex index = index();
         Optional<ManagedSets.Group> found = ManagedSets.group(index, id, group);
         if (found.isEmpty()) return Optional.of(missing(id, group));
         return apply(Refactor.rename(index, found.get().file(), found.get().start(), newName));
     }
 
-    public Optional<String> removeGroup(String id, String group) {
+    private Optional<String> removeGroup(String id, String group) {
         BotIndex index = index();
         Optional<ManagedSets.Group> found = ManagedSets.group(index, id, group);
         if (found.isEmpty()) return Optional.of(missing(id, group));
@@ -967,10 +983,10 @@ public final class HostPluginValues implements PluginValues {
     }
 
     public MethodWrite createMethod(String id, String group, String className, String method) {
-        if (forward != null) {
-            return methodWrite(forward.write(new PluginWrite.CreateMethod(id, group, className, method)), className,
-                    method);
-        }
+        return methodWrite(send(new PluginWrite.CreateMethod(id, group, className, method)), className, method);
+    }
+
+    private MethodWrite createMethodHere(String id, String group, String className, String method) {
         BotIndex index = index();
         String returns = null;
         String imported = null;
@@ -1038,8 +1054,7 @@ public final class HostPluginValues implements PluginValues {
                 // The bot's constants too (2026-10-12): a flow names its activities as Activities.Collect.class,
                 // which nothing but them spells, so without them every flow with an activity was refused.
                 .map(found -> HostValueContext.of(found.form(), found.initializer(), services,
-                        expression -> changed(new PluginWrite.SetMember(id, member, expression),
-                                () -> writeInitializer(found, imported(expression))),
+                        expression -> changed(new PluginWrite.SetMember(id, member, expression)),
                         () -> constants().stream().filter(c -> !isItself(c, found)).toList()));
     }
 
@@ -1057,8 +1072,7 @@ public final class HostPluginValues implements PluginValues {
         // An enum's constant is its name: the value was only checked, and nothing of it is written.
         if (set.filter(declared -> declared instanceof ManagedOpenSet.OneEnum<?>
                 || declared instanceof ManagedOpenSet.EnumGroups<?>).isPresent()) {
-            PluginWrite.AddConstant constant = new PluginWrite.AddConstant(id, member);
-            return forward != null ? forward.write(constant) : perform(constant);
+            return send(new PluginWrite.AddConstant(id, member));
         }
         Class<?> type = value instanceof Enum<?> constant ? constant.getDeclaringClass() : value.getClass();
         // Each part another constant holds is written as that constant: a screen's Way.of(HOME, …) names HOME, which
@@ -1076,8 +1090,7 @@ public final class HostPluginValues implements PluginValues {
             return Optional.of(member + " cannot be written whole: a part of it is of a type nothing writes, or "
                     + "names a constant the bot does not have. Nothing was added.");
         }
-        if (forward != null) return forward.write(new PluginWrite.Add(id, member, type.getName(), initializer.get()));
-        return apply(ManagedSets.add(index(), id, member, type, imported(initializer.get())));
+        return send(new PluginWrite.Add(id, member, type.getName(), initializer.get()));
     }
 
     /**
@@ -1132,7 +1145,10 @@ public final class HostPluginValues implements PluginValues {
     }
 
     public Optional<String> rename(String id, String member, String newName) {
-        if (forward != null) return forward.write(new PluginWrite.Rename(id, member, newName));
+        return send(new PluginWrite.Rename(id, member, newName));
+    }
+
+    private Optional<String> renameHere(String id, String member, String newName) {
         BotIndex index = index();
         Optional<ManagedSets.Member> found = ManagedSets.member(index, id, member, PluginHost.grammar());
         if (found.isEmpty()) return Optional.of(missing(id, member));
@@ -1146,7 +1162,10 @@ public final class HostPluginValues implements PluginValues {
 
     /** The mark is written only where the bot compiles {@code @Refactor}; elsewhere the repoint goes unmarked. */
     public Optional<String> repoint(String id, String member, String replacement, String note) {
-        if (forward != null) return forward.write(new PluginWrite.Repoint(id, member, replacement, note));
+        return send(new PluginWrite.Repoint(id, member, replacement, note));
+    }
+
+    private Optional<String> repointHere(String id, String member, String replacement, String note) {
         BotIndex index = index();
         Optional<ManagedSets.Member> from = ManagedSets.member(index, id, member, PluginHost.grammar());
         Optional<ManagedSets.Member> to = ManagedSets.member(index, id, replacement, PluginHost.grammar());
@@ -1157,7 +1176,10 @@ public final class HostPluginValues implements PluginValues {
     }
 
     public Optional<String> remove(String id, String member) {
-        if (forward != null) return forward.write(new PluginWrite.Remove(id, member));
+        return send(new PluginWrite.Remove(id, member));
+    }
+
+    private Optional<String> removeHere(String id, String member) {
         BotIndex index = index();
         Optional<ManagedSets.Member> found = ManagedSets.member(index, id, member, PluginHost.grammar());
         if (found.isEmpty()) return Optional.of(missing(id, member));
@@ -1165,7 +1187,10 @@ public final class HostPluginValues implements PluginValues {
     }
 
     public Optional<String> moveBefore(String id, String member, String before) {
-        if (forward != null) return forward.write(new PluginWrite.MoveBefore(id, member, before));
+        return send(new PluginWrite.MoveBefore(id, member, before));
+    }
+
+    private Optional<String> moveBeforeHere(String id, String member, String before) {
         BotIndex index = index();
         List<ManagedSets.Member> members = ManagedSets.members(index, id, PluginHost.grammar());
         Optional<ManagedSets.Member> moving = members.stream().filter(m -> m.memberName().equals(member)).findFirst();
@@ -1253,14 +1278,19 @@ public final class HostPluginValues implements PluginValues {
 
     @Override
     public Optional<String> addRunParameter(ParameterWrite write) {
-        if (forward != null) return forward.write(PluginWrite.AddRunParameter.of(write));
-        return written(() -> JavaParameters.addDuringRun(config, state, write, this::classNamed, PluginHost.grammar()));
+        PluginWrite.AddRunParameter add;
+        try {
+            add = PluginWrite.AddRunParameter.of(write);
+        } catch (IllegalArgumentException e) {
+            // A mark member of a kind no write carries: refused, never thrown at the plugin.
+            return Optional.of(e.getMessage());
+        }
+        return send(add);
     }
 
     @Override
     public Optional<String> forgetRunParameter(String group, String name) {
-        if (forward != null) return forward.write(new PluginWrite.ForgetRunParameter(group, name));
-        return written(() -> JavaParameters.forgetDuringRun(config, state, group, name, PluginHost.grammar()));
+        return send(new PluginWrite.ForgetRunParameter(group, name));
     }
 
     /** One undoable parameter write, its snapshot first, and whatever shows the file redrawn. */
