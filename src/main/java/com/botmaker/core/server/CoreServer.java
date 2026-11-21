@@ -5,6 +5,7 @@ package com.botmaker.core.server;
 
 import com.botmaker.core.assist.McpEndpoint;
 import com.botmaker.core.assist.McpTools;
+import com.botmaker.core.dashboard.DashboardAccess;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.modelcontextprotocol.json.jackson2.JacksonMcpJsonMapper;
 import io.modelcontextprotocol.server.McpServer;
@@ -27,6 +28,7 @@ import org.eclipse.jetty.server.ServerConnector;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.EnumSet;
 import java.util.List;
@@ -82,6 +84,7 @@ public final class CoreServer implements AutoCloseable {
     private final McpSyncServer mcp;
     private final String version;
     private final Hooks hooks;
+    private final DashboardAccess dashboard = new DashboardAccess(Clock.systemUTC());
     private final Map<String, Channel> channels = new ConcurrentHashMap<>();
     private final AtomicLong lastActive = new AtomicLong(System.nanoTime());
     private final AtomicBoolean ending = new AtomicBoolean();
@@ -113,8 +116,11 @@ public final class CoreServer implements AutoCloseable {
         context.addServlet(new ServletHolder(new QuitServlet()), QUIT);
         context.addServlet(new ServletHolder(new StudioServlet()), STUDIO);
         context.addServlet(new ServletHolder(new StudioServlet()), STUDIO + "/*");
-        McpEndpoint.guard(context, token);
-        // After the guard: a request refused for its token keeps no core up.
+        context.addServlet(new ServletHolder(new DashboardKeyServlet()), DashboardAccess.KEY_PATH);
+        context.addServlet(new ServletHolder(new DashboardStubServlet()), DashboardAccess.PATH);
+        context.addServlet(new ServletHolder(new DashboardStubServlet()), DashboardAccess.PATH + "/*");
+        McpEndpoint.guard(context, token, dashboard::admits);
+        // After the guard: a request refused for its token keeps no core up, nor does a dashboard's.
         context.addFilter(new FilterHolder(activity()), "/*", EnumSet.of(DispatcherType.REQUEST));
         jetty.setHandler(context);
     }
@@ -247,9 +253,30 @@ public final class CoreServer implements AutoCloseable {
 
     private Filter activity() {
         return (request, response, chain) -> {
-            lastActive.set(System.nanoTime());
+            if (!DashboardAccess.isDashboard((HttpServletRequest) request)) lastActive.set(System.nanoTime());
             chain.doFilter(request, response);
         };
+    }
+
+    /** Answers a client holding the bearer token with a one-time link to the dashboard. */
+    private final class DashboardKeyServlet extends HttpServlet {
+        @Override
+        protected void doPost(HttpServletRequest request, HttpServletResponse response) throws IOException {
+            String url = "http://127.0.0.1:" + request.getLocalPort() + DashboardAccess.PATH + "?key="
+                    + dashboard.newKey();
+            response.setContentType("application/json");
+            response.getOutputStream().write(JSON.writeValueAsBytes(Map.of("url", url)));
+        }
+    }
+
+    /** Until the page is served (plan phase 3): trades a key, else says the dashboard is open. */
+    private final class DashboardStubServlet extends HttpServlet {
+        @Override
+        protected void doGet(HttpServletRequest request, HttpServletResponse response) throws IOException {
+            if (dashboard.tradeIn(request, response)) return;
+            response.setContentType("text/plain");
+            response.getWriter().write("BotMaker core dashboard");
+        }
     }
 
     private final class InfoServlet extends HttpServlet {

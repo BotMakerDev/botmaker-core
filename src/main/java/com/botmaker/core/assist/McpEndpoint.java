@@ -20,6 +20,7 @@ import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
 import java.util.EnumSet;
 import java.util.HexFormat;
+import java.util.function.Predicate;
 
 /**
  * Where an MCP client — Claude Code, Cursor, Codex, Gemini CLI, opencode, a local runner — reaches BotMaker, and how
@@ -69,10 +70,13 @@ public final class McpEndpoint {
         }
     }
 
-    /** Puts {@code context} behind {@code token}: {@link #HELLO} answers the proof, and every other path refuses a request without the bearer token. */
-    public static void guard(ServletContextHandler context, String token) {
+    /**
+     * Puts {@code context} behind {@code token}: {@link #HELLO} answers the proof, a request {@code admitted} passes
+     * (the dashboard's cookie), and every other path refuses a request without the bearer token.
+     */
+    public static void guard(ServletContextHandler context, String token, Predicate<HttpServletRequest> admitted) {
         context.addServlet(new ServletHolder(new Hello(token)), HELLO);
-        context.addFilter(new FilterHolder(bearer(token)), "/*", EnumSet.of(DispatcherType.REQUEST));
+        context.addFilter(new FilterHolder(bearer(token, admitted)), "/*", EnumSet.of(DispatcherType.REQUEST));
     }
 
     /**
@@ -90,11 +94,15 @@ public final class McpEndpoint {
         }
     }
 
-    /** Refuses a request whose bearer token is not {@code token}, compared in constant time; {@link #HELLO} aside. */
-    private static Filter bearer(String token) {
+    /**
+     * Refuses a request whose bearer token is not {@code token}, compared in constant time; {@link #HELLO} and what
+     * {@code admitted} lets through aside.
+     */
+    private static Filter bearer(String token, Predicate<HttpServletRequest> admitted) {
         byte[] expected = ("Bearer " + token).getBytes(StandardCharsets.UTF_8);
         return (request, response, chain) -> {
-            if (HELLO.equals(((HttpServletRequest) request).getRequestURI())) {
+            if (HELLO.equals(((HttpServletRequest) request).getRequestURI())
+                    || admitted.test((HttpServletRequest) request)) {
                 chain.doFilter(request, response);
                 return;
             }

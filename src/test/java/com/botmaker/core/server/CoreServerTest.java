@@ -5,6 +5,7 @@ package com.botmaker.core.server;
 
 import com.botmaker.core.TestSources;
 import com.botmaker.core.assist.McpEndpoint;
+import com.botmaker.core.dashboard.DashboardAccess;
 import com.botmaker.core.edit.Edit;
 import com.botmaker.core.edit.EditRequest;
 import com.botmaker.core.edit.EditResult;
@@ -16,6 +17,7 @@ import com.botmaker.core.project.ProjectState;
 import com.botmaker.core.services.MavenService;
 import com.botmaker.java.edit.BlockId;
 import com.botmaker.java.types.ProjectAnalyzer;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.eclipse.jdt.core.dom.ASTNode;
 import org.eclipse.jdt.core.dom.Block;
 import org.eclipse.jdt.core.dom.CompilationUnit;
@@ -24,6 +26,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -44,6 +47,7 @@ import java.util.function.Predicate;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -473,5 +477,132 @@ class CoreServerTest {
 
     private static CoreServer.Hooks hooks(CoreServer.Idle idle, Runnable exit) {
         return new CoreServer.Hooks(idle, () -> false, channel -> { }, exit);
+    }
+
+    private static final HttpClient HTTP = HttpClient.newHttpClient();
+
+    /** A one-time dashboard link, asked with the bearer token. */
+    private static URI dashboardLink(CoreLauncher.Address at) throws Exception {
+        HttpResponse<String> answer = HTTP.send(HttpRequest.newBuilder(at.uri(DashboardAccess.KEY_PATH))
+                .header("Authorization", "Bearer " + TOKEN).POST(HttpRequest.BodyPublishers.noBody()).build(),
+                HttpResponse.BodyHandlers.ofString());
+        assertEquals(200, answer.statusCode(), answer.body());
+        return URI.create(new ObjectMapper().readTree(answer.body()).get("url").asText());
+    }
+
+    private static HttpResponse<String> get(URI uri, String cookie) throws Exception {
+        HttpRequest.Builder request = HttpRequest.newBuilder(uri);
+        if (cookie != null) request.header("Cookie", DashboardAccess.cookieName(uri.getPort()) + "=" + cookie);
+        return HTTP.send(request.build(), HttpResponse.BodyHandlers.ofString());
+    }
+
+    /** The cookie a page gets for {@code link}. */
+    private static String traded(URI link) throws Exception {
+        HttpResponse<String> answer = get(link, null);
+        assertEquals(303, answer.statusCode());
+        String set = answer.headers().firstValue("Set-Cookie").orElseThrow();
+        return set.substring(set.indexOf('=') + 1, set.indexOf(';'));
+    }
+
+    @Test
+    void dashboardWithoutCookieIs401() throws Exception {
+        try (CoreServer server = CoreServer.start(0, TOKEN, "1.0", hooks(SLOW, () -> { }))) {
+            CoreLauncher.Address at = new CoreLauncher.Address(server.port(), TOKEN);
+            assertEquals(401, get(at.uri(DashboardAccess.PATH), null).statusCode());
+            assertEquals(401, get(at.uri(DashboardAccess.PATH), "forged").statusCode());
+            assertEquals(401, get(at.uri(DashboardAccess.PATH + "?key=forged"), null).statusCode());
+        }
+    }
+
+    @Test
+    void dashboardKeyNeedsBearer() throws Exception {
+        try (CoreServer server = CoreServer.start(0, TOKEN, "1.0", hooks(SLOW, () -> { }))) {
+            CoreLauncher.Address at = new CoreLauncher.Address(server.port(), TOKEN);
+            assertEquals(401, HTTP.send(HttpRequest.newBuilder(at.uri(DashboardAccess.KEY_PATH))
+                    .POST(HttpRequest.BodyPublishers.noBody()).build(),
+                    HttpResponse.BodyHandlers.discarding()).statusCode());
+            String cookie = traded(dashboardLink(at));
+            assertEquals(401, HTTP.send(HttpRequest.newBuilder(at.uri(DashboardAccess.KEY_PATH))
+                    .header("Cookie", DashboardAccess.cookieName(server.port()) + "=" + cookie)
+                    .POST(HttpRequest.BodyPublishers.noBody()).build(),
+                    HttpResponse.BodyHandlers.discarding()).statusCode());
+        }
+    }
+
+    @Test
+    void keyTradesForCookieAndRedirects() throws Exception {
+        try (CoreServer server = CoreServer.start(0, TOKEN, "1.0", hooks(SLOW, () -> { }))) {
+            CoreLauncher.Address at = new CoreLauncher.Address(server.port(), TOKEN);
+            URI link = dashboardLink(at);
+            assertEquals("127.0.0.1", link.getHost());
+            assertEquals(server.port(), link.getPort());
+            HttpResponse<String> answer = get(link, null);
+            assertEquals(303, answer.statusCode());
+            assertEquals(DashboardAccess.PATH, answer.headers().firstValue("Location").orElseThrow());
+            String set = answer.headers().firstValue("Set-Cookie").orElseThrow();
+            assertTrue(set.startsWith(DashboardAccess.cookieName(server.port()) + "="), set);
+            assertTrue(set.contains("HttpOnly") && set.contains("SameSite=Strict")
+                    && set.contains("Path=" + DashboardAccess.PATH), set);
+            String cookie = set.substring(set.indexOf('=') + 1, set.indexOf(';'));
+            assertEquals(200, get(at.uri(DashboardAccess.PATH), cookie).statusCode());
+        }
+    }
+
+    @Test
+    void mcpWithDashboardCookieIs401() throws Exception {
+        try (CoreServer server = CoreServer.start(0, TOKEN, "1.0", hooks(SLOW, () -> { }))) {
+            CoreLauncher.Address at = new CoreLauncher.Address(server.port(), TOKEN);
+            String cookie = traded(dashboardLink(at));
+            assertEquals(401, get(at.uri(McpEndpoint.PATH), cookie).statusCode());
+            assertEquals(401, get(at.uri(CoreServer.INFO), cookie).statusCode());
+            assertEquals(401, get(at.uri(CoreServer.QUIT), cookie).statusCode());
+            assertEquals(401, get(at.uri(DashboardAccess.PATH + "/../core"), cookie).statusCode());
+        }
+    }
+
+    @Test
+    void dashboardRequestsKeepNoCoreUp() throws Exception {
+        CountDownLatch exited = new CountDownLatch(1);
+        CoreServer.Idle quick = new CoreServer.Idle(Duration.ofMillis(200), Duration.ofMillis(50));
+        try (CoreServer server = CoreServer.start(0, TOKEN, "1.0", hooks(quick, exited::countDown))) {
+            CoreLauncher.Address at = new CoreLauncher.Address(server.port(), TOKEN);
+            String cookie = traded(dashboardLink(at));
+            int answered = 0;
+            long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+            while (exited.getCount() > 0 && System.nanoTime() < until) {
+                if (get(at.uri(DashboardAccess.PATH), cookie).statusCode() == 200) answered++;
+                exited.await(50, TimeUnit.MILLISECONDS);
+            }
+            assertEquals(0, exited.getCount(), "a page polling /dashboard kept the core up");
+            assertTrue(answered > 0);
+        }
+    }
+
+    @Test
+    void twoTabsEachNeedTheirOwnKey() throws Exception {
+        try (CoreServer server = CoreServer.start(0, TOKEN, "1.0", hooks(SLOW, () -> { }))) {
+            CoreLauncher.Address at = new CoreLauncher.Address(server.port(), TOKEN);
+            URI first = dashboardLink(at);
+            URI second = dashboardLink(at);
+            String one = traded(first);
+            String two = traded(second);
+            assertNotEquals(one, two);
+            assertEquals(200, get(at.uri(DashboardAccess.PATH), one).statusCode());
+            assertEquals(200, get(at.uri(DashboardAccess.PATH), two).statusCode());
+            assertEquals(401, get(first, null).statusCode());
+        }
+    }
+
+    @Test
+    void aHeadSpendsNoKey() throws Exception {
+        try (CoreServer server = CoreServer.start(0, TOKEN, "1.0", hooks(SLOW, () -> { }))) {
+            CoreLauncher.Address at = new CoreLauncher.Address(server.port(), TOKEN);
+            String cookie = traded(dashboardLink(at));
+            URI link = dashboardLink(at);
+            HTTP.send(HttpRequest.newBuilder(link).method("HEAD", HttpRequest.BodyPublishers.noBody())
+                    .header("Cookie", DashboardAccess.cookieName(server.port()) + "=" + cookie).build(),
+                    HttpResponse.BodyHandlers.discarding());
+            assertEquals(303, get(link, null).statusCode());
+        }
     }
 }
