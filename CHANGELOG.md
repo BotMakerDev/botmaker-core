@@ -9,6 +9,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- The core dashboard (2026-11-21): a read-only page at `/dashboard` with eight cards (the core, clients, projects,
+  runs, companions, MCP, plugins, the JVM) and a live feed of what the core tells, filtered by kind and run
+  (`dashboard`). It streams from `/dashboard/events` (SSE: `inside`, `seen`, `ended`). A tab gets in by a one-time key,
+  traded for a cookie scoped to `/dashboard`; `core_status` prints the link. An open tab does not keep the core up.
+- `close_project {keep_run}` and `reload_plugins` MCP tools (2026-11-21), for `botmaker core close` and `reload`; the
+  MCP's bearer reads `/dashboard/events` too.
+
 - Security advisories (catalog trust, phase 5): a plugin release or a run copy a catalog advisory names is refused
   until the user says *Run anyway* for that release alone, kept in `advisory-overrides.json` of the config folder;
   the check reads the last verified catalog, so it holds offline. Pickers leave affected releases out, each pulled

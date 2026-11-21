@@ -102,6 +102,16 @@ per user.
   `run_bot {runs}`'s first words, `K of N can run` for a dry run and `K of N started` (`PooledRuns.Outcome.words`),
   are read by `botmaker bot run --runs` (the cli's `SeveralStart`). `operations`' JSON keys (`assist.Operations`) are
   read by `botmaker tool` (the cli's `mcp.Operations`).
+- `dashboard` (2026-11-21, spec `2026-11-21-core-dashboard-design.md`) is the read-only page the core serves at
+  `/dashboard`: `DashboardFeed` keeps the last events, `server.CoreWatch` builds `Inside` (what the core is now),
+  `DashboardServlet` serves the page and `DashboardEvents` the SSE stream at `/dashboard/events`, its frames `inside`,
+  `seen` and `ended`. `DashboardAccess` lets a tab in by a one-time key (`CoreServer.dashboardLink()`, also given by
+  `core_status` and `POST /dashboard-key`) traded for a cookie `bm-dashboard-<port>`; the MCP's bearer passes too. The
+  page acts on nothing. `botmaker core` (the cli's `core.CoreFeed` and `CoreCards`) reads that stream with the bearer,
+  by field name: `Inside`'s component names and each `seen` frame's keys (`type` first, `source`, `kind`, `atMillis`,
+  `told`), so a rename changes both. Its acts are MCP tools by name: `core_status`, `quit_core`, `stop`,
+  `open_project`, `close_project {keep_run}` and `reload_plugins` (`CoreHome.lasting`). A `tools/call` that the cli's
+  bridge answers with no core carries `_meta {"botmaker/unreached": true}` (the cli's `McpBridge.UNREACHED`).
 - Plugins load in both processes since phase 10c (2026-11-05). The core alone resolves the pom and tells
   `LibrariesResolved`, and Studio binds its copy to it. Each copy's writes are `PluginWrite`s that the core makes on the
   project's thread (`Request.PluginWriting`, `Request.Batch`). Studio's copy forwards over the channel
