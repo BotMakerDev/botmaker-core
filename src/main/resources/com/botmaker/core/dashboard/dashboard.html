@@ -7,31 +7,462 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>BotMaker core</title>
 <style>
-  :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
-  body { margin: 16px; }
-  pre { white-space: pre-wrap; word-break: break-all; font-size: 12px; }
+  :root {
+    color-scheme: light dark;
+    --bg: #f6f7f9; --card: #ffffff; --line: #dde1e6; --text: #1c2127; --muted: #66707c;
+    --accent: #2f6fd6; --ok: #1f8a4c; --warn: #b7791f; --bad: #c53030; --hover: #eef2f8; --code: #f0f2f5;
+    font-family: system-ui, sans-serif; font-size: 14px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #15181c; --card: #1e2228; --line: #343a42; --text: #e4e7eb; --muted: #9aa3ad;
+      --accent: #6ea2ff; --ok: #4cc07f; --warn: #e0a84a; --bad: #f06a6a; --hover: #262c34; --code: #252a31;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 16px; background: var(--bg); color: var(--text); }
+  header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 12px; }
+  h1 { font-size: 18px; margin: 0; }
+  #state { color: var(--muted); }
+  #state.live { color: var(--ok); }
+  #banner { display: none; padding: 10px 12px; margin-bottom: 12px; border: 1px solid var(--bad);
+            border-radius: 6px; color: var(--bad); background: var(--card); }
+  #banner.shown { display: block; }
+  .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+  @media (max-width: 900px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
+          cursor: pointer; min-height: 92px; overflow: hidden; }
+  .card:hover { background: var(--hover); }
+  .card.open { border-color: var(--accent); }
+  .card h2 { font-size: 13px; margin: 0 0 6px; color: var(--muted); font-weight: 600; }
+  .card .body div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .big { font-size: 16px; font-weight: 600; }
+  .muted { color: var(--muted); }
+  .ok { color: var(--ok); } .warn { color: var(--warn); } .bad { color: var(--bad); }
+  #detail { display: none; background: var(--card); border: 1px solid var(--accent); border-radius: 8px;
+            padding: 10px 12px; margin-top: 10px; max-height: 45vh; overflow: auto; }
+  #detail.shown { display: block; }
+  #detail h3 { margin: 0 0 8px; font-size: 14px; }
+  #detail table, #feed table { border-collapse: collapse; width: 100%; }
+  td, th { text-align: left; padding: 3px 8px 3px 0; vertical-align: top; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 600; }
+  #feed { margin-top: 14px; background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+          padding: 10px 12px; }
+  .filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .filters h2 { font-size: 14px; margin: 0 8px 0 0; }
+  select, input { background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 4px;
+                  padding: 3px 6px; font: inherit; }
+  #rows tr.row { cursor: pointer; }
+  #rows tr.row:hover { background: var(--hover); }
+  #rows td.time { white-space: nowrap; color: var(--muted); font-variant-numeric: tabular-nums; }
+  #rows td.kind { white-space: nowrap; }
+  #rows td.summary { word-break: break-word; }
+  pre { margin: 0; white-space: pre-wrap; word-break: break-all; font-size: 12px; background: var(--code);
+        padding: 6px; border-radius: 4px; }
 </style>
 </head>
 <body>
-<h1>BotMaker core</h1>
-<p id="state">Connecting…</p>
-<pre id="log"></pre>
+<header><h1>BotMaker core</h1><span id="state">Connecting…</span></header>
+<div id="banner">Core ended — open the dashboard again from Studio or core_status</div>
+<div class="grid">
+  <section class="card" data-card="Core"><h2>Core</h2><div class="body"></div></section>
+  <section class="card" data-card="Clients"><h2>Clients</h2><div class="body"></div></section>
+  <section class="card" data-card="Project"><h2>Project</h2><div class="body"></div></section>
+  <section class="card" data-card="Runs"><h2>Runs</h2><div class="body"></div></section>
+  <section class="card" data-card="Companions"><h2>Companions</h2><div class="body"></div></section>
+  <section class="card" data-card="Plugins"><h2>Plugins</h2><div class="body"></div></section>
+  <section class="card" data-card="MCP calls"><h2>MCP calls</h2><div class="body"></div></section>
+  <section class="card" data-card="Last edit"><h2>Last edit</h2><div class="body"></div></section>
+</div>
+<div id="detail"></div>
+<section id="feed">
+  <div class="filters">
+    <h2>Events</h2>
+    <select id="kind"><option value="">every kind</option></select>
+    <select id="client"><option value="">every source</option></select>
+    <select id="run">
+      <option value="">runs and the rest</option>
+      <option value="run">run events only</option>
+      <option value="other">no run events</option>
+    </select>
+    <input id="text" type="search" placeholder="search">
+    <span id="count" class="muted"></span>
+  </div>
+  <table><thead><tr><th>Time</th><th>Kind</th><th>Source</th><th>What</th></tr></thead><tbody id="rows"></tbody></table>
+</section>
 <script>
-  // Until the plan's phase 4 draws the cards: each frame as it comes, the latest first, at most 500.
-  const state = document.getElementById('state');
-  const log = document.getElementById('log');
-  const lines = [];
-  const show = (name, data) => {
-    lines.unshift(name + ' ' + data);
-    if (lines.length > 500) lines.length = 500;
-    log.textContent = lines.join('\n');
+  "use strict";
+  // Read-only: the page only listens. Everything shown is written with textContent, never as HTML.
+  const ROWS = 500, EDITS = 50, LINES = 300;
+  const RUN_KINDS = new Set(["runState", "runOutput", "runLogged", "runTraced", "runFrame", "runProcess",
+    "runsStarted", "debugSession", "debugPaused", "debugFollowed", "inputAsked"]);
+
+  let inside = null;
+  const seen = [];                 // the latest ROWS seen, oldest first
+  const CALLS = 500;
+  const calls = new Map();         // the latest CALLS calls: id → {tool, plugin, at, steps, outcome, millis}
+  let callsTotal = 0, callsFailed = 0, callsRefused = 0, lastMcpAt = 0, lastMcpTool = "";
+  const run = { phase: null, detail: "", since: 0, started: [], lines: [], frames: 0, frameBytes: 0,
+                paused: null, pid: null, debug: null };
+  const edits = [];                // the latest EDITS edits, newest first
+  let history = null;
+  const clientsSeen = [];          // channel openings and closings, newest first
+  let openCard = null;
+
+  const $ = id => document.getElementById(id);
+  const el = (tag, cls, ...kids) => {
+    const node = document.createElement(tag);
+    if (cls) node.className = cls;
+    for (const kid of kids) node.append(kid instanceof Node ? kid : String(kid ?? ""));
+    return node;
   };
-  const events = new EventSource('/dashboard/events');
-  events.onopen = () => { state.textContent = 'Live'; };
-  events.addEventListener('inside', e => show('inside', e.data));
-  events.addEventListener('seen', e => show('seen', e.data));
-  events.addEventListener('ended', () => { state.textContent = 'Core ended'; events.close(); });
-  events.onerror = () => { state.textContent = 'Core ended'; events.close(); };
+  const line = (...kids) => el("div", null, ...kids);
+  const span = (cls, text) => el("span", cls, text);
+  const time = ms => ms ? new Date(ms).toLocaleTimeString([], { hour12: false }) : "—";
+  const span2 = ms => {
+    if (ms == null) return "—";
+    const s = Math.floor(ms / 1000), h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60);
+    return h ? h + "h" + String(m).padStart(2, "0") + "m" : m ? m + "m" + String(s % 60).padStart(2, "0") + "s"
+      : (ms < 10000 ? (ms / 1000).toFixed(1) : s) + " s";
+  };
+  const mb = bytes => Math.round(bytes / 1048576) + " MB";
+  const median = xs => {
+    if (!xs.length) return null;
+    const sorted = [...xs].sort((a, b) => a - b), mid = sorted.length >> 1;
+    return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+  };
+  const table = (heads, rows) => el("table", null,
+    el("thead", null, el("tr", null, ...heads.map(h => el("th", null, h)))),
+    el("tbody", null, ...rows.map(r => el("tr", null, ...r.map(c => el("td", null, c))))));
+
+  // ---- what each seen frame changes --------------------------------------------------------------
+
+  function kindOf(s) { return s.type === "told" ? s.event.event : s.type; }
+  function sourceOf(s) { return s.type === "told" ? s.source : s.type === "edit" ? (s.client ?? "") : s.id; }
+
+  function summary(s) {
+    if (s.type === "edit") {
+      return (s.accepted ? "accepted " : "refused ") + s.kind + (s.file ? " in " + s.file : "")
+        + (s.methods.length ? " · " + s.methods.join(", ") : "") + " · " + span2(s.tookMillis)
+        + (s.label ? " · " + s.label : "");
+    }
+    if (s.type === "client") return s.kind + " " + s.id + (s.opened ? " opened" : " closed");
+    const e = s.event;
+    switch (e.event) {
+      case "methodsChanged": return e.file + " · " + e.methods.length + " changed, " + e.removed.length
+        + " removed" + (e.source ? " · " + e.source : "");
+      case "historyChanged": return "undo " + (e.canUndo ? e.undoLabel : "—") + " · redo " + (e.canRedo ? e.redoLabel : "—");
+      case "diagnostics": return e.file + " · " + e.problems.length + " problems";
+      case "runState": return e.phase + (e.detail ? " · " + e.detail : "");
+      case "runOutput": return e.stream + " " + e.text;
+      case "runLogged": return e.folder;
+      case "runTraced": return e.level + " " + e.source + " " + e.text + (e.count > 1 ? " ×" + e.count : "");
+      case "runFrame": return "a frame of " + s.dropped + " bytes (not shown)";
+      case "runProcess": return "pid " + e.pid;
+      case "runsStarted": return e.words;
+      case "debugSession": return e.phase;
+      case "debugPaused": return e.file + ":" + e.line;
+      case "debugFollowed": return e.hits.length + " hits" + (e.looping ? " · looping" : "");
+      case "sourcesChanged": return e.files.join(", ");
+      case "inputAsked": return e.kind + " · " + e.prompt;
+      case "status": return e.message;
+      case "opened": return e.report.join(" · ");
+      case "librariesResolved": return e.jars.length + " jars" + (e.problems.length ? " · " + e.problems.length + " problems" : "");
+      case "refusal": return (e.file ? e.file + " · " : "") + e.reason;
+      case "toolCallStarted": return "#" + e.call + " " + e.tool + (e.plugin ? " (" + e.plugin + ")" : "");
+      case "toolCallStep": return "#" + e.call + " " + e.device + " " + e.command + (e.ok ? "" : " failed") + " · " + span2(e.millis);
+      case "toolCallProgress": return "#" + e.call + " " + e.command + " " + e.done + "/" + e.total;
+      case "toolCallEnded": return "#" + e.call + " " + e.outcome + " · " + span2(e.millis)
+        + (s.dropped ? " · " + s.dropped + " image bytes not shown" : "");
+      default: return "";
+    }
+  }
+
+  function heard(s) {
+    if (s.type === "edit") {
+      edits.unshift(s);
+      if (edits.length > EDITS) edits.length = EDITS;
+      return;
+    }
+    if (s.type === "client") {
+      clientsSeen.unshift(s);
+      if (clientsSeen.length > EDITS) clientsSeen.length = EDITS;
+      return;
+    }
+    const e = s.event;
+    switch (e.event) {
+      case "historyChanged": history = e; break;
+      case "runState":
+        if ((run.phase == null || run.phase === "ENDED") && e.phase !== "ENDED") {
+          // A new run: what the last one started and showed is not its.
+          run.started = []; run.frames = 0; run.frameBytes = 0;
+        }
+        if (run.phase !== e.phase) run.since = s.atMillis;
+        run.phase = e.phase; run.detail = e.detail;
+        if (e.phase === "ENDED") { run.pid = null; run.paused = null; }
+        break;
+      case "runProcess": run.pid = e.pid; break;
+      case "runsStarted": run.started = e.runs; break;
+      case "runOutput": case "runTraced":
+        run.lines.push(s);
+        if (run.lines.length > LINES) run.lines.shift();
+        break;
+      case "runFrame": run.frames++; run.frameBytes += s.dropped; break;
+      case "debugSession": run.debug = e.phase; if (e.phase !== "STARTED") run.paused = null; break;
+      case "debugPaused": run.paused = e; break;
+      case "toolCallStarted":
+        calls.set(e.call, { tool: e.tool, plugin: e.plugin, at: e.atMillis, steps: [], outcome: null, millis: null });
+        callsTotal++;
+        if (calls.size > CALLS) calls.delete(calls.keys().next().value);
+        if (s.source === "mcp") { lastMcpAt = e.atMillis; lastMcpTool = e.tool; }
+        break;
+      case "toolCallStep": calls.get(e.call)?.steps.push(e); break;
+      case "toolCallEnded": {
+        const call = calls.get(e.call);
+        // An end whose start the page never heard counts nowhere, so the totals agree.
+        if (!call) break;
+        call.outcome = e.outcome; call.millis = e.millis;
+        if (e.outcome === "ERROR") callsFailed++;
+        if (e.outcome === "REFUSED") callsRefused++;
+        break;
+      }
+    }
+  }
+
+  // ---- the cards -----------------------------------------------------------------------------
+
+  const cards = {
+    "Core": {
+      card: () => inside ? [
+        line(span(inside.ending ? "warn big" : "ok big", inside.ending ? "● ending" : "● up"), " ",
+             span("big", span2(inside.uptimeMillis))),
+        line("pid " + inside.pid + " · v" + inside.version),
+        line("heap " + mb(inside.heapUsed) + " / " + mb(inside.heapMax) + " · " + inside.threads + " threads"),
+        line(span("muted", inside.idleLeftMillis == null ? "kept up" : "idle exit in " + span2(inside.idleLeftMillis)))
+      ] : [line(span("muted", "waiting for the core"))],
+      detail: () => inside ? [
+        el("h3", null, "Threads by name"),
+        table(["Name", "Live"], Object.entries(inside.threadsByPrefix).sort((a, b) => b[1] - a[1])),
+        el("h3", null, "Jars rebuilt since the core started"),
+        inside.rebuiltJars.length ? table(["Jar"], inside.rebuiltJars.map(j => [j])) : line(span("muted", "none"))
+      ] : []
+    },
+    "Clients": {
+      card: () => {
+        const list = inside ? inside.clients : [];
+        const rows = list.map(c => line(c.kind + " " + c.id.slice(0, 8), span("muted", " · " + c.requests + " asks"
+          + (c.watchingCalls ? " · watching calls" : ""))));
+        if (lastMcpAt) rows.push(line("mcp", span("muted", " · last " + lastMcpTool + " at " + time(lastMcpAt))));
+        return [line(span("big", list.length), span("muted", list.length === 1 ? " channel" : " channels")),...(rows.length ? rows : [line(span("muted", "no client"))])];
+      },
+      detail: () => [
+        el("h3", null, "Channels"),
+        table(["Id", "Kind", "Opened", "Asks", "Last ask", "Open file", "Watching calls"],
+          (inside ? inside.clients : []).map(c => [c.id, c.kind, time(c.openedMillis), c.requests,
+            c.lastRequest ?? "—", c.openFile ?? "—", c.watchingCalls ? "yes" : "no"])),
+        el("h3", null, "MCP"),
+        line(lastMcpAt ? "last call " + lastMcpTool + " at " + time(lastMcpAt) : "no MCP call heard"),
+        el("h3", null, "Opened and closed"),
+        table(["Time", "Kind", "Id", ""], clientsSeen.map(c => [time(c.atMillis), c.kind, c.id, c.opened ? "opened" : "closed"]))
+      ]
+    },
+    "Project": {
+      card: () => !inside ? [] : !inside.project ? [line(span("muted", "no project open"))] : [
+        line(span("big", inside.project)),
+        line("lock pid " + (inside.lockHolder ?? "—") + (inside.devMode ? " · dev mode" : "")),
+        line(span("muted", history ? "undo " + (history.canUndo ? history.undoLabel : "—") : "no history heard"))
+      ],
+      detail: () => [
+        el("h3", null, "History"),
+        history ? table(["", "Label"], [["Undo", history.canUndo ? history.undoLabel : "—"],
+                                        ["Redo", history.canRedo ? history.redoLabel : "—"]])
+                : line(span("muted", "no history heard yet")),
+        el("h3", null, "Open file by client"),
+        table(["Client", "File"], (inside ? inside.clients : []).map(c => [c.kind + " " + c.id, c.openFile ?? "—"]))
+      ]
+    },
+    "Runs": {
+      card: () => {
+        if (!inside?.running && (!run.phase || run.phase === "ENDED")) {
+          return [line(span("muted", run.phase === "ENDED" ? "ended " + time(run.since) : "nothing runs"))];
+        }
+        const cls = run.phase === "PAUSED" || run.paused ? "warn" : "ok";
+        return [
+          line(span(cls + " big", "▶ " + (inside?.running ?? "run")), " ", span("muted", run.since && inside ? span2(Math.max(0, inside.atMillis - run.since)) : "")),
+          line((run.phase ?? "") + (run.detail ? " · " + run.detail : "")),
+          line(span("muted", (run.started.length ? run.started.length + " runs · rows "
+            + run.started.map(r => r.row).join(", ") + " · " : "") + (run.pid ? "pid " + run.pid : "")
+            + (run.paused ? " · paused " + (run.paused.file ? "at " + run.paused.file + ":" + run.paused.line
+                                                            : "outside the bot") : "")))
+        ];
+      },
+      detail: () => [
+        el("h3", null, "Runs started"),
+        run.started.length ? table(["Row", "Run id"], run.started.map(r => [r.row, r.runId || "—"]))
+                           : line(span("muted", "one run, or none")),
+        line(span("muted", run.frames + " frames heard, " + mb(run.frameBytes) + " (never shown)")),
+        el("h3", null, "Its lines, newest first"),
+        table(["Time", "Where", "Line"], [...run.lines].reverse().map(s => [time(s.atMillis),
+          s.event.event === "runOutput" ? s.event.stream : s.event.level + " " + s.event.source,
+          s.event.text]))
+      ]
+    },
+    "Companions": {
+      card: () => !inside?.companions.length ? [line(span("muted", "none running"))] : [
+        line(span("big", inside.companions.length)),
+        ...inside.companions.map(c => line(c.split(".").pop(), span("ok", " ▶"))),
+        line(span("muted", "with " + (inside.running ?? "—")))
+      ],
+      detail: () => [table(["Companion", "Serves"], (inside?.companions ?? []).map(c => [c, inside.running ?? "—"]))]
+    },
+    "Plugins": {
+      card: () => !inside?.plugins.length ? [line(span("muted", "none bound"))] : [
+        line(span("big", inside.plugins.length)),
+        ...inside.plugins.map(p => line(p.coordinate.split(":").pop() + " " + p.version,
+          p.localBuild ? span("warn", " local") : ""))
+      ],
+      detail: () => [table(["Coordinate", "Version", "Build", "Said"], (inside?.plugins ?? []).map(p =>
+        [p.coordinate, p.version, p.localBuild ? "local" : "released", p.said || "—"]))]
+    },
+    "MCP calls": {
+      card: () => {
+        const running = [...calls.values()].filter(c => c.outcome == null).length;
+        const mid = median([...calls.values()].filter(c => c.millis != null).map(c => c.millis));
+        return [
+          line(span("big", running + " running"), span("muted", " · " + callsTotal + " total")),
+          line(span(callsFailed ? "bad" : "muted", callsFailed + " failed"),
+               span(callsRefused ? "warn" : "muted", " · " + callsRefused + " refused")),
+          line(span("muted", "median " + (mid == null ? "—" : span2(mid))))
+        ];
+      },
+      detail: () => {
+        const list = [...calls.entries()].reverse().slice(0, 200);
+        return [table(["#", "Started", "Tool", "Outcome", "Took", "Steps"], list.map(([id, c]) => [id, time(c.at),
+          c.tool + (c.plugin ? " (" + c.plugin + ")" : ""),
+          span(c.outcome === "ERROR" ? "bad" : c.outcome === "REFUSED" ? "warn" : c.outcome ? "ok" : "muted",
+               c.outcome ?? "running"),
+          c.millis == null ? "—" : span2(c.millis),
+          el("div", null, ...c.steps.map(st => line(span(st.ok ? "" : "bad", st.device + " " + st.command),
+            span("muted", " · " + span2(st.millis)))))]))];
+      }
+    },
+    "Last edit": {
+      card: () => {
+        const e = edits[0];
+        if (!e) return [line(span("muted", "no edit yet"))];
+        return [
+          line(span(e.accepted ? "ok big" : "bad big", e.kind), " ", span("muted", span2(e.tookMillis))),
+          line((e.file || "no file") + (e.methods.length ? " · " + e.methods.join(", ") : "")),
+          line(span("muted", (e.client ? e.client.slice(0, 8) + " · " : "") + time(e.atMillis)
+            + (e.label ? " · " + e.label : "")))
+        ];
+      },
+      detail: () => [table(["Time", "Who", "Kind", "File", "Methods", "Took", "Said"], edits.map(e => [time(e.atMillis),
+        e.client ?? "—", span(e.accepted ? "ok" : "bad", e.kind), e.file || "—", e.methods.join(", "),
+        span2(e.tookMillis), e.label || ""]))]
+    }
+  };
+
+  function drawBodies() {
+    for (const node of document.querySelectorAll(".card")) {
+      node.querySelector(".body").replaceChildren(...cards[node.dataset.card].card());
+      node.classList.toggle("open", node.dataset.card === openCard);
+    }
+  }
+
+  /** The cards and the open detail; the detail only when something changed, so a selection in it stays. */
+  function drawCards() {
+    drawBodies();
+    const detail = $("detail");
+    detail.classList.toggle("shown", openCard != null);
+    if (openCard) detail.replaceChildren(el("h3", null, openCard), ...cards[openCard].detail());
+  }
+
+  for (const node of document.querySelectorAll(".card")) {
+    node.addEventListener("click", () => {
+      openCard = openCard === node.dataset.card ? null : node.dataset.card;
+      drawCards();
+    });
+  }
+
+  // ---- the feed --------------------------------------------------------------------------------
+
+  const expanded = new Set();
+  const offered = { kind: new Set(), client: new Set() };
+
+  function offer(select, set, value) {
+    if (!value || set.has(value)) return;
+    set.add(value);
+    const option = el("option", null, value);
+    option.value = value;
+    select.append(option);
+  }
+
+  function drawFeed() {
+    const kind = $("kind").value, client = $("client").value, which = $("run").value;
+    const text = $("text").value.toLowerCase();
+    const rows = [];
+    for (let i = seen.length - 1; i >= 0; i--) {
+      const s = seen[i], k = kindOf(s), what = s.summary;
+      if (kind && k !== kind) continue;
+      if (client && sourceOf(s) !== client) continue;
+      if (which === "run" && !RUN_KINDS.has(k)) continue;
+      if (which === "other" && RUN_KINDS.has(k)) continue;
+      if (text && !what.toLowerCase().includes(text) && !k.toLowerCase().includes(text)) continue;
+      const row = el("tr", "row", el("td", "time", time(s.atMillis)), el("td", "kind", k),
+        el("td", "muted", sourceOf(s)), el("td", "summary", what));
+      row.addEventListener("click", () => {
+        expanded.has(s) ? expanded.delete(s) : expanded.add(s);
+        drawFeed();
+      });
+      rows.push(row);
+      if (expanded.has(s)) {
+        const cell = el("td", null, el("pre", null, JSON.stringify(s, (key, value) => key === "summary" ? undefined : value, 2)));
+        cell.colSpan = 4;
+        rows.push(el("tr", null, cell));
+      }
+    }
+    $("rows").replaceChildren(...rows);
+    $("count").textContent = rows.filter(r => r.classList.contains("row")).length + " of " + seen.length;
+  }
+
+  for (const id of ["kind", "client", "run"]) $(id).addEventListener("change", drawFeed);
+  $("text").addEventListener("input", drawFeed);
+
+  // ---- the stream ------------------------------------------------------------------------------
+
+  let pending = false;
+  function later() {
+    if (pending) return;
+    pending = true;
+    requestAnimationFrame(() => { pending = false; drawCards(); drawFeed(); });
+  }
+
+  function ended(event) {
+    stream.close();
+    // An error before the core said ended: not admitted, or gone without a word. Either way a new key is needed.
+    $("state").textContent = event.type === "ended" ? "Core ended" : "Disconnected";
+    $("state").classList.remove("live");
+    $("banner").classList.add("shown");
+  }
+
+  const stream = new EventSource("/dashboard/events");
+  stream.onopen = () => { $("state").textContent = "Live"; $("state").classList.add("live"); };
+  stream.addEventListener("inside", e => { inside = JSON.parse(e.data); later(); });
+  stream.addEventListener("seen", e => {
+    const s = JSON.parse(e.data);
+    s.summary = summary(s);
+    heard(s);
+    seen.push(s);
+    if (seen.length > ROWS) expanded.delete(seen.shift());
+    offer($("kind"), offered.kind, kindOf(s));
+    offer($("client"), offered.client, sourceOf(s));
+    later();
+  });
+  stream.addEventListener("ended", ended);
+  // No retry: a key opens the page once, so a new one comes from an opener.
+  stream.onerror = ended;
+  setInterval(() => { if (inside && !$("banner").classList.contains("shown")) drawBodies(); }, 1000);
 </script>
 </body>
 </html>
