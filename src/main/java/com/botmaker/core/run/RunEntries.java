@@ -165,6 +165,16 @@ public final class RunEntries {
             started = List.copyOf(going);
         }
 
+        /** The title of the entry that goes with its companions, for the core's dashboard. */
+        public synchronized Optional<String> runningTitle() {
+            return Optional.ofNullable(running).map(RunEntry::title);
+        }
+
+        /** The class names of the companions going now, for the core's dashboard. */
+        public synchronized List<String> going() {
+            return started.stream().map(companion -> companion.getClass().getName()).toList();
+        }
+
         /**
          * The run ended, or the project closes: each companion started is stopped, once. An end with no run started (a
          * compile that failed) drops the ask too.

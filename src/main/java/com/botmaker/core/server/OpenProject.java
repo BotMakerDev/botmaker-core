@@ -362,6 +362,19 @@ public final class OpenProject implements AutoCloseable {
         }
     }
 
+    /** What runs now with its companions, and their class names: the dashboard's Runs and Companions. */
+    Optional<String> runningTitle() {
+        return companions.runningTitle();
+    }
+
+    List<String> companionsGoing() {
+        return companions.going();
+    }
+
+    boolean devMode() {
+        return StudioProjectSettings.devModeIn(config.projectPath());
+    }
+
     /** {@code watcher} hears every event from now on. */
     void watch(Consumer<CoreEvent> watcher) {
         this.watcher = watcher;

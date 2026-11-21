@@ -7,6 +7,8 @@ import com.botmaker.core.CoreJson;
 import com.botmaker.core.assist.CoreHome;
 import com.botmaker.core.assist.PluginTools;
 import com.botmaker.core.assist.RunLog;
+import com.botmaker.core.dashboard.DashboardFeed;
+import com.botmaker.core.dashboard.Inside;
 import com.botmaker.core.edit.EditResult;
 import com.botmaker.core.event.CoreEvent;
 import com.botmaker.core.plugin.HomePlugins;
@@ -67,6 +69,8 @@ public final class Projects implements AutoCloseable, CoreHome.Host {
     /** What the open project's runs printed and traced, for the core's own run tools. */
     private final RunLog log = new RunLog(Clock.systemUTC(), this::launching);
     private final AtomicLong asks = new AtomicLong();
+    /** What the core's dashboard is told, and builds its snapshot from. */
+    private final CoreWatch watch = new CoreWatch(Clock.systemUTC());
     /** What each start of several runs the MCP asked for was told to have started, until it is answered. */
     private final Map<String, Optional<CoreEvent.RunsStarted>> several = new ConcurrentHashMap<>();
     /** Set and read on the opener's thread, and by {@link #close}. */
@@ -94,6 +98,7 @@ public final class Projects implements AutoCloseable, CoreHome.Host {
     Projects(OpenProject.Libraries libraries, ServedTools tools) {
         this.libraries = libraries;
         this.tools = tools;
+        tools.watch(event -> watch.feed().told(event, "mcp"));
         tools.fallback(CoreHome.served(JSON, this, log));
         tools.held(CoreHome.device(JSON));
         tools.lasting(CoreHome.lasting(JSON, this));
@@ -101,8 +106,22 @@ public final class Projects implements AutoCloseable, CoreHome.Host {
 
     /** Serves {@code channel}'s requests from now on; what {@link CoreServer.Hooks#opened} is given. */
     public void attach(Channel channel) {
+        watch.attached(channel.id());
         channel.onMessage(text -> received(channel, text));
-        channel.onClose(() -> inTurn(() -> leave(channel)));
+        channel.onClose(() -> {
+            watch.left(channel.id());
+            inTurn(() -> leave(channel));
+        });
+    }
+
+    /** What the core's dashboard shows happened. */
+    public DashboardFeed feed() {
+        return watch.feed();
+    }
+
+    /** The whole core now, for the core's dashboard. */
+    public Inside inside() {
+        return watch.inside(server, open);
     }
 
     /** Whether a project is open. */
@@ -130,6 +149,7 @@ public final class Projects implements AutoCloseable, CoreHome.Host {
             refuseUnreadable(channel, text, unreadable);
             return;
         }
+        watch.received(channel.id(), request);
         switch (request) {
             case Request.Open ask -> inTurn(() -> answer(channel, ask.id(), open(channel, ask.project())));
             // A client's tools and its answers to the core's calls need no project, and never wait behind one.
@@ -164,7 +184,11 @@ public final class Projects implements AutoCloseable, CoreHome.Host {
                 if (project == null) {
                     answer(channel, request.id(), new EditResult.Refused("No project is open."));
                 } else {
-                    project.ask(request).thenAccept(result -> answer(channel, request.id(), result));
+                    long start = System.nanoTime();
+                    project.ask(request).thenAccept(result -> {
+                        if (CoreWatch.isEdit(request)) watch.answered(channel.id(), request, result, start);
+                        answer(channel, request.id(), result);
+                    });
                 }
             }
         }
@@ -270,7 +294,10 @@ public final class Projects implements AutoCloseable, CoreHome.Host {
         open = project;
         held = false;
         kept = false;
-        project.watch(event -> heard(project, event));
+        project.watch(event -> {
+            watch.feed().told(event, "project");
+            heard(project, event);
+        });
         return Optional.empty();
     }
 

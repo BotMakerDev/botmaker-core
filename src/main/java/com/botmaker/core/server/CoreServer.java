@@ -185,6 +185,13 @@ public final class CoreServer implements AutoCloseable {
         }
     }
 
+    /** How long until this core ends with nothing to do; empty while a client or a run keeps it up. */
+    public Optional<Long> idleLeftMillis() {
+        if (!idle()) return Optional.empty();
+        long quiet = System.nanoTime() - lastActive.get();
+        return Optional.of(Math.max(0, hooks.idle().after().minusNanos(quiet).toMillis()));
+    }
+
     private void tick() {
         List.copyOf(channels.values()).forEach(Channel::heartbeat);
         long quiet = System.nanoTime() - lastActive.get();
