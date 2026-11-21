@@ -286,24 +286,26 @@ class CatalogIndexTest {
         try {
             List<String> urls = List.of("http://127.0.0.1:" + server.getAddress().getPort() + "/catalog.json");
             Path cache = dir.resolve("cache/catalog.json");
+            // Unsigned: signing is CatalogClientTest's; this is the session's one request and the kept copy.
 
-            CatalogClient online = new CatalogClient(new GitHubClient(), urls, cache);
+            CatalogClient online = new CatalogClient(new GitHubClient(), urls, cache, Optional::of);
             assertEquals(1, online.fetch().join().plugins().size());
             assertEquals(1, online.fetch().join().bots().size());
             assertEquals(1, requests.get(), "one request a session");
 
             answer.set(null);
-            CatalogClient offline = new CatalogClient(new GitHubClient(), urls, cache);
+            CatalogClient offline = new CatalogClient(new GitHubClient(), urls, cache, Optional::of);
             assertEquals("BotMakerDev/botmaker-sdk", offline.fetch().join().plugins().getFirst().repo(),
                     "the kept catalog");
             offline.fetch().join();
             assertEquals(3, requests.get(), "a failed read is asked again");
 
-            CatalogClient nothing = new CatalogClient(new GitHubClient(), urls, dir.resolve("none.json"));
+            CatalogClient nothing = new CatalogClient(new GitHubClient(), urls, dir.resolve("none.json"), Optional::of);
             assertSame(CatalogIndex.EMPTY, nothing.fetch().join());
 
-            answer.set("{\"schemaVersion\": 3, \"plugins\": [], \"bots\": []}");
-            CatalogClient emptied = new CatalogClient(new GitHubClient(), urls, cache);
+            // built after the kept one: a catalog naming no build time never replaces one that names it
+            answer.set("{\"schemaVersion\": 3, \"builtAt\": \"2026-10-28T18:00:00Z\", \"plugins\": [], \"bots\": []}");
+            CatalogClient emptied = new CatalogClient(new GitHubClient(), urls, cache, Optional::of);
             assertTrue(emptied.fetch().join().isEmpty(), "a catalog listing nothing is an answer");
             emptied.fetch().join();
             assertEquals(5, requests.get(), "and is not asked again");

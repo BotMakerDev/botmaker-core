@@ -1,0 +1,6 @@
+# The Ed25519 public keys whose signature on catalog.signed.json the core trusts (CatalogSignature), one base64 DER
+# key a line, as botmaker-catalog's tools/new-signing-key.sh prints it. A new key is added beside the old one and
+# released before the catalog signs with it; the old line goes once no catalog it signed is served.
+#
+# 2026-11-21, key id 70ec7bf8fe39b01b.
+MCowBQYDK2VwAyEAjXTEgacHw2nn0U+L1bJVagdkKWBLp9PJWCKF1LNHVAc=

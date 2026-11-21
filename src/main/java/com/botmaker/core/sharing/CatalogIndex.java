@@ -53,6 +53,16 @@ public record CatalogIndex(List<PluginRegistry.Plugin> plugins, List<GalleryEntr
         return read(body).orElse(EMPTY);
     }
 
+    /** When the catalog {@code body} holds was built ({@code builtAt}), empty when it says none or no instant. */
+    static Optional<Instant> builtAt(String body) {
+        try {
+            JsonNode built = MAPPER.readTree(body).path("builtAt");
+            return built.isTextual() ? Optional.of(Instant.parse(built.asText())) : Optional.empty();
+        } catch (Exception e) {
+            return Optional.empty();
+        }
+    }
+
     /**
      * The catalog {@code body} holds, empty when it is no catalog at all — which a catalog listing nothing is not:
      * {@code {"plugins": [], "bots": []}} is an answer, and replaces the one kept from the last read.

@@ -45,7 +45,7 @@ class CatalogCopiesTest {
 
         @Override
         public CatalogClient.Reply catalog() {
-            return new CatalogClient.Reply(catalog, fresh);
+            return new CatalogClient.Reply(catalog, fresh ? CatalogClient.Trust.VERIFIED : CatalogClient.Trust.CACHED);
         }
 
         @Override

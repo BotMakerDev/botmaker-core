@@ -62,7 +62,7 @@ public final class CatalogCopies {
             @Override
             public CatalogClient.Reply catalog() {
                 CatalogClient client = CatalogClient.session();
-                CatalogClient.Reply kept = new CatalogClient.Reply(client.kept(), false);
+                CatalogClient.Reply kept = new CatalogClient.Reply(client.kept(), CatalogClient.Trust.CACHED);
                 try {
                     // asked again: a release since this BotMaker started is got, as New Project offers it
                     return client.refresh().completeOnTimeout(kept, CATALOG_SECONDS, TimeUnit.SECONDS).join();

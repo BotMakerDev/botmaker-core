@@ -9,6 +9,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- The catalog is signed (catalog trust, phase 4): `CatalogClient` reads `catalog.signed.json` and uses only a catalog
+  whose Ed25519 signature `CatalogSignature` verifies against `catalog-keys.txt`. It keeps only a verified catalog on
+  disk, as the signed file. A catalog that fails is treated like no answer: the kept one serves, `Reply.trust()`
+  `UNVERIFIED`. A verified catalog built before the kept one never replaces it. The unsigned `catalog.json` kept before
+  is deleted. `Reply` holds `Trust` (`VERIFIED`, `CACHED`, `UNVERIFIED`) in place of `fresh`, which stays as a method.
+
 - A catalog row is found by a slug its repository had before a rename or a transfer (catalog trust, phase 3):
   `GalleryEntry` and `PluginRegistry.Plugin` carry `formerly` and `answersTo`, `CatalogIndex.botAt`,
   `GitHubGallery.find`, `PluginRegistry.entryFor` (by the old coordinate), a run copy's `CatalogCopies.copyOf` and
