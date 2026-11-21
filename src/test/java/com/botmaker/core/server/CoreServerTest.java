@@ -43,6 +43,7 @@ import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -591,6 +592,35 @@ class CoreServerTest {
             assertEquals(200, get(at.uri(DashboardAccess.PATH), two).statusCode());
             assertEquals(401, get(first, null).statusCode());
         }
+    }
+
+    @Test
+    void pageIsServedWithItsPolicy() throws Exception {
+        try (CoreServer server = CoreServer.start(0, TOKEN, "1.0", hooks(SLOW, () -> { }))) {
+            CoreLauncher.Address at = new CoreLauncher.Address(server.port(), TOKEN);
+            HttpResponse<String> page = get(at.uri(DashboardAccess.PATH), traded(dashboardLink(at)));
+            assertEquals(200, page.statusCode());
+            assertTrue(page.headers().firstValue("Content-Type").orElseThrow().startsWith("text/html"));
+            assertEquals("default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'",
+                    page.headers().firstValue("Content-Security-Policy").orElseThrow());
+            assertTrue(page.body().contains("<title>"), page.body());
+        }
+    }
+
+    @Test
+    void closingTheCoreEndsTheStream() throws Exception {
+        CoreServer server = CoreServer.start(0, TOKEN, "1.0", hooks(SLOW, () -> { }));
+        CoreLauncher.Address at = new CoreLauncher.Address(server.port(), TOKEN);
+        String cookie = traded(dashboardLink(at));
+        HttpResponse<Stream<String>> stream = HTTP.send(
+                HttpRequest.newBuilder(at.uri(DashboardAccess.PATH + "/events"))
+                        .header("Cookie", DashboardAccess.cookieName(server.port()) + "=" + cookie).build(),
+                HttpResponse.BodyHandlers.ofLines());
+        assertEquals(200, stream.statusCode());
+        CompletableFuture<List<String>> lines = CompletableFuture.supplyAsync(() -> stream.body().toList());
+        server.close();
+        List<String> read = lines.get(5, TimeUnit.SECONDS);
+        assertTrue(read.contains("event: ended"), read.toString());
     }
 
     @Test

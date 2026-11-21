@@ -1,0 +1,37 @@
+<!doctype html>
+<!-- SPDX-FileCopyrightText: 2026 LiQiyeDev -->
+<!-- SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0 -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BotMaker core</title>
+<style>
+  :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+  body { margin: 16px; }
+  pre { white-space: pre-wrap; word-break: break-all; font-size: 12px; }
+</style>
+</head>
+<body>
+<h1>BotMaker core</h1>
+<p id="state">Connecting…</p>
+<pre id="log"></pre>
+<script>
+  // Until the plan's phase 4 draws the cards: each frame as it comes, the latest first, at most 500.
+  const state = document.getElementById('state');
+  const log = document.getElementById('log');
+  const lines = [];
+  const show = (name, data) => {
+    lines.unshift(name + ' ' + data);
+    if (lines.length > 500) lines.length = 500;
+    log.textContent = lines.join('\n');
+  };
+  const events = new EventSource('/dashboard/events');
+  events.onopen = () => { state.textContent = 'Live'; };
+  events.addEventListener('inside', e => show('inside', e.data));
+  events.addEventListener('seen', e => show('seen', e.data));
+  events.addEventListener('ended', () => { state.textContent = 'Core ended'; events.close(); });
+  events.onerror = () => { state.textContent = 'Core ended'; events.close(); };
+</script>
+</body>
+</html>

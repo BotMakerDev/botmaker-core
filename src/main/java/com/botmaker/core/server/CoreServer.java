@@ -6,6 +6,10 @@ package com.botmaker.core.server;
 import com.botmaker.core.assist.McpEndpoint;
 import com.botmaker.core.assist.McpTools;
 import com.botmaker.core.dashboard.DashboardAccess;
+import com.botmaker.core.dashboard.DashboardEvents;
+import com.botmaker.core.dashboard.DashboardFeed;
+import com.botmaker.core.dashboard.DashboardServlet;
+import com.botmaker.core.dashboard.Inside;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.modelcontextprotocol.json.jackson2.JacksonMcpJsonMapper;
 import io.modelcontextprotocol.server.McpServer;
@@ -45,6 +49,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 /**
  * The core's one server: Jetty on {@code 127.0.0.1}, every path behind {@link McpEndpoint}'s token but its hello.
@@ -72,8 +77,17 @@ public final class CoreServer implements AutoCloseable {
      * @param busy   true while something must keep the core up with no client (a run, from phase 10b)
      * @param opened hears each channel as it opens, before its first message; it sets the channel's listener
      * @param exit   ends the core; called once, off the server's threads
+     * @param inside what the core is now, for the dashboard; null from a server with no core behind it (a test's)
+     * @param feed   what the dashboard shows happened
      */
-    public record Hooks(Idle idle, BooleanSupplier busy, Consumer<Channel> opened, Runnable exit) {}
+    public record Hooks(Idle idle, BooleanSupplier busy, Consumer<Channel> opened, Runnable exit,
+                        Supplier<Inside> inside, DashboardFeed feed) {
+
+        /** With nothing inside to show, and a feed no one tells: a server with no core behind it. */
+        public Hooks(Idle idle, BooleanSupplier busy, Consumer<Channel> opened, Runnable exit) {
+            this(idle, busy, opened, exit, () -> null, new DashboardFeed(Clock.systemUTC()));
+        }
+    }
 
     /** What {@link #INFO} answers; {@code ending} once the core has begun to end, when it opens no channel. */
     public record Info(String version, long pid, int clients, boolean busy, boolean ending) {}
@@ -85,6 +99,7 @@ public final class CoreServer implements AutoCloseable {
     private final String version;
     private final Hooks hooks;
     private final DashboardAccess dashboard = new DashboardAccess(Clock.systemUTC());
+    private final DashboardEvents events;
     private final Map<String, Channel> channels = new ConcurrentHashMap<>();
     private final AtomicLong lastActive = new AtomicLong(System.nanoTime());
     private final AtomicBoolean ending = new AtomicBoolean();
@@ -117,8 +132,11 @@ public final class CoreServer implements AutoCloseable {
         context.addServlet(new ServletHolder(new StudioServlet()), STUDIO);
         context.addServlet(new ServletHolder(new StudioServlet()), STUDIO + "/*");
         context.addServlet(new ServletHolder(new DashboardKeyServlet()), DashboardAccess.KEY_PATH);
-        context.addServlet(new ServletHolder(new DashboardStubServlet()), DashboardAccess.PATH);
-        context.addServlet(new ServletHolder(new DashboardStubServlet()), DashboardAccess.PATH + "/*");
+        // The page first: a jar without it fails here, before the stream starts its ticks.
+        DashboardServlet page = new DashboardServlet(dashboard);
+        this.events = new DashboardEvents(hooks.feed(), hooks.inside());
+        context.addServlet(new ServletHolder(page), DashboardAccess.PATH);
+        context.addServlet(new ServletHolder(events), DashboardEvents.PATH);
         McpEndpoint.guard(context, token, dashboard::admits);
         // After the guard: a request refused for its token keeps no core up, nor does a dashboard's.
         context.addFilter(new FilterHolder(activity()), "/*", EnumSet.of(DispatcherType.REQUEST));
@@ -147,6 +165,7 @@ public final class CoreServer implements AutoCloseable {
         try {
             jetty.start();
         } catch (Exception e) {
+            events.close();
             mcp.close();
             jetty.stop();
             throw e;
@@ -180,6 +199,8 @@ public final class CoreServer implements AutoCloseable {
         if (!closed.compareAndSet(false, true)) return;
         ticks.shutdownNow();
         List.copyOf(channels.values()).forEach(Channel::close);
+        // Before Jetty stops: each open page hears that the core ended.
+        events.close();
         try {
             mcp.close();
         } finally {
@@ -266,16 +287,6 @@ public final class CoreServer implements AutoCloseable {
                     + dashboard.newKey();
             response.setContentType("application/json");
             response.getOutputStream().write(JSON.writeValueAsBytes(Map.of("url", url)));
-        }
-    }
-
-    /** Until the page is served (plan phase 3): trades a key, else says the dashboard is open. */
-    private final class DashboardStubServlet extends HttpServlet {
-        @Override
-        protected void doGet(HttpServletRequest request, HttpServletResponse response) throws IOException {
-            if (dashboard.tradeIn(request, response)) return;
-            response.setContentType("text/plain");
-            response.getWriter().write("BotMaker core dashboard");
         }
     }
 

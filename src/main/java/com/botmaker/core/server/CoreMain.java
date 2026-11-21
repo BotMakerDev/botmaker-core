@@ -106,7 +106,7 @@ public final class CoreMain {
                         awaitQuietly(started);
                         self[0].close();
                         ended.run();
-                    }));
+                    }, projects::inside, projects.feed()));
         } catch (IOException e) {
             projects.close();
             throw e;
