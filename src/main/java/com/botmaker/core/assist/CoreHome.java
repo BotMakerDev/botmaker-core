@@ -42,6 +42,21 @@ public final class CoreHome {
          * @throws IllegalArgumentException with why it keeps running
          */
         String quitCore(boolean force);
+
+        /**
+         * Closes the open project, which no client with a screen holds; with {@code keepRun}, a bot running now
+         * finishes first.
+         *
+         * @throws IllegalArgumentException with why it stays open
+         */
+        String closeProject(boolean keepRun);
+
+        /**
+         * The open project's libraries resolved again and its plugins bound again, as after a client changed them.
+         *
+         * @throws IllegalArgumentException with why they were not
+         */
+        String reloadPlugins();
     }
 
     record Open(@Describe("the project's folder, absolute, as list_projects gives it") String path) {
@@ -49,6 +64,10 @@ public final class CoreHome {
 
     record Quit(@Describe(value = "true to quit with Studio attached, which then joins a fresh core", optional = true)
                 Boolean force) {
+    }
+
+    record Close(@Describe(value = "true to let a bot running now finish before the project closes", optional = true)
+                 Boolean keep_run) {
     }
 
     private CoreHome() {
@@ -75,8 +94,8 @@ public final class CoreHome {
     }
 
     /**
-     * {@code core_status} and {@code quit_core}, the core itself, and {@code operations}, what its bound plugins offer
-     * ({@link Operations}): served with Studio attached too.
+     * {@code core_status}, {@code quit_core}, {@code close_project} and {@code reload_plugins}, the core itself, and
+     * {@code operations}, what its bound plugins offer ({@link Operations}): served with Studio attached too.
      */
     public static List<SyncToolSpecification> lasting(McpJsonMapper json, Host host) {
         List<AssistantTool<?>> tools = new ArrayList<>();
@@ -86,6 +105,11 @@ public final class CoreHome {
         tools.add(said("quit_core", "End BotMaker's core, so the next call starts a fresh one on the jars built now; "
                 + "refused while a bot runs, and while Studio is attached unless force.", Quit.class,
                 call -> host.quitCore(Boolean.TRUE.equals(call.force()))));
+        tools.add(said("close_project", "Close the project open in BotMaker's core; refused while Studio holds it, "
+                + "which closes it itself. keep_run lets a running bot finish first.", Close.class,
+                call -> host.closeProject(Boolean.TRUE.equals(call.keep_run()))));
+        tools.add(said("reload_plugins", "Resolve the open project's libraries again and bind its plugins again, as "
+                + "after its pom changed (a local build in dev mode included).", host::reloadPlugins));
         tools.add(Operations.tool(host));
         return tools.stream().map(tool -> McpTools.served(json, tool)).toList();
     }

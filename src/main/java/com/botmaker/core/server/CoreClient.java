@@ -248,7 +248,9 @@ public final class CoreClient implements AutoCloseable {
             if (answer.statusCode() != HttpURLConnection.HTTP_OK) {
                 throw new IOException("The core gave no dashboard link: HTTP " + answer.statusCode());
             }
-            return URI.create(LINK.readTree(answer.body()).path("url").asText());
+            URI link = URI.create(LINK.readTree(answer.body()).path("url").asText());
+            if (!link.isAbsolute()) throw new IOException("The core gave no dashboard link: " + answer.body());
+            return link;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IOException("Interrupted", e);

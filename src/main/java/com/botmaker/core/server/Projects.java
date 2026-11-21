@@ -34,6 +34,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -224,6 +225,10 @@ public final class Projects implements AutoCloseable, CoreHome.Host {
             return CompletableFuture.supplyAsync(work, opener).join();
         } catch (RejectedExecutionException ending) {
             throw new IllegalArgumentException("BotMaker's core is ending.");
+        } catch (CompletionException failed) {
+            // A refusal said in turn is said as it was.
+            if (failed.getCause() instanceof IllegalArgumentException refused) throw refused;
+            throw failed;
         }
     }
 
@@ -575,6 +580,35 @@ public final class Projects implements AutoCloseable, CoreHome.Host {
         CoreServer serving = server;
         if (serving == null) throw new IllegalArgumentException("This core runs inside Studio: quit Studio instead.");
         return serving.quit(force);
+    }
+
+    @Override
+    public String closeProject(boolean keepRun) {
+        return inTurnAwaited(() -> {
+            OpenProject project = open;
+            if (project == null) throw new IllegalArgumentException("No project is open.");
+            String name = project.directory().getFileName().toString();
+            if (!project.unattended()) throw new IllegalArgumentException("Studio holds " + name + ": close it there.");
+            if (keepRun && project.running()) {
+                // As a client's close keeping its run: the run's end closes it (heard).
+                held = false;
+                kept = true;
+                return name + " closes once its bot ends; stop ends it now.";
+            }
+            boolean ran = project.running();
+            project.drain();
+            closeOpen();
+            return name + " is closed" + (ran ? ", and its bot stopped." : ".");
+        });
+    }
+
+    @Override
+    public String reloadPlugins() {
+        asked(Request.Reload::new);
+        // LibrariesResolved queued the plugins' tools in turn before the reload answered: served once this turn runs.
+        OpenProject project = inTurnAwaited(() -> open);
+        if (project == null) throw new IllegalArgumentException("No project is open: open_project opens one.");
+        return project.directory().getFileName() + "'s libraries are resolved again and its plugins bound again.";
     }
 
     private static void answer(Channel channel, long id, EditResult result) {
