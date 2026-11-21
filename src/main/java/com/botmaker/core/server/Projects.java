@@ -7,6 +7,7 @@ import com.botmaker.core.CoreJson;
 import com.botmaker.core.assist.CoreHome;
 import com.botmaker.core.assist.PluginTools;
 import com.botmaker.core.assist.RunLog;
+import com.botmaker.core.dashboard.DashboardAccess;
 import com.botmaker.core.dashboard.DashboardFeed;
 import com.botmaker.core.dashboard.Inside;
 import com.botmaker.core.edit.EditResult;
@@ -551,6 +552,8 @@ public final class Projects implements AutoCloseable, CoreHome.Host {
                     + ".");
             lines.add(info.clients() == 0 ? "No Studio is attached." : "Studio is attached (" + info.clients()
                     + " window" + (info.clients() == 1 ? "" : "s") + ").");
+            lines.add("Its dashboard, opened once within " + DashboardAccess.KEY_LIFE.toSeconds() + " s: "
+                    + serving.dashboardLink());
         }
         OpenProject project = open;
         lines.add(project == null ? "No project is open." : project.directory().getFileName() + " is open"

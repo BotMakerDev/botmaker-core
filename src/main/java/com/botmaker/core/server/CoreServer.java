@@ -179,6 +179,11 @@ public final class CoreServer implements AutoCloseable {
         return port;
     }
 
+    /** A link to the dashboard carrying a new one-time key, good once within {@link DashboardAccess#KEY_LIFE}. */
+    public String dashboardLink() {
+        return "http://127.0.0.1:" + port + DashboardAccess.PATH + "?key=" + dashboard.newKey();
+    }
+
     /** The MCP server, whose tools {@link ServedTools} keeps; a test serves its own on it. */
     public McpSyncServer mcp() {
         return mcp;
@@ -283,10 +288,8 @@ public final class CoreServer implements AutoCloseable {
     private final class DashboardKeyServlet extends HttpServlet {
         @Override
         protected void doPost(HttpServletRequest request, HttpServletResponse response) throws IOException {
-            String url = "http://127.0.0.1:" + request.getLocalPort() + DashboardAccess.PATH + "?key="
-                    + dashboard.newKey();
             response.setContentType("application/json");
-            response.getOutputStream().write(JSON.writeValueAsBytes(Map.of("url", url)));
+            response.getOutputStream().write(JSON.writeValueAsBytes(Map.of("url", dashboardLink())));
         }
     }
 

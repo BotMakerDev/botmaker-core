@@ -20,6 +20,8 @@ import com.botmaker.core.assist.McpEndpoint;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.net.CookieManager;
+import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -36,6 +38,7 @@ import java.util.regex.Pattern;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -175,6 +178,26 @@ class CoreClientTest {
             Thread.sleep(50);
         }
         assertFalse(after.rpc("tools/list", "{}").contains("\"echo\""), "a client's tools go with it");
+    }
+
+    /** A client asks for the dashboard's link; a browser that follows it lands on the page, its cookie traded. */
+    @Test
+    void dashboardLinkOpensThePage(@TempDir Path cache) throws Exception {
+        cores.add(CoreMain.serve(cache, "1.0", SLOW, CoreServerTest.TEST_LIBRARIES, () -> { }));
+        CoreLauncher.Address at = CoreLauncher.connect(cache, "1.0", CoreLauncher.process());
+        try (CoreClient client = CoreClient.connect(at, "1.0", event -> { }, () -> { })) {
+            URI link = client.dashboardLink();
+            assertTrue(link.toString().startsWith("http://127.0.0.1:" + at.port() + "/dashboard?key="), link::toString);
+
+            HttpClient browser = HttpClient.newBuilder().cookieHandler(new CookieManager())
+                    .followRedirects(HttpClient.Redirect.NORMAL).build();
+            HttpResponse<String> page = browser.send(HttpRequest.newBuilder(link).GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertEquals(200, page.statusCode());
+            assertTrue(page.headers().firstValue("Content-Type").orElse("").startsWith("text/html"),
+                    page.headers()::toString);
+            assertNotEquals(link, client.dashboardLink(), "each link carries a key of its own");
+        }
     }
 
     /** A bare MCP client over HTTP: initialized once, each answer read out of its SSE frame when it is one. */

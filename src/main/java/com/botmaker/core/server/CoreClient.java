@@ -4,6 +4,7 @@
 package com.botmaker.core.server;
 
 import com.botmaker.core.CoreJson;
+import com.botmaker.core.dashboard.DashboardAccess;
 import com.botmaker.core.edit.Edit;
 import com.botmaker.core.edit.EditRequest;
 import com.botmaker.core.edit.EditResult;
@@ -12,8 +13,13 @@ import com.botmaker.core.event.CoreEvent;
 import com.botmaker.core.plugin.PluginWrite;
 import com.botmaker.core.run.claims.SeveralAsk;
 import com.botmaker.core.run.trial.TrialAsk;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
+import java.net.HttpURLConnection;
+import java.net.URI;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
@@ -42,15 +48,19 @@ public final class CoreClient implements AutoCloseable {
     static final Duration ANSWER_TIMEOUT = Duration.ofMinutes(1);
     /** How long a start of several runs may take: it compiles and builds the run's classpath before any starts. */
     static final Duration SEVERAL_TIMEOUT = Duration.ofMinutes(5);
+    /** Reads {@link DashboardAccess#KEY_PATH}'s answer, plain JSON outside the protocol. */
+    private static final ObjectMapper LINK = new ObjectMapper();
 
     private final AtomicLong ids = new AtomicLong();
     private final Map<Long, CompletableFuture<EditResult>> waiting = new ConcurrentHashMap<>();
     /** What a start of several runs this client asked for was told to have started, until its answer is read. */
     private final Map<String, Optional<CoreEvent.RunsStarted>> several = new ConcurrentHashMap<>();
+    private final CoreLauncher.Address at;
     private volatile ChannelClient channel;
     private volatile boolean ended;
 
-    private CoreClient() {
+    private CoreClient(CoreLauncher.Address at) {
+        this.at = at;
     }
 
     /**
@@ -71,7 +81,7 @@ public final class CoreClient implements AutoCloseable {
      */
     public static CoreClient connect(CoreLauncher.Address at, String version, Consumer<CoreEvent> told,
                                      Consumer<Reply.Call> called, Runnable ended) throws IOException {
-        CoreClient client = new CoreClient();
+        CoreClient client = new CoreClient(at);
         client.channel = ChannelClient.open(at, version, text -> client.received(text, told, called), () -> {
             client.ended = true;
             client.failWaiting();
@@ -223,6 +233,28 @@ public final class CoreClient implements AutoCloseable {
     /** {@link #leave()}, the bot running now kept going when {@code keepRun} ({@link Request.Close}). */
     public EditResult leave(boolean keepRun) throws IOException {
         return ask(new Request.Close(ids.incrementAndGet(), keepRun), ANSWER_TIMEOUT);
+    }
+
+    /**
+     * A link to the core's dashboard for a browser, which cannot send the token: its one-time key is good once, within
+     * {@link DashboardAccess#KEY_LIFE}, so ask for a new one each time it is opened.
+     */
+    public URI dashboardLink() throws IOException {
+        HttpRequest request = HttpRequest.newBuilder(at.uri(DashboardAccess.KEY_PATH))
+                .header("Authorization", "Bearer " + at.token()).timeout(ANSWER_TIMEOUT)
+                .POST(HttpRequest.BodyPublishers.noBody()).build();
+        try {
+            HttpResponse<String> answer = CoreLauncher.HTTP.send(request, HttpResponse.BodyHandlers.ofString());
+            if (answer.statusCode() != HttpURLConnection.HTTP_OK) {
+                throw new IOException("The core gave no dashboard link: HTTP " + answer.statusCode());
+            }
+            return URI.create(LINK.readTree(answer.body()).path("url").asText());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Interrupted", e);
+        } catch (IllegalArgumentException e) {
+            throw new IOException("The core's dashboard link is not a link", e);
+        }
     }
 
     public boolean isOpen() {
