@@ -57,16 +57,28 @@ public final class Advisories {
      * repository now or one it had before a move, whichever of them the advisory was filed under.
      */
     public static Optional<Advisory> affecting(CatalogIndex catalog, String slug, String tag) {
-        if (slug == null || tag == null || slug.isBlank() || tag.isBlank()) return Optional.empty();
-        List<String> slugs = slugsOf(catalog, slug.strip());
-        return catalog.advisories().stream()
-                .filter(a -> slugs.stream().anyMatch(s -> a.affects(s, tag.strip())))
-                .max(Comparator.comparing(Advisory::severity));
+        return naming(catalog, slug, tag).max(WORST_LAST);
     }
 
-    /** The advisory refusing {@code tag} of {@code slug} on this computer: {@link #affecting}, not overridden. */
+    /**
+     * The worst advisory refusing {@code tag} of {@code slug} on this computer: of those naming it, the ones this
+     * computer's <i>Run anyway</i> did not let through, so another advisory of the same release still asks.
+     */
     public Optional<Advisory> refusing(CatalogIndex catalog, String slug, String tag) {
-        return affecting(catalog, slug, tag).filter(a -> !overridden(a, slug, tag));
+        return naming(catalog, slug, tag).filter(a -> !overridden(a, slug, tag)).max(WORST_LAST);
+    }
+
+    /**
+     * Orders advisories by severity, the worst last; a severity this build does not know ranks below {@code low},
+     * since nothing says how bad it is (the enum's order puts {@code UNKNOWN} after {@code critical}).
+     */
+    static final Comparator<Advisory> WORST_LAST = Comparator.comparingInt(
+            a -> a.severity() == Advisory.Severity.UNKNOWN ? -1 : a.severity().ordinal());
+
+    private static Stream<Advisory> naming(CatalogIndex catalog, String slug, String tag) {
+        if (slug == null || tag == null || slug.isBlank() || tag.isBlank()) return Stream.empty();
+        List<String> slugs = slugsOf(catalog, slug.strip());
+        return catalog.advisories().stream().filter(a -> slugs.stream().anyMatch(s -> a.affects(s, tag.strip())));
     }
 
     /**

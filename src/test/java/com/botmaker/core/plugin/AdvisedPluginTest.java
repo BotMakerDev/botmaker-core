@@ -37,7 +37,11 @@ class AdvisedPluginTest {
     Path config;
 
     private PluginGate gate(List<PluginGate.Asked> asked, AtomicBoolean answer) {
-        return new PluginGate(() -> LISTED, REPO, () -> "", () -> CommunityConsent.of(""), kept -> {}, question -> {
+        return gate(LISTED, asked, answer);
+    }
+
+    private PluginGate gate(CatalogIndex listed, List<PluginGate.Asked> asked, AtomicBoolean answer) {
+        return new PluginGate(() -> listed, REPO, () -> "", () -> CommunityConsent.of(""), kept -> {}, question -> {
             asked.add(question);
             return answer.get();
         }, jar -> true, jar -> false, (jar, row, version) -> ReleasePins.Verdict.APPROVED, UnpackedBots::libOf,
@@ -64,5 +68,18 @@ class AdvisedPluginTest {
         assertEquals(List.of(SDK_JAR), gate(asked, answer).admit(LISTED, List.of(SDK_JAR), List.of()).loadable(),
                 "the yes is kept for this release");
         assertEquals(1, asked.size());
+    }
+
+    @Test
+    void eachAdvisoryAsked() {
+        Advisory another = new Advisory("BMA-2026-0002", "BotMakerDev/botmaker-sdk", List.of("v1.0.0"),
+                Advisory.Severity.LOW, "Logs the window title.", null, "2026-11-21", null);
+        CatalogIndex both = new CatalogIndex(List.of(SDK), List.of(), List.of(another, ADVISED));
+        List<PluginGate.Asked> asked = new ArrayList<>();
+        assertEquals(List.of(SDK_JAR),
+                gate(both, asked, new AtomicBoolean(true)).admit(both, List.of(SDK_JAR), List.of()).loadable());
+        assertEquals(2, asked.size(), "a Run anyway lets one advisory through, not both");
+        assertTrue(asked.get(0).question().contains("BMA-2026-0001"), "the critical one first");
+        assertTrue(asked.get(1).question().contains("BMA-2026-0002"));
     }
 }

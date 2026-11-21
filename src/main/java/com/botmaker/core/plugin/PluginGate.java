@@ -290,16 +290,25 @@ public final class PluginGate {
                 continue;
             }
             // An advisory naming this release refuses it until the user runs it anyway, for this release alone
-            // (spec 2026-11-21 § 5); the rank and listing questions still follow.
-            Optional<Advisory> advised = row.flatMap(r -> advisories.refusing(listed, r.repo(), version));
-            if (advised.isPresent()) {
+            // (spec 2026-11-21 § 5); the rank and listing questions still follow. Several advisories are asked about
+            // each, worst first: a Run anyway lets one through, not all.
+            String declined = null;
+            Set<String> answered = new HashSet<>();
+            for (Optional<Advisory> advised = row.flatMap(r -> advisories.refusing(listed, r.repo(), version));
+                 advised.isPresent(); advised = advisories.refusing(listed, row.get().repo(), version)) {
                 String slug = row.get().repo();
                 String why = Advisories.refusal(listed, advised.get(), slug, version);
-                if (!asks(new Asked(coordinate, describe(entry), row, Optional.of(why)))) {
-                    refused.add(new PluginLoader.PluginFailure(describe(entry), new IllegalStateException(why)));
-                    continue;
+                // One already answered that still refuses: its Run anyway was not kept, so it refuses for good.
+                if (!answered.add(advised.get().id()) || !asks(new Asked(coordinate, describe(entry), row,
+                        Optional.of(why)))) {
+                    declined = why;
+                    break;
                 }
                 advisories.override(advised.get(), slug, version);
+            }
+            if (declined != null) {
+                refused.add(new PluginLoader.PluginFailure(describe(entry), new IllegalStateException(declined)));
+                continue;
             }
             if (!CommunityConsent.needsAsking(coordinate, version, row, !listed.isEmpty(), who, dev.contains(jar),
                     () -> verdict == ReleasePins.Verdict.APPROVED)) {

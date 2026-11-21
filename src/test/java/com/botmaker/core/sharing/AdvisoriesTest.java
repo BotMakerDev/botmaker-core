@@ -82,6 +82,22 @@ class AdvisoriesTest {
     }
 
     @Test
+    void overridingTheWorstStillAsksAboutTheOthers() {
+        Advisories here = new Advisories(config.resolve(Advisories.FILE));
+        Advisory critical = new Advisory("BMA-2026-0002", "somedev/firestone", List.of("v1"),
+                Advisory.Severity.CRITICAL, "Deletes the save.", null, "2026-11-21", null);
+        Advisory unknown = new Advisory("BMA-2026-0003", "somedev/firestone", List.of("v1"),
+                Advisory.Severity.UNKNOWN, "A word this build does not know.", null, "2026-11-21", null);
+        CatalogIndex catalog = catalog(LEAK, critical, unknown);
+        Advisories.Refused worst = here.refusingRun(copy("v1"), catalog).orElseThrow();
+        assertEquals(critical, worst.advisory(), "critical first, an unknown severity last");
+        here.override(worst);
+        assertEquals(LEAK, here.refusingRun(copy("v1"), catalog).orElseThrow().advisory(), "the high one still asks");
+        here.override(here.refusingRun(copy("v1"), catalog).orElseThrow());
+        assertEquals(unknown, here.refusingRun(copy("v1"), catalog).orElseThrow().advisory());
+    }
+
+    @Test
     void overrideIsPerRelease() {
         Advisories here = new Advisories(config.resolve(Advisories.FILE));
         here.override(here.refusingRun(copy("v1"), catalog(LEAK)).orElseThrow());

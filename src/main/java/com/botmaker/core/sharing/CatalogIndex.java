@@ -16,7 +16,6 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -113,7 +112,7 @@ public record CatalogIndex(List<PluginRegistry.Plugin> plugins, List<GalleryEntr
     private static Optional<ApprovedRelease.Yanked> advisory(String repo, List<String> formerly, String tag,
                                                              List<Advisory> advisories) {
         return advisories.stream().filter(a -> a.affects(repo, tag) || formerly.stream().anyMatch(s -> a.affects(s, tag)))
-                .max(Comparator.comparing(Advisory::severity))
+                .max(Advisories.WORST_LAST)
                 .map(a -> new ApprovedRelease.Yanked("security advisory " + a.id() + " ("
                         + a.severity().displayName().toLowerCase(Locale.ROOT) + "): " + a.summary().strip(),
                         a.published()));
