@@ -14,11 +14,14 @@ import com.botmaker.plugin.host.PluginCoordinate;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.PrintStream;
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
@@ -96,6 +99,28 @@ public class HostUpgradeTest {
         assertEquals(List.of("Upgraded to 2.0.0", "Before the upgrade to 2.0.0"), titles.subList(0, 2),
                 "the class changed by hand is committed before the repair, and the repair is a commit: " + titles);
         assertTrue(vcs.status().isClean(), "nothing the repair changed is left out of its commit");
+    }
+
+    /** A folder with no class yet compiles: its upgrade warns of nothing, and the next write is not refused. */
+    @Test
+    void aFolderWithNoClassUpgradesWithNoWarning() throws Exception {
+        HostValues first = at("1.0.0", GREETING);
+        assertEquals(Optional.empty(), first.create(GREETING));
+        Files.delete(first.sourcesDir().resolve("Emulators.java"));
+
+        PrintStream err = System.err;
+        ByteArrayOutputStream said = new ByteArrayOutputStream();
+        System.setErr(new PrintStream(said, true, StandardCharsets.UTF_8));
+        HostValues next;
+        try {
+            next = at("2.0.0", GREETING);
+            next.ids();
+        } finally {
+            System.setErr(err);
+        }
+        assertEquals("2.0.0", next.recorded());
+        assertFalse(said.toString(StandardCharsets.UTF_8).contains("does not compile"), said.toString(StandardCharsets.UTF_8));
+        assertEquals(Optional.empty(), next.create(GREETING));
     }
 
     @Test

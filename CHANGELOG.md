@@ -9,6 +9,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- A plugin's values of this PC with no class yet upgrade quietly: the check that they still compile no longer hands
+  javac an empty list, which it refused with "no source files", warning that they did not compile.
 - A bot that names no plugin keeps its run log and its wire to Studio again. Since run claims (2026-11-15) the run's
   inner half (`AgentRun`) failed to link without the contract on the bot's classpath, and every such run printed
   `this run keeps no log: java.lang.NoClassDefFoundError: …Claims$Service`. The call that serves claims now sits in

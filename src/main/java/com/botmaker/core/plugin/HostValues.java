@@ -510,6 +510,10 @@ public final class HostValues implements PluginValues {
             }
             return Optional.empty();
         }
+        // No class yet (a plugin's first upgrade, before any write): nothing to compile, and javac refuses an empty
+        // list with "no source files".
+        List<Path> sources = sources();
+        if (sources.isEmpty()) return Optional.empty();
         Path out = null;
         try {
             out = Files.createTempDirectory("botmaker-host-values");
@@ -519,7 +523,7 @@ public final class HostValues implements PluginValues {
                 String joined = String.join(File.pathSeparator, path.stream().map(Path::toString).toList());
                 List<String> options = List.of("-proc:none", "-d", out.toString(), "-classpath", joined);
                 boolean ok = javac.getTask(Writer.nullWriter(), files, diagnostics, options, null,
-                        files.getJavaFileObjectsFromPaths(sources())).call();
+                        files.getJavaFileObjectsFromPaths(sources)).call();
                 if (ok) return Optional.empty();
                 for (Diagnostic<? extends JavaFileObject> each : diagnostics.getDiagnostics()) {
                     if (each.getKind() != Diagnostic.Kind.ERROR) continue;
