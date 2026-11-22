@@ -33,7 +33,8 @@ per user.
   (phase 10) needs its own.
 - The edit engine came too (phase 6b, 2026-11-05): `parser` (`CodeEditor`, its handlers, factories and guard),
   `state`, `project.managed`, `project.params`, `migrate`, `index`, part of `validation` and `nav`. `CodeEditor` reports
-  through `parser.EditorOutput`, which `server.OpenProject` tells its clients (Studio's tests: `BusEditorOutput`).
+  through `parser.EditorOutput`, which `server.OpenProject` tells its clients (Studio's tests: `BusEditorOutput`). It is
+  the public methods only (2026-11-22): each kind of edit is a package-private `*Edits` class over one `EditGate`.
 - `edit.CoreEditor` (phase 6c, 2026-11-05) is the one way a typed edit reaches the open bot: it finds its target by
   `BlockId` in the tree. A request runs as an `EditSession`, over `EditStage`s it edits with `CodeEditor`: whole or not
   at all, one write. `EditRequest.Guard` says how far the compiler judges it: `EVERY_EDIT` for an assistant,

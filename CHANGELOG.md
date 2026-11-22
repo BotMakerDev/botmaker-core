@@ -17,6 +17,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - *Migrate first* also moves a bot's public `@Param` fields to `params/`, since which ones are public is not written
   after the move.
+- Nothing the user sees: `CodeEditor` is split by kind of edit (`EditGate`, `MemberEdits`, `ExpressionEdits`,
+  `CallEdits`, `SlotEdits`, `StatementEdits`, `SwitchEdits`, package-private) and keeps its public methods.
+
+### Fixed
+
+- The refusal journal names the edit that wrote broken code when it was an insert. It said `insert`, the helper every
+  insert goes through.
 
 ## [0.3.1] — 2026-11-22
 
