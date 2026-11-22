@@ -5,7 +5,7 @@ All notable changes to `botmaker-core`.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this module uses
 [semantic versioning](https://semver.org/). `release.sh` refuses to cut a version with no section here.
 
-## [Unreleased]
+## [0.3.1] — 2026-11-22
 
 ### Added
 
@@ -63,6 +63,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - A value is matched against the bot's constants by the last lookup while the constants are equal and the grammar the
   same. A lookup spells each constant once, and a new one for each write spelled every constant again. With both
   changes, *Tidy* of 63 cards went from 10.4 s to 5.8 s.
+- Built against botmaker-sdk 1.12.1 (was 1.12.0).
+- Built against botmaker-shared 0.10.1 (was 0.10.0).
+- Built against botmaker-session 0.9.1 (was 0.9.0).
+- Built against botmaker-studio-api 0.19.1 (was 0.19.0).
+- Built against botmaker-plugin-host 0.14.1 (was 0.14.0).
+- Built against botmaker-cli 0.14.1 (was 0.14.0).
+- Built against botmaker-java 0.4.1 (was 0.4.0).
 
 ## [0.3.0] — 2026-11-21
 
