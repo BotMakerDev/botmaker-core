@@ -33,7 +33,7 @@ class RunOverlayMergeTest {
 
     @Test
     void partsKeepPluginOrderAndARepeatedIdIsDropped() {
-        List<PluginHost.OwnedPart> merged = PluginHost.mergeRunOverlayParts(List.of(
+        List<PluginHost.OwnedPart> merged = PluginParts.mergeRunOverlayParts(List.of(
                 fake("a", List.of(RunOverlayPart.id("run").bar(NOTHING), RunOverlayPart.id("run").layer(NOTHING))),
                 fake("b", List.of(RunOverlayPart.id("run").bar(NOTHING)))));
         assertEquals(List.of("a:run", "b:run"), owners(merged), "ids are unique within a plugin, not across");
@@ -41,7 +41,7 @@ class RunOverlayMergeTest {
 
     @Test
     void aPluginThatThrowsOrOffersNothingCostsOnlyItself() {
-        List<PluginHost.OwnedPart> merged = PluginHost.mergeRunOverlayParts(List.of(
+        List<PluginHost.OwnedPart> merged = PluginParts.mergeRunOverlayParts(List.of(
                 broken("broken"),
                 fake("none", null),
                 fake("ok", List.of(RunOverlayPart.id("bar").bar(NOTHING)))));

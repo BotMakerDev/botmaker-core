@@ -63,7 +63,7 @@ class ProjectClosingTest {
         Fake first = new Fake("first", log);
         Fake second = new Fake("second", log);
 
-        PluginHost.closeOutgoing(List.of(loaded("first", first), loaded("second", second)));
+        PluginCalls.closeOutgoing(List.of(loaded("first", first), loaded("second", second)));
 
         assertEquals(List.of("first", "second"), log);
         assertEquals(1, first.told.get(), "a plugin told twice would release something it no longer holds");
@@ -80,7 +80,7 @@ class ProjectClosingTest {
         List<String> log = new ArrayList<>();
         Fake after = new Fake("after", log);
 
-        PluginHost.closeOutgoing(List.of(loaded("broken", new Broken()), loaded("after", after)));
+        PluginCalls.closeOutgoing(List.of(loaded("broken", new Broken()), loaded("after", after)));
 
         assertEquals(List.of("after"), log);
     }
@@ -91,7 +91,7 @@ class ProjectClosingTest {
      */
     @Test
     void a_plugin_that_never_heard_of_it_is_unaffected() {
-        PluginHost.closeOutgoing(List.of(TestPlugins.loaded("older", StudioPlugin.declare())));
+        PluginCalls.closeOutgoing(List.of(TestPlugins.loaded("older", StudioPlugin.declare())));
     }
 
     /**

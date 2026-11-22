@@ -55,7 +55,7 @@ class ToolbarMergeTest {
 
     @Test
     void a_plugins_items_sort_by_their_own_order() {
-        List<ToolbarItem> merged = PluginHost.mergeToolbarItems(List.of(
+        List<ToolbarItem> merged = PluginBars.mergeToolbarItems(List.of(
                 fake("a", List.of(bar("late", 90), bar("early", 10), bar("middle", 20)))));
 
         assertEquals(List.of("early", "middle", "late"), ids(merged));
@@ -68,10 +68,10 @@ class ToolbarMergeTest {
      */
     @Test
     void plugins_order_by_name_rather_than_by_discovery_order() {
-        List<ToolbarItem> zebraFirst = PluginHost.mergeToolbarItems(List.of(
+        List<ToolbarItem> zebraFirst = PluginBars.mergeToolbarItems(List.of(
                 fake("zebra", List.of(bar("z", 10))),
                 fake("alpha", List.of(bar("a", 10)))));
-        List<ToolbarItem> alphaFirst = PluginHost.mergeToolbarItems(List.of(
+        List<ToolbarItem> alphaFirst = PluginBars.mergeToolbarItems(List.of(
                 fake("alpha", List.of(bar("a", 10))),
                 fake("zebra", List.of(bar("z", 10)))));
 
@@ -82,7 +82,7 @@ class ToolbarMergeTest {
     /** A plugin that cannot list its buttons costs its own and nothing else — never the project. */
     @Test
     void a_plugin_that_throws_does_not_cost_the_others_their_items() {
-        List<ToolbarItem> merged = PluginHost.mergeToolbarItems(List.of(
+        List<ToolbarItem> merged = PluginBars.mergeToolbarItems(List.of(
                 broken("broken"),
                 fake("good", List.of(bar("kept", 1)))));
 
@@ -92,9 +92,9 @@ class ToolbarMergeTest {
     /** A plugin contributing nothing is the ordinary case, and the default the contract ships. */
     @Test
     void a_plugin_that_contributes_nothing_is_not_an_error() {
-        assertTrue(PluginHost.mergeToolbarItems(List.of(fake("a", List.of()))).isEmpty());
-        assertTrue(PluginHost.mergeToolbarItems(List.of(fake("a", null))).isEmpty());
-        assertTrue(PluginHost.mergeToolbarItems(List.of()).isEmpty());
+        assertTrue(PluginBars.mergeToolbarItems(List.of(fake("a", List.of()))).isEmpty());
+        assertTrue(PluginBars.mergeToolbarItems(List.of(fake("a", null))).isEmpty());
+        assertTrue(PluginBars.mergeToolbarItems(List.of()).isEmpty());
     }
 
     /**
@@ -115,11 +115,11 @@ class ToolbarMergeTest {
      */
     @Test
     void bar_items_group_into_one_tab_per_plugin() {
-        List<PluginHost.OwnedItem> owned = PluginHost.mergeOwnedToolbarItems(List.of(
+        List<PluginHost.OwnedItem> owned = PluginBars.mergeOwnedToolbarItems(List.of(
                 fake("zebra", List.of(bar("z2", 20), bar("z1", 10))),
                 fake("alpha", List.of(bar("a", 10), overlay("point", 10)))));
 
-        List<PluginHost.PluginBar> bars = PluginHost.barItemsByPlugin(owned);
+        List<PluginHost.PluginBar> bars = PluginBars.barItemsByPlugin(owned);
 
         assertEquals(List.of(TestPlugins.coordinate("alpha"), TestPlugins.coordinate("zebra")),
                 bars.stream().map(PluginHost.PluginBar::plugin).toList());
@@ -132,21 +132,21 @@ class ToolbarMergeTest {
     /** A plugin whose only items are the overlay's has nothing on the bar, so it gets no tab. */
     @Test
     void a_plugin_with_overlay_items_only_has_no_tab() {
-        List<PluginHost.OwnedItem> owned = PluginHost.mergeOwnedToolbarItems(List.of(
+        List<PluginHost.OwnedItem> owned = PluginBars.mergeOwnedToolbarItems(List.of(
                 fake("overlay-only", List.of(overlay("point", 10))),
                 fake("bar", List.of(bar("open", 10)))));
 
         assertEquals(List.of(TestPlugins.coordinate("bar")),
-                PluginHost.barItemsByPlugin(owned).stream().map(PluginHost.PluginBar::plugin).toList());
+                PluginBars.barItemsByPlugin(owned).stream().map(PluginHost.PluginBar::plugin).toList());
     }
 
     /** One filter, two readers — the bar takes the bar's items, the overlay editor takes only its own. */
     @Test
     void overlay_items_answers_the_overlays_items_only() {
-        List<ToolbarItem> merged = PluginHost.mergeToolbarItems(List.of(fake("com.example.one", List.of(
+        List<ToolbarItem> merged = PluginBars.mergeToolbarItems(List.of(fake("com.example.one", List.of(
                 overlay("point-here", 10),
                 bar("cut", 20)))));
 
-        assertEquals(List.of("point-here"), ids(PluginHost.overlayItems(merged)));
+        assertEquals(List.of("point-here"), ids(PluginBars.overlayItems(merged)));
     }
 }

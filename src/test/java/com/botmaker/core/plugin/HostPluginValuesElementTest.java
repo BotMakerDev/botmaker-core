@@ -26,22 +26,22 @@ class HostPluginValuesElementTest {
 
     @Test
     void aValueOfTheElementTypeOrASubtypeJoins() {
-        assertEquals(Optional.empty(), HostPluginValues.notAnElement(DECLARED, WORDS,"HELLO", "hello"));
+        assertEquals(Optional.empty(), DeclaredValues.notAnElement(DECLARED, WORDS,"HELLO", "hello"));
         assertEquals(Optional.empty(),
-                HostPluginValues.notAnElement(DECLARED, WORDS,"HELLO", new StringBuilder("hello")));
+                DeclaredValues.notAnElement(DECLARED, WORDS,"HELLO", new StringBuilder("hello")));
     }
 
     @Test
     void aValueOfAnotherClassIsRefusedNamingBoth() {
         assertEquals(Optional.of("COUNT cannot join Words: it is an Integer, and every constant there is a"
                         + " CharSequence."),
-                HostPluginValues.notAnElement(DECLARED, WORDS,"COUNT", 3));
+                DeclaredValues.notAnElement(DECLARED, WORDS,"COUNT", 3));
     }
 
     @Test
     void aSetNoPluginDeclaresIsNotCheckedHere() {
-        assertEquals(Optional.empty(), HostPluginValues.notAnElement(DECLARED, ManagedValue.idOf(TestValue.Id.WORDS_TOO), "X",
+        assertEquals(Optional.empty(), DeclaredValues.notAnElement(DECLARED, ManagedValue.idOf(TestValue.Id.WORDS_TOO), "X",
                 3));
-        assertEquals(Optional.empty(), HostPluginValues.notAnElement(DECLARED, "nobody", "X", 3));
+        assertEquals(Optional.empty(), DeclaredValues.notAnElement(DECLARED, "nobody", "X", 3));
     }
 }

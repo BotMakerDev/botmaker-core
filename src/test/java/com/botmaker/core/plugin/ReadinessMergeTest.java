@@ -26,7 +26,7 @@ class ReadinessMergeTest {
     @Test
     void theLeastReadyIsShown() {
         Readiness blocked = Readiness.blocked("signed out of Steam");
-        assertEquals(Optional.of(blocked), PluginHost.leastReady(List.of(
+        assertEquals(Optional.of(blocked), PluginParts.leastReady(List.of(
                 saying("a", Readiness.ready("game window found")), saying("b", blocked),
                 saying("c", Readiness.waiting("updating")))));
     }
@@ -34,8 +34,8 @@ class ReadinessMergeTest {
     @Test
     void nothingToSayAndAFailingCheckAreLeftOut() {
         LoadedPlugin silent = TestPlugins.loaded("silent", StudioPlugin.declare());
-        assertEquals(Optional.empty(), PluginHost.leastReady(List.of(silent, saying("broken", null))));
+        assertEquals(Optional.empty(), PluginParts.leastReady(List.of(silent, saying("broken", null))));
         Readiness ready = Readiness.ready("");
-        assertEquals(Optional.of(ready), PluginHost.leastReady(List.of(saying("broken", null), saying("r", ready))));
+        assertEquals(Optional.of(ready), PluginParts.leastReady(List.of(saying("broken", null), saying("r", ready))));
     }
 }

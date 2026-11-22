@@ -21,7 +21,7 @@ class AssistantGuideMergeTest {
 
     @Test
     void aPluginThatSaysNothingCostsOnlyItself() {
-        List<PluginHost.OwnedGuide> merged = PluginHost.mergeAssistantGuides(List.of(
+        List<PluginHost.OwnedGuide> merged = PluginAssistant.mergeAssistantGuides(List.of(
                 guiding("blank", "  "),
                 guiding("nulled", null),
                 TestPlugins.loaded("silent", StudioPlugin.declare()),

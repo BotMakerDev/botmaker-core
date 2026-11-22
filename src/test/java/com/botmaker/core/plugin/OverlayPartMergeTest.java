@@ -28,7 +28,7 @@ class OverlayPartMergeTest {
     @Test
     void aPluginThatThrowsOrDeclaresNothingCostsOnlyItself() {
         OverlayPart targets = OverlayPart.of().targets(Body.class, "Activities");
-        List<PluginHost.OwnedOverlay> merged = PluginHost.mergeOverlayParts(List.of(
+        List<PluginHost.OwnedOverlay> merged = PluginParts.mergeOverlayParts(List.of(
                 offering("broken", () -> {
                     throw new IllegalStateException("no");
                 }),

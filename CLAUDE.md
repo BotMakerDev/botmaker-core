@@ -63,6 +63,8 @@ per user.
   `services.upgrade` (plugin upgrade, `Removal` for leaving the pom) and `services.JitPackSearch` came too. They ask
   through ports (`Requests`, `Edits`, `Properties`) a client fills; a window comes through `UiPort`, attached by a
   client with a screen (`HostServices.attach`), and `UiPort.NONE` without one. Studio keeps the slot editors' contexts.
+  `PluginHost` and `HostPluginValues` are the public methods only (2026-11-22), over package-private classes beside
+  them: `Plugin*` by what the bound set is asked, `WritePerformer` and `*Writes` by what is written.
 - `sharing` came whole in phase 9 (2026-11-05), with `services.LocalBuilds`, `project.ClassKind` and `run.RunEntries`.
 - `parser.StatementKind` and `parser.StatementBodies` (phase 9a, 2026-11-05) say what a statement is and which bodies it
   holds; Studio's `BlockConverter` draws by them and `read_tree` reads by them, so a new statement kind goes there first.

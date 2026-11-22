@@ -22,6 +22,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Nothing the user sees: `ProjectVcs` is split by what git is asked (`GitFolder`, `GitVersions`, `GitMerges`,
   `GitBranches`, `GitRemotes`, `GitTransfer`, `GitTags`) and `MavenService` by what is done to a pom (`PomModel`,
   `PomDefaults`, `PomEdits`, `PluginShadows`, `MavenResolver`), all package-private; both keep their public methods.
+- Nothing the user sees: `PluginHost` is split by what the bound plugins are asked (`PluginCalls`, `PluginDeclarations`,
+  `PluginComposition`, `PluginSlots`, `PluginBars`, `PluginParts`, `PluginAssistant`, `PluginPalette`, `PluginClasses`)
+  and `HostPluginValues` by what is written (`WritePerformer`, `HolderWrites`, `SetWrites`, `MethodWrites`, `BotWrites`,
+  `DeclaredValues`), all package-private; both keep their public methods.
 
 ### Fixed
 

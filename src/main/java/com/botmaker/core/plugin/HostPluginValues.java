@@ -13,52 +13,32 @@ import com.botmaker.plugin.api.source.ParameterWrite;
 import com.botmaker.plugin.api.source.PluginValues;
 import com.botmaker.plugin.api.source.RunParameter;
 import com.botmaker.plugin.api.value.Ref;
-import com.botmaker.plugin.host.LoadedPlugin;
-import com.botmaker.plugin.host.PluginCoordinate;
 import com.botmaker.java.index.nav.Refactor;
-import com.botmaker.core.parser.refactor.ReviewMarker;
 import com.botmaker.java.grammar.JavaValue;
-import com.botmaker.java.grammar.ShortNames;
-import com.botmaker.core.project.FileJournal;
 import com.botmaker.core.project.ProjectConfig;
-import com.botmaker.core.project.ProjectFile;
 import com.botmaker.core.project.ProjectState;
-import com.botmaker.core.project.ProjectWrites;
 import com.botmaker.core.project.managed.BotMethods;
-import com.botmaker.core.project.managed.HolderFiles;
 import com.botmaker.core.project.managed.JavaManagedValues;
-import com.botmaker.core.project.managed.NestedClasses;
 import com.botmaker.core.project.managed.ManagedHolders;
+import com.botmaker.core.project.managed.NestedClasses;
 import com.botmaker.core.project.managed.ManagedConstants;
 import com.botmaker.core.project.managed.ManagedIds;
 import com.botmaker.core.project.managed.ManagedMethod;
-import com.botmaker.core.project.managed.ManagedMigrations;
-import com.botmaker.core.project.managed.ManagedRepairs;
 import com.botmaker.core.project.managed.ManagedSets;
-import com.botmaker.core.project.managed.MisplacedParams;
-import com.botmaker.core.project.params.JavaParameterEdits;
 import com.botmaker.core.project.params.JavaParameters;
 import com.botmaker.java.index.BotIndex;
 import com.botmaker.core.project.vcs.Checkpoints;
-import com.botmaker.core.project.vcs.VersionOrigin;
 import com.botmaker.core.services.BotSources;
 
-import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.lang.reflect.Executable;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.lang.reflect.Type;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.function.Supplier;
 
 /**
  * Studio's own side of {@link PluginValues} — a plugin's values, read out of the bot's Java and written back
@@ -69,6 +49,9 @@ import java.util.function.Supplier;
  * the disk, and the snapshot is {@link Checkpoints}. What this class adds is the shape: a plugin edits its
  * own value through {@link ValueContext}, the same interface a slot on the canvas and a row in the
  * Parameters window are edited through, so no second way to edit a value exists.
+ *
+ * <p><b>Every write leaves through {@link #send}</b> and is made by a {@link WritePerformer}: {@link HolderWrites} for
+ * a holder the bot lacks, {@link SetWrites} for an open set, {@link MethodWrites} for a method, over {@link BotWrites}.
  *
  * <p><b>An open set</b> ({@code Pictures}) is {@link ManagedSets}' — planned there by binding and compiled as
  * the whole bot, written here after one Project History snapshot. That replaced {@code HostSources}, the
@@ -88,18 +71,16 @@ import java.util.function.Supplier;
  */
 public final class HostPluginValues implements PluginValues {
 
-    /** The label the snapshot before a write is recorded under. */
-    private static final String HISTORY_LABEL = "Change a plugin's value";
-
     /** The live project's values, or null between projects. */
     private static volatile HostPluginValues current;
 
     private final ProjectConfig config;
     private final ProjectState state;
     private final StudioServices services;
-    private final Edits edits;
     /** Where each write goes instead of the bot; null when this instance writes the bot itself. */
     private final Forward forward;
+    private final HolderWrites holders;
+    private final WritePerformer performer;
     /** Where each set of classes' holder was last found, by the set's id; checked on its file at each use. */
     private final Map<String, WriteSteps.HolderAt> holdersSeen = new ConcurrentHashMap<>();
 
@@ -123,8 +104,10 @@ public final class HostPluginValues implements PluginValues {
         this.config = config;
         this.state = state;
         this.services = services;
-        this.edits = edits;
         this.forward = forward;
+        BotWrites writes = new BotWrites(config, state, edits);
+        this.holders = new HolderWrites(config, state, writes);
+        this.performer = new WritePerformer(config, state, writes, holders);
     }
 
     /** Values that write the bot themselves, not installed: the one the core performs each {@link PluginWrite} on. */
@@ -222,42 +205,7 @@ public final class HostPluginValues implements PluginValues {
      * project's one thread, as {@link #perform} is.
      */
     public Optional<String> performAll(String label, List<PluginWrite> writes) {
-        if (writes == null || writes.isEmpty()) return Optional.empty();
-        return WriteSteps.step(label, () -> {
-            FileJournal journal = new FileJournal();
-            Optional<String> refused;
-            try {
-                refused = journal.keeping(() -> {
-                    for (PluginWrite write : writes) {
-                        Optional<String> refusal = perform(write);
-                        if (refusal.isPresent()) return refusal;
-                    }
-                    return Optional.<String>empty();
-                });
-            } catch (RuntimeException | Error failed) {
-                takeBack(journal);
-                throw failed;
-            }
-            if (refused.isEmpty()) return refused;
-            List<String> notPutBack = takeBack(journal);
-            return Optional.of(refused.get() + (notPutBack.isEmpty() ? ""
-                    : " The writes before it could not all be taken back: " + String.join(", ", notPutBack)
-                    + " still hold them."));
-        }, (named, changed) -> {
-            if (edits != null) edits.step(named, changed);
-        });
-    }
-
-    /**
-     * A together's files put back as {@code journal} heard them, the open step told so it records only what stayed, and
-     * the open file redrawn when it was one of them; the files that could not be put back, by name.
-     */
-    private List<String> takeBack(FileJournal journal) {
-        List<String> notPutBack = journal.restore(state);
-        WriteSteps.Step step = WriteSteps.open();
-        if (step != null) step.restored(journal.before());
-        redraw(journal.before().keySet());
-        return notPutBack;
+        return performer.performAll(label, writes);
     }
 
     /**
@@ -283,94 +231,7 @@ public final class HostPluginValues implements PluginValues {
      * writes the bot for a plugin: this instance's own writes reach it through {@link #send}.
      */
     public Optional<String> perform(PluginWrite write) {
-        return switch (write) {
-            case PluginWrite.SetValue set -> {
-                Optional<ManagedMethod> found = JavaManagedValues.find(config, state, set.id());
-                if (found.isEmpty() || !found.get().editable()) yield Optional.of(notEditable(set.id()));
-                write(found.get(), imported(set.value()));
-                yield Optional.empty();
-            }
-            case PluginWrite.SetMember set -> {
-                Optional<ManagedSets.Member> found = ManagedSets.member(index(), set.id(), set.member(),
-                        PluginHost.grammar()).filter(member -> member.initializer() != null);
-                if (found.isEmpty()) yield Optional.of(missing(set.id(), set.member()));
-                writeInitializer(found.get(), imported(set.value()));
-                yield Optional.empty();
-            }
-            case PluginWrite.SetSetup set -> classes(set.id())
-                    .map(classes -> setSetup(classes, set.constant(), set.value()))
-                    .orElseGet(() -> Optional.of(notClasses(set.id())));
-            case PluginWrite.Create create -> createHere(create.id());
-            case PluginWrite.AddClass add -> classes(add.id())
-                    .map(classes -> apply(NestedClasses.add(index(), classes.id(), add.member(), classes.type(),
-                            classes.setup(), imported(add.setup()), PluginHost.grammar())))
-                    .orElseGet(() -> Optional.of(notClasses(add.id())));
-            case PluginWrite.AddConstant add -> apply(ManagedSets.add(index(), add.id(), add.member(), null, null));
-            case PluginWrite.Add add -> {
-                Class<?> type;
-                try {
-                    type = Class.forName(add.type(), false, PluginHost.classLoader());
-                } catch (ClassNotFoundException e) {
-                    yield Optional.of("No plugin in this project has " + add.type() + ", so " + add.member()
-                            + " cannot be written.");
-                }
-                yield apply(ManagedSets.add(index(), add.id(), add.member(), type, imported(add.value())));
-            }
-            case PluginWrite.Rename rename -> renameHere(rename.id(), rename.member(), rename.newName());
-            case PluginWrite.Repoint repoint -> repointHere(repoint.id(), repoint.member(), repoint.replacement(),
-                    repoint.note());
-            case PluginWrite.Remove remove -> removeHere(remove.id(), remove.member());
-            case PluginWrite.MoveBefore move -> moveBeforeHere(move.id(), move.member(), move.before());
-            case PluginWrite.AddGroup add -> addGroupHere(add.id(), add.group(), add.constants());
-            case PluginWrite.RenameGroup rename -> declared(rename.id())
-                    .map(set -> renameGroupHere(set, rename.group(), rename.newName()))
-                    .orElseGet(() -> renameGroup(rename.id(), rename.group(), rename.newName()));
-            case PluginWrite.RemoveGroup remove -> declared(remove.id())
-                    .map(set -> removeGroupHere(set, remove.group()))
-                    .orElseGet(() -> removeGroup(remove.id(), remove.group()));
-            case PluginWrite.CreateMethod create -> Optional.ofNullable(
-                    createMethodHere(create.id(), create.group(), create.className(), create.method()).refusal());
-            case PluginWrite.CreateBooleanMethod create -> Optional.ofNullable(written(index(), create.className(),
-                    create.method(), BotMethods.BOOLEAN, null, null).refusal());
-            case PluginWrite.AppendCall call -> apply(BotMethods.appendCall(index(), call.method(), call.owner(),
-                    call.name(), call.arguments().stream().map(this::imported).toList()));
-            case PluginWrite.AddRunParameter add -> {
-                ParameterWrite parameter;
-                try {
-                    parameter = add.write(PluginHost.classLoader(), id -> classes(id).orElseThrow(() ->
-                            new IllegalArgumentException(notClasses(id))));
-                } catch (ClassNotFoundException e) {
-                    yield Optional.of("No plugin in this project has " + e.getMessage() + ", so " + add.name()
-                            + " cannot be written.");
-                } catch (IllegalArgumentException e) {
-                    yield Optional.of(e.getMessage());
-                }
-                yield written(() -> JavaParameters.addDuringRun(config, state, parameter, this::classNamed,
-                        PluginHost.grammar()));
-            }
-            case PluginWrite.ForgetRunParameter forget -> written(() -> JavaParameters.forgetDuringRun(config, state,
-                    forget.group(), forget.name(), PluginHost.grammar()));
-            case PluginWrite.ApplyPlan plan -> apply(plan.plan());
-        };
-    }
-
-    /** The value a bound plugin declares by {@code id}. */
-    private static Optional<ManagedValue<?>> declared(String id) {
-        return PluginHost.managedValues().stream().filter(value -> value.id().equals(id)).findFirst();
-    }
-
-    /** The set of classes a bound plugin declares by {@code id}. */
-    private static Optional<ManagedClasses<?>> classes(String id) {
-        return declared(id).filter(ManagedClasses.class::isInstance).map(value -> (ManagedClasses<?>) value);
-    }
-
-    private static String notClasses(String id) {
-        return "No plugin in this project declares " + ManagedIds.spelled(id, PluginHost.managedValues())
-                + " as a set of classes.";
-    }
-
-    private static String notEditable(String id) {
-        return "The bot has no " + ManagedIds.spelled(id, PluginHost.managedValues()) + " a plugin may change.";
+        return performer.perform(write);
     }
 
     /** A value a plugin's window changed, sent as every write is; a refusal said. */
@@ -425,47 +286,6 @@ public final class HostPluginValues implements PluginValues {
         return send(new PluginWrite.Create(id));
     }
 
-    private Optional<String> createHere(String id) {
-        if (JavaManagedValues.find(config, state, id).isPresent()) return Optional.empty();
-        for (LoadedPlugin plugin : PluginHost.plugins()) {
-            List<ManagedValue<?>> declared;
-            try {
-                declared = plugin.plugin().managedValues();
-            } catch (RuntimeException | LinkageError e) {
-                continue;
-            }
-            if (declared == null) continue;
-            declared = declared.stream().filter(java.util.Objects::nonNull).toList();
-            for (ManagedValue<?> value : declared) {
-                if (!id.equals(value.id())) continue;
-                if (value.onHost()) return Optional.of(HostValues.notTheBots(value));
-                // A method value its holder lacks, or a parameter (2026-10-12: a conditional one, now that its
-                // condition holds), is written into the holder the bot has.
-                java.util.Map<Path, List<ManagedValue<?>>> kept = value instanceof ManagedOpenSet<?>
-                        ? java.util.Map.of()
-                        : ManagedHolders.valuesToKeep(config, index(),
-                                java.util.Map.of(plugin.coordinate(), List.of(value)));
-                if (!kept.isEmpty()) {
-                    if (state.isReaderMode()) return Optional.of("This project is open read-only.");
-                    return keep(kept).isEmpty() ? Optional.of("BotMaker cannot write a starting value for "
-                            + ManagedIds.spelled(id, PluginHost.managedValues()) + ".") : Optional.empty();
-                }
-                ManagedHolders.Plan plan = ManagedHolders.plan(config, plugin.coordinate(), value, declared,
-                        PluginHost.grammar());
-                if (plan instanceof ManagedHolders.Plan.Refused refused) return Optional.of(refused.reason());
-                ManagedHolders.Plan.Write write = (ManagedHolders.Plan.Write) plan;
-                try {
-                    create(write.file(), write.source(), "Create " + write.relative());
-                } catch (java.io.UncheckedIOException e) {
-                    return Optional.of("Could not write " + write.relative() + ": " + e.getCause().getMessage());
-                }
-                return Optional.empty();
-            }
-        }
-        return Optional.of("No plugin in this project declares the value a bot marks "
-                + ManagedIds.spelled(id, PluginHost.managedValues()) + ".");
-    }
-
     /**
      * Writes every holder a bound plugin declares and the open project lacks, and answers the files written
      * (project-relative). Called on every bind (2026-09-26): a plugin's managed file exists the
@@ -488,241 +308,7 @@ public final class HostPluginValues implements PluginValues {
     /** {@link #createMissing} on this project's values; nothing when they do not write the bot themselves. */
     public List<String> missing() {
         if (forward != null || state.isReaderMode()) return List.of();
-        return writeMissing();
-    }
-
-    private List<String> writeMissing() {
-        java.util.Map<PluginCoordinate, List<ManagedValue<?>>> byPlugin = new java.util.LinkedHashMap<>();
-        // A holder is found by every value its plugin declares: one the user moved may carry only the marks of
-        // conditional parameters that no longer apply.
-        java.util.Map<PluginCoordinate, List<ManagedValue<?>>> allByPlugin = new java.util.LinkedHashMap<>();
-        // A conditional parameter that does not apply to this bot is not written (2026-10-12):
-        // ManagedParam.ConditionStep.when, read against the bot as it stands, once for every plugin.
-        HostParamScope scope = HostParamScope.over(this);
-        for (LoadedPlugin plugin : PluginHost.plugins()) {
-            try {
-                List<ManagedValue<?>> offered = plugin.plugin().managedValues();
-                List<ManagedValue<?>> all = offered == null ? List.of()
-                        : offered.stream().filter(java.util.Objects::nonNull).toList();
-                List<ManagedValue<?>> declared = all.stream()
-                        .filter(value -> !(value instanceof ManagedParam<?> param) || param.appliesIn(scope))
-                        .toList();
-                if (!declared.isEmpty()) byPlugin.put(plugin.coordinate(), declared);
-                if (!all.isEmpty()) allByPlugin.put(plugin.coordinate(), all);
-            } catch (RuntimeException | LinkageError e) {
-                // A plugin that cannot say what it manages gets no file; every other plugin still does.
-            }
-        }
-        List<ManagedValue<?>> everyValue = allByPlugin.values().stream().flatMap(List::stream).toList();
-        if (byPlugin.isEmpty()) {
-            Set<Path> files = new LinkedHashSet<>(moveMisplaced(allByPlugin));
-            files.addAll(repairLeftovers(everyValue));
-            return files.stream().map(file -> config.projectPath().relativize(file).toString()).toList();
-        }
-        java.util.Set<HolderFiles.Key> present = index().read(units -> HolderFiles.find(units, allByPlugin)).keySet();
-        List<String> written = new ArrayList<>();
-        for (ManagedHolders.Plan plan : ManagedHolders.missing(config, byPlugin, java.util.Set.copyOf(ids()),
-                present, PluginHost.grammar())) {
-            if (plan instanceof ManagedHolders.Plan.Refused refused) {
-                System.err.println("Warning: " + refused.reason());
-                continue;
-            }
-            ManagedHolders.Plan.Write write = (ManagedHolders.Plan.Write) plan;
-            try {
-                create(write.file(), write.source(), "Create " + write.relative());
-                written.add(write.relative());
-            } catch (java.io.UncheckedIOException e) {
-                System.err.println("Warning: could not write " + write.relative() + ": "
-                        + e.getCause().getMessage());
-            }
-        }
-        // A plugin's parameter is kept as the plugin declares it (2026-10-11): one the holder lacks goes back in,
-        // since the bot's main reads it by name, and a changed category, note or audience is written over the
-        // old one. A method value the holder lacks is not: the user may have deleted it, and create() writes it
-        // when a plugin window asks for it (2026-10-12).
-        java.util.Map<PluginCoordinate, List<ManagedValue<?>>> params = new java.util.LinkedHashMap<>();
-        byPlugin.forEach((plugin, declared) ->
-                params.put(plugin, declared.stream().filter(ManagedParam.class::isInstance).toList()));
-        keep(ManagedHolders.valuesToKeep(config, index(), params))
-                .forEach(file -> written.add(config.projectPath().relativize(file).toString()));
-        // A parameter its plugin moved to another holder goes to that group, whole (2026-11-05), whether it
-        // applies to this bot or not: it is already written.
-        moveMisplaced(allByPlugin).forEach(file -> written.add(config.projectPath().relativize(file).toString()));
-        // The old shape beside the new (2026-11-05): a field the group above now holds goes, on every bind.
-        repairLeftovers(everyValue).forEach(file -> written.add(config.projectPath().relativize(file).toString()));
-        return List.copyOf(written);
-    }
-
-    /**
-     * Applies {@link ManagedRepairs#leftoverFields} on the live buffers, after one snapshot an undo can return to,
-     * and answers the files changed or deleted. What it kept is said on the log, as the bind's other warnings are.
-     *
-     * <p>A holder the plan empties is deleted only when no editor tab holds it: an open buffer would write the old
-     * field back on its next save, so that file stays as it was, its duplicate harmless, until the next bind.
-     */
-    private Set<Path> repairLeftovers(List<ManagedValue<?>> live) {
-        ManagedRepairs.Planned plan = ManagedRepairs.leftoverFields(index(), live);
-        plan.left().forEach(sentence -> System.err.println("Warning: " + sentence));
-        Set<Path> changed = new LinkedHashSet<>();
-        if (plan.isEmpty()) return changed;
-        Set<Path> open = openFiles();
-        snapshot();
-        recorded(() -> BotSources.forEach(config, state, (file, source) -> {
-            String after = plan.rewrites().get(file);
-            if (after == null || plan.deleted().contains(file)) return null;
-            changed.add(file);
-            return after;
-        }));
-        deleteUnlessOpen(plan.deleted(), open, changed);
-        plan.repaired().forEach(sentence -> System.err.println("Repaired: " + sentence));
-        // A class deleted or a field made a method: the batch's next write reads the bot's types again.
-        WriteSteps.Step step = WriteSteps.open();
-        if (step != null) step.typesChanged();
-        redraw(changed);
-        return changed;
-    }
-
-    /**
-     * Applies {@link MisplacedParams#plan} after one snapshot an undo can return to: each group in {@code params/}
-     * on the live buffers, a new group written beside them, each starting copy on disk, and an emptied group pair
-     * deleted unless an editor tab holds it. Answers the files changed, created or deleted.
-     */
-    private Set<Path> moveMisplaced(Map<PluginCoordinate, List<ManagedValue<?>>> byPlugin) {
-        MisplacedParams.Moves moves = MisplacedParams.plan(config, index(), byPlugin);
-        moves.left().forEach(sentence -> System.err.println("Warning: " + sentence));
-        Set<Path> changed = new LinkedHashSet<>();
-        if (moves.isEmpty()) return changed;
-        // A group an editor tab holds would keep its parameter after the move, a second copy: nothing moves.
-        Set<Path> open = openFiles();
-        for (Path gone : moves.deleted()) {
-            if (open.contains(gone)) {
-                System.err.println("Warning: " + gone + " is open in an editor, so its parameters were not moved"
-                        + " to their groups; close it and open the bot again.");
-                return changed;
-            }
-        }
-        Set<Path> existing = Set.copyOf(index().sources().keySet());
-        snapshot();
-        // Where the parameter goes is written first: a write that fails leaves it where it was, never nowhere.
-        try {
-            moves.rewrites().forEach((file, text) -> {
-                if (!existing.contains(file) && ProjectWrites.create(config, file, text, HISTORY_LABEL)) {
-                    changed.add(file);
-                }
-            });
-            moves.starting().forEach((file, text) -> {
-                if (ProjectWrites.replace(config, file, text, HISTORY_LABEL)) changed.add(file);
-            });
-        } catch (UncheckedIOException e) {
-            System.err.println("Warning: parameters were not moved to their groups: " + e.getCause().getMessage());
-            redraw(changed);
-            return changed;
-        }
-        recorded(() -> BotSources.forEach(config, state, (file, source) -> {
-            String after = moves.rewrites().get(file);
-            if (after == null) return null;
-            changed.add(file);
-            return after;
-        }));
-        deleteUnlessOpen(moves.deleted(), open, changed);
-        moves.moved().forEach(sentence -> System.err.println("Repaired: " + sentence));
-        WriteSteps.Step step = WriteSteps.open();
-        if (step != null) step.typesChanged();
-        redraw(changed);
-        return changed;
-    }
-
-    /** Every file an editor tab holds, by its absolute path. */
-    private Set<Path> openFiles() {
-        Set<Path> open = new LinkedHashSet<>();
-        for (ProjectFile file : state.getAllFiles()) {
-            if (file.getPath() != null) open.add(file.getPath().toAbsolutePath().normalize());
-        }
-        return open;
-    }
-
-    /**
-     * Deletes each of {@code gone} but those in {@code open}, adding what it deleted to {@code changed}: an open
-     * buffer would write the file back on its next save, so it stays as it was until the next bind.
-     */
-    private static void deleteUnlessOpen(Set<Path> gone, Set<Path> open, Set<Path> changed) {
-        for (Path file : gone) {
-            if (open.contains(file)) {
-                System.err.println("Warning: " + file + " is open in an editor, so it was not deleted.");
-                continue;
-            }
-            try {
-                if (Files.isRegularFile(file)) FileJournal.heard(file, Files.readString(file), false);
-                if (Files.deleteIfExists(file)) changed.add(file);
-            } catch (IOException e) {
-                System.err.println("Warning: could not delete " + file + ": " + e.getMessage());
-            }
-        }
-    }
-
-    /**
-     * Writes each file's values as their plugins declare them ({@code ManagedHolders.keptValues}), on the live
-     * buffer, after one snapshot an undo can return to, and answers the files changed.
-     */
-    private java.util.Set<Path> keep(java.util.Map<Path, List<ManagedValue<?>>> kept) {
-        java.util.Set<Path> changed = new java.util.LinkedHashSet<>();
-        if (kept.isEmpty()) return changed;
-        recorded(() -> BotSources.forEach(config, state, (file, source) -> {
-            List<ManagedValue<?>> values = kept.get(file);
-            if (values == null) return null;
-            String after = ManagedHolders.keptValues(source, values, PluginHost.grammar());
-            if (after.equals(source)) return null;
-            if (changed.isEmpty()) snapshot();
-            changed.add(file);
-            return after;
-        }));
-        // A parameter added to a group is added to its starting copy too, or the next open's fit drops it.
-        kept.forEach((file, values) -> JavaParameters.rewriteStarting(config, file,
-                source -> ManagedHolders.keptValues(source, values, PluginHost.grammar())));
-        if (!changed.isEmpty()) redraw(changed);
-        return changed;
-    }
-
-    /**
-     * One write: a snapshot, then the rewrite of one expression.
-     *
-     * <p>The snapshot is taken before the file is touched and per {@code set} call, so an editor that writes
-     * on every keystroke would record every one of them. That is why the built-in editors commit on OK
-     * rather than as the user types (2026-09-20), and why a plugin's should too.
-     */
-    private void write(ManagedMethod value, JavaValue expression) {
-        recorded(() -> {
-            snapshot();
-            JavaManagedValues.setValue(config, state, value, expression);
-        });
-    }
-
-    private void snapshot() {
-        checkpoint(HISTORY_LABEL);
-    }
-
-    /**
-     * The Project History snapshot before a write: one per undo step, so a batch takes one, not one per write, and
-     * one per plugin tool call ({@link ToolCalls}).
-     */
-    private void checkpoint(String label) {
-        WriteSteps.Step open = WriteSteps.open();
-        if (open != null && !open.firstCheckpoint()) return;
-        if (!ToolCalls.firstCheckpoint()) return;
-        Checkpoints.take(config.projectPath(), VersionOrigin.SAFETY, label);
-    }
-
-    /**
-     * Runs {@code writes} as one step of the editor's undo ({@link WriteSteps}), or as part of the plugin's batch
-     * when one is open — so ↶ takes a plugin's write back like an edit on the canvas.
-     */
-    private void recorded(Runnable writes) {
-        WriteSteps.step(HISTORY_LABEL, () -> {
-            writes.run();
-            return null;
-        }, (label, changed) -> {
-            if (edits != null) edits.step(label, changed);
-        });
+        return holders.writeMissing(this);
     }
 
     // ── the contract's operations, by declaration: each the spelled one below ────────────────────────────
@@ -740,6 +326,10 @@ public final class HostPluginValues implements PluginValues {
     /** The bot's managed constants as they stand now, which a value of one of them is read and written as. */
     private List<ManagedConstants.Constant> constants() {
         return ManagedConstants.scan(config, state);
+    }
+
+    private BotIndex index() {
+        return BotSources.index(config, state);
     }
 
     @Override
@@ -800,50 +390,6 @@ public final class HostPluginValues implements PluginValues {
                         PluginHost.grammar(), setup, PluginHost.managedValues()));
     }
 
-    /** What the setup of {@code constant}'s class returns, written. */
-    private Optional<String> setSetup(ManagedClasses<?> set, String constant, JavaValue expression) {
-        String setup = set.setup().getName();
-        // Inside a batch, the holder found by the first write serves the next ones, checked on its file (Tidy).
-        WriteSteps.Step open = WriteSteps.open();
-        WriteSteps.HolderAt at = open == null ? null : open.holder(set.id());
-        if (at != null && setSetup(at, set.id(), constant, setup, expression)) return Optional.empty();
-        Optional<NestedClasses.Nested> nested = NestedClasses.named(index(), set.id(), constant, PluginHost.grammar(),
-                setup).filter(found -> found.setup() != null);
-        if (nested.isEmpty()) return Optional.of(missing(set.id(), constant));
-        if (open != null) {
-            open.holder(set.id(), new WriteSteps.HolderAt(nested.get().file().toAbsolutePath().normalize(),
-                    nested.get().holder()));
-        }
-        setSetup(nested.get(), setup, expression);
-        return Optional.empty();
-    }
-
-    /** The setup written in the holder {@code at}; false, and nothing written, when the holder is not there as it was. */
-    private boolean setSetup(WriteSteps.HolderAt at, String id, String constant, String setup, JavaValue expression) {
-        Optional<String> source = BotSources.sourceOf(config, state, at.file());
-        if (source.isEmpty()) return false;
-        String written = NestedClasses.setupSetIn(source.get(), id, at.holder(), constant, setup, imported(expression),
-                PluginHost.managedValues());
-        if (written == null) return false;
-        recorded(() -> {
-            snapshot();
-            BotSources.forEach(config, state, (visited, text) -> visited.equals(at.file()) ? written : null);
-        });
-        redraw(Set.of(at.file()));
-        return true;
-    }
-
-    private void setSetup(NestedClasses.Nested nested, String setup, JavaValue expression) {
-        Path file = nested.file().toAbsolutePath().normalize();
-        recorded(() -> {
-            snapshot();
-            BotSources.forEach(config, state, (visited, source) -> visited.equals(file)
-                    ? NestedClasses.setupSet(source, nested.holder(), nested.constant(), setup,
-                    imported(expression)) : null);
-        });
-        redraw(Set.of(file));
-    }
-
     @Override
     public Optional<String> addClass(ManagedValue<?> declared, String member, Object setup) {
         if (!(declared instanceof ManagedClasses<?> set)) {
@@ -852,7 +398,8 @@ public final class HostPluginValues implements PluginValues {
         if (setup == null) return Optional.of("No setup was given for " + member + ".");
         Class<?> type = set.setup().getReturnType();
         if (!type.isInstance(setup)) {
-            return Optional.of(member + "'s setup is " + article(setup.getClass()) + ", not " + article(type) + ".");
+            return Optional.of(member + "'s setup is " + DeclaredValues.article(setup.getClass()) + ", not "
+                    + DeclaredValues.article(type) + ".");
         }
         ManagedConstants.Lookup names = new ManagedConstants.Lookup(constants(), PluginHost.grammar());
         Optional<JavaValue> written = PluginHost.grammar().write(setup.getClass(), setup, names);
@@ -919,30 +466,10 @@ public final class HostPluginValues implements PluginValues {
         return send(new PluginWrite.RenameGroup(set.id(), group, newName));
     }
 
-    private Optional<String> renameGroupHere(ManagedValue<?> set, String group, String newName) {
-        if (set instanceof ManagedClasses<?>) {
-            BotIndex index = index();
-            return NestedClasses.named(index, set.id(), group, PluginHost.grammar(), null)
-                    .map(nested -> apply(NestedClasses.rename(index, nested, newName)))
-                    .orElseGet(() -> Optional.of(missing(set.id(), group)));
-        }
-        return renameGroup(set.id(), group, newName);
-    }
-
     @Override
     public Optional<String> removeGroup(ManagedValue<?> set, String group) {
         if (set == null) return Optional.of("No set was named.");
         return send(new PluginWrite.RemoveGroup(set.id(), group));
-    }
-
-    private Optional<String> removeGroupHere(ManagedValue<?> set, String group) {
-        if (set instanceof ManagedClasses<?>) {
-            BotIndex index = index();
-            return NestedClasses.named(index, set.id(), group, PluginHost.grammar(), null)
-                    .map(nested -> apply(NestedClasses.remove(index, nested)))
-                    .orElseGet(() -> Optional.of(missing(set.id(), group)));
-        }
-        return removeGroup(set.id(), group);
     }
 
     @Override
@@ -1022,7 +549,7 @@ public final class HostPluginValues implements PluginValues {
         return send(append);
     }
 
-    // ── an open set: ManagedSets planned, written here ────────────────────────────────────────────────────
+    // ── an open set: ManagedSets planned, written by SetWrites ────────────────────────────────────────────
 
     public List<String> members(String id) {
         return ManagedSets.members(index(), id, PluginHost.grammar()).stream()
@@ -1039,102 +566,18 @@ public final class HostPluginValues implements PluginValues {
         return send(new PluginWrite.AddGroup(id, group, constants));
     }
 
-    private Optional<String> addGroupHere(String id, String group, List<String> constants) {
-        Optional<ManagedOpenSet<?>> set = openSet(PluginHost.managedValues(), id)
-                .filter(ManagedOpenSet.EnumGroups.class::isInstance);
-        if (set.isEmpty()) return Optional.of(notGrouped(id));
-        return apply(ManagedSets.addGroup(index(), id, group, constants, set.get().type()));
-    }
-
-    /** A group of a set of nested enums renamed; {@link #perform}'s, for a set no bound plugin declares. */
-    private Optional<String> renameGroup(String id, String group, String newName) {
-        BotIndex index = index();
-        Optional<ManagedSets.Group> found = ManagedSets.group(index, id, group);
-        if (found.isEmpty()) return Optional.of(missing(id, group));
-        return apply(Refactor.rename(index, found.get().file(), found.get().start(), newName));
-    }
-
-    private Optional<String> removeGroup(String id, String group) {
-        BotIndex index = index();
-        Optional<ManagedSets.Group> found = ManagedSets.group(index, id, group);
-        if (found.isEmpty()) return Optional.of(missing(id, group));
-        return apply(ManagedSets.removeGroup(index, found.get()));
-    }
-
-    private static String notGrouped(String id) {
-        return "No plugin in this project declares " + ManagedIds.spelled(id, PluginHost.managedValues())
-                + " as a set of enums.";
-    }
-
     // ── the bot's methods ─────────────────────────────────────────────────────────────────────────────────
 
     public List<String> methods(String id, String group) {
         BotIndex index = index();
         if (id == null && group == null) return BotMethods.returning(index, null);
         return ManagedSets.group(index, id, group)
-                .map(found -> BotMethods.returning(index, canonical(index, found)))
+                .map(found -> BotMethods.returning(index, MethodWrites.canonical(index, found)))
                 .orElse(List.of());
     }
 
     public MethodWrite createMethod(String id, String group, String className, String method) {
         return methodWrite(send(new PluginWrite.CreateMethod(id, group, className, method)), className, method);
-    }
-
-    private MethodWrite createMethodHere(String id, String group, String className, String method) {
-        BotIndex index = index();
-        String returns = null;
-        String imported = null;
-        String first = null;
-        if (id != null || group != null) {
-            Optional<ManagedSets.Group> found = ManagedSets.group(index, id, group);
-            if (found.isEmpty()) return new MethodWrite(null, missing(id, group));
-            if (found.get().members().isEmpty()) {
-                return new MethodWrite(null, found.get().qualified() + " has no constant to return.");
-            }
-            returns = found.get().qualified();
-            String canonical = canonical(index, found.get());
-            imported = canonical.substring(0, canonical.length() - group.length() - 1);
-            first = found.get().members().getFirst().name();
-        }
-        return written(index, className, method, returns, imported, first);
-    }
-
-    /** {@link BotMethods#create}'s method written into the bot, creating its class when there is none. */
-    private MethodWrite written(BotIndex index, String className, String method, String returns, String imported,
-                                String first) {
-        Path file = className == null ? null : config.mainPackageDir().resolve(className + ".java");
-        Refactor.Outcome planned = BotMethods.create(index, config.mainPackage(), file, className, method, returns,
-                imported, first);
-        if (planned instanceof Refactor.Planned plan && file != null && plan.rewrites().containsKey(file)
-                && !index.sources().containsKey(file)) {
-            // A new class: nothing in the bot has that file yet, so it is created rather than rewritten.
-            if (java.nio.file.Files.exists(file)) {
-                // A file the bot's sources do not declare the class in: never written over.
-                return new MethodWrite(null, className + ".java already exists but declares no class "
-                        + className + ", so nothing was written.");
-            }
-            checkpoint("Before: " + plan.summary());
-            try {
-                create(file, plan.rewrites().get(file), plan.summary());
-            } catch (java.io.UncheckedIOException e) {
-                return new MethodWrite(null, "Could not write " + className + ".java: " + e.getCause().getMessage());
-            }
-            redraw(Set.of(file.toAbsolutePath().normalize()));
-            return new MethodWrite(className + "::" + method, null);
-        }
-        Optional<String> refused = apply(planned);
-        return refused.isPresent() ? new MethodWrite(null, refused.get())
-                : new MethodWrite(className + "::" + method, null);
-    }
-
-    /** The canonical name of a nested enum — {@code com.bot.plugins.sdk.Activities.Collect}. */
-    private static String canonical(BotIndex index, ManagedSets.Group group) {
-        String pkg = index.read(units -> {
-            var unit = units.get(group.file());
-            return unit == null || unit.getPackage() == null ? ""
-                    : unit.getPackage().getName().getFullyQualifiedName();
-        });
-        return (pkg.isEmpty() ? "" : pkg + ".") + group.qualified();
     }
 
     /**
@@ -1160,8 +603,8 @@ public final class HostPluginValues implements PluginValues {
 
     public Optional<String> add(String id, String member, Object value) {
         if (value == null) return Optional.of("No value was given for " + member + ".");
-        Optional<ManagedOpenSet<?>> set = openSet(PluginHost.managedValues(), id);
-        Optional<String> stranger = set.flatMap(declared -> notAnElement(declared, member, value));
+        Optional<ManagedOpenSet<?>> set = DeclaredValues.openSet(PluginHost.managedValues(), id);
+        Optional<String> stranger = set.flatMap(declared -> DeclaredValues.notAnElement(declared, member, value));
         if (stranger.isPresent()) return stranger;
         // An enum's constant is its name: the value was only checked, and nothing of it is written.
         if (set.filter(declared -> declared instanceof ManagedOpenSet.OneEnum<?>
@@ -1187,49 +630,6 @@ public final class HostPluginValues implements PluginValues {
         return send(new PluginWrite.Add(id, member, type.getName(), initializer.get()));
     }
 
-    /**
-     * Why {@code value} may not join the open set {@code id}, or empty when it may: the set's declaration
-     * names the class of each constant, and a value of another class would compile into a set the plugin then
-     * reads as the wrong type. Compared by binary name, the class or any supertype — the plugin's class loader
-     * is not Studio's. A set no plugin declares with an element type is not checked here.
-     */
-    static Optional<String> notAnElement(List<ManagedValue<?>> declared, String id, String member, Object value) {
-        return openSet(declared, id).flatMap(set -> notAnElement(set, member, value));
-    }
-
-    /** The same, against the set already found. */
-    private static Optional<String> notAnElement(ManagedOpenSet<?> set, String member, Object value) {
-        // A set of classes takes fields here, each of its field type; a whole class is addClass's.
-        boolean classes = set instanceof ManagedClasses<?>;
-        Class<?> element = set instanceof ManagedClasses<?> nested ? nested.fieldType() : set.type();
-        if (classes && !member.contains(".")) {
-            return Optional.of(member + " names a whole class of " + set.holder() + ", which is added with its setup.");
-        }
-        if (element == null || isA(value.getClass(), element.getName())) return Optional.empty();
-        return Optional.of(member + " cannot join " + set.holder() + ": it is " + article(value.getClass())
-                + ", and every " + (classes ? "field" : "constant") + " there is " + article(element) + ".");
-    }
-
-    /** The open set {@code id} among what the plugins declare, or empty. */
-    private static Optional<ManagedOpenSet<?>> openSet(List<ManagedValue<?>> declared, String id) {
-        return declared.stream()
-                .<ManagedOpenSet<?>>flatMap(value -> value instanceof ManagedOpenSet<?> set && set.id().equals(id)
-                        ? java.util.stream.Stream.of(set) : java.util.stream.Stream.empty())
-                .findFirst();
-    }
-
-    private static boolean isA(Class<?> cls, String name) {
-        if (cls == null) return false;
-        if (cls.getName().equals(name) || isA(cls.getSuperclass(), name)) return true;
-        for (Class<?> face : cls.getInterfaces()) if (isA(face, name)) return true;
-        return false;
-    }
-
-    private static String article(Class<?> cls) {
-        String name = cls.getSimpleName().isEmpty() ? cls.getName() : cls.getSimpleName();
-        return ("AEIOU".indexOf(name.charAt(0)) >= 0 ? "an " : "a ") + name;
-    }
-
     public List<Use> uses(String id, String member) {
         BotIndex index = index();
         return ManagedSets.member(index, id, member, PluginHost.grammar())
@@ -1242,125 +642,17 @@ public final class HostPluginValues implements PluginValues {
         return send(new PluginWrite.Rename(id, member, newName));
     }
 
-    private Optional<String> renameHere(String id, String member, String newName) {
-        BotIndex index = index();
-        Optional<ManagedSets.Member> found = ManagedSets.member(index, id, member, PluginHost.grammar());
-        if (found.isEmpty()) return Optional.of(missing(id, member));
-        // A nested enum's constant is named "Collect.WON", and its new name may be given the same way; it stays
-        // in its enum, so only the part after the group is the new identifier.
-        String group = found.get().group();
-        String name = group != null && newName != null && newName.startsWith(group + ".")
-                ? newName.substring(group.length() + 1) : newName;
-        return apply(Refactor.rename(index, found.get().file(), found.get().start(), name));
-    }
-
     /** The mark is written only where the bot compiles {@code @Refactor}; elsewhere the repoint goes unmarked. */
     public Optional<String> repoint(String id, String member, String replacement, String note) {
         return send(new PluginWrite.Repoint(id, member, replacement, note));
-    }
-
-    private Optional<String> repointHere(String id, String member, String replacement, String note) {
-        BotIndex index = index();
-        Optional<ManagedSets.Member> from = ManagedSets.member(index, id, member, PluginHost.grammar());
-        Optional<ManagedSets.Member> to = ManagedSets.member(index, id, replacement, PluginHost.grammar());
-        if (from.isEmpty()) return Optional.of(missing(id, member));
-        if (to.isEmpty()) return Optional.of(missing(id, replacement));
-        return apply(ManagedSets.repoint(index, from.get(), to.get(),
-                ReviewMarker.available(state) ? note : null));
     }
 
     public Optional<String> remove(String id, String member) {
         return send(new PluginWrite.Remove(id, member));
     }
 
-    private Optional<String> removeHere(String id, String member) {
-        BotIndex index = index();
-        Optional<ManagedSets.Member> found = ManagedSets.member(index, id, member, PluginHost.grammar());
-        if (found.isEmpty()) return Optional.of(missing(id, member));
-        return apply(ManagedSets.remove(index, found.get()));
-    }
-
     public Optional<String> moveBefore(String id, String member, String before) {
         return send(new PluginWrite.MoveBefore(id, member, before));
-    }
-
-    private Optional<String> moveBeforeHere(String id, String member, String before) {
-        BotIndex index = index();
-        List<ManagedSets.Member> members = ManagedSets.members(index, id, PluginHost.grammar());
-        Optional<ManagedSets.Member> moving = members.stream().filter(m -> m.memberName().equals(member)).findFirst();
-        Optional<ManagedSets.Member> anchor = members.stream().filter(m -> m.memberName().equals(before)).findFirst();
-        if (moving.isEmpty()) return Optional.of(missing(id, member));
-        if (anchor.isEmpty()) return Optional.of(missing(id, before));
-        Refactor.Outcome planned = ManagedSets.moveBefore(index, moving.get(), anchor.get());
-        // Already above: nothing to write, and no snapshot either.
-        if (planned instanceof Refactor.Planned plan && plan.rewrites().isEmpty()) return Optional.empty();
-        return apply(planned);
-    }
-
-    private BotIndex index() {
-        return BotSources.index(config, state);
-    }
-
-    /** A new class's file written; inside a batch, the next write reads the bot's types again (WriteSteps.Step#types). */
-    private void create(Path file, String source, String label) {
-        ProjectWrites.create(config, file, source, label);
-        // A plugin's group in params/ is written with its starting copy, which the fitter keeps params/ to.
-        JavaParameters.startingFile(config, file).ifPresent(starting ->
-                ProjectWrites.create(config, starting, source, label));
-        WriteSteps.Step open = WriteSteps.open();
-        if (open != null) open.typesChanged();
-    }
-
-    /**
-     * {@code value} as it may be written into any of the bot's files: a part a plugin hands over as the Java it
-     * is written as, {@code Research::body}, imports its class, and a full name is written short (2026-10-13).
-     */
-    private JavaValue imported(JavaValue value) {
-        // Inside a plugin's batch, read once for all its writes (WriteSteps.Step#types).
-        WriteSteps.Step open = WriteSteps.open();
-        List<String> types = open == null ? BotMethods.topLevelTypes(index())
-                : open.types(() -> BotMethods.topLevelTypes(index()));
-        return ShortNames.imported(value, types);
-    }
-
-    private static String missing(String id, String member) {
-        return "The project has no " + member + " in the class marked "
-                + ManagedIds.spelled(id, PluginHost.managedValues()) + ".";
-    }
-
-    /**
-     * A plan written as one step in Project History: the snapshot first, then every file it rewrites, buffer
-     * and disk, then the open file redrawn when it was one of them. It is one step of the editor's ↶ as well
-     * (2026-10-15), or part of the plugin's batch.
-     */
-    private Optional<String> apply(Refactor.Outcome outcome) {
-        return switch (outcome) {
-            case Refactor.Refused refused -> Optional.of(refused.reason());
-            case Refactor.Planned plan -> {
-                recorded(() -> {
-                    checkpoint("Before: " + plan.summary());
-                    BotSources.forEach(config, state, (file, source) -> plan.rewrites().get(file));
-                });
-                redraw(plan.rewrites().keySet());
-                yield Optional.empty();
-            }
-        };
-    }
-
-    private void writeInitializer(ManagedSets.Member member, JavaValue expression) {
-        Path file = member.file().toAbsolutePath().normalize();
-        // A field of a nested class (ManagedClasses) is in the class whose instance its group holds.
-        boolean nested = member.group() != null;
-        recorded(() -> {
-            snapshot();
-            // An edit makes a migrated value the author's: a rerun of the migration leaves it alone from now on.
-            BotSources.forEach(config, state, (visited, source) -> !visited.equals(file) ? null
-                    : nested ? NestedClasses.fieldSet(source, member.className(), member.group(), member.name(),
-                            expression)
-                    : ManagedMigrations.unmarked(JavaParameterEdits.setValue(source, member.className(),
-                            member.name(), expression), member.className(), member.name()));
-        });
-        redraw(Set.of(file));
     }
 
     // ── a during-a-run parameter ─────────────────────────────────────────────────────────────────────────
@@ -1385,41 +677,5 @@ public final class HostPluginValues implements PluginValues {
     @Override
     public Optional<String> forgetRunParameter(String group, String name) {
         return send(new PluginWrite.ForgetRunParameter(group, name));
-    }
-
-    /** One undoable parameter write, its snapshot first, and whatever shows the file redrawn. */
-    private Optional<String> written(Supplier<Optional<String>> write) {
-        List<Optional<String>> refused = new ArrayList<>();
-        recorded(() -> {
-            snapshot();
-            refused.add(write.get());
-        });
-        ProjectFile active = state == null ? null : state.getActiveFile();
-        if (active != null && active.getPath() != null) redraw(Set.of(active.getPath().toAbsolutePath().normalize()));
-        return refused.getFirst();
-    }
-
-    /** The class of a constant of the plugin's set, as {@link JavaParameterEdits} writes it. */
-    private Optional<JavaParameterEdits.ClassName> classNamed(ParameterWrite.ClassOf classOf) {
-        ManagedClasses<?> set = classOf.classes();
-        Optional<NestedClasses.Nested> nested = NestedClasses.named(index(), set.id(), classOf.constant().name(),
-                PluginHost.grammar(), set.setup().getName());
-        if (nested.isEmpty()) return Optional.empty();
-        String holder = nested.get().holder();
-        return BotMethods.topLevelTypes(index()).stream()
-                .filter(type -> type.equals(holder) || type.endsWith("." + holder)).findFirst()
-                .map(top -> new JavaParameterEdits.ClassName(top, holder + "." + nested.get().className()));
-    }
-
-    /**
-     * Tells the editor to re-render the file it shows when a write here changed it underneath — the buffer
-     * really changed, so a stale view is the only thing wrong, which is the kind of bug that reads as data loss.
-     */
-    private void redraw(java.util.Collection<Path> changed) {
-        if (edits == null) return;
-        ProjectFile active = state.getActiveFile();
-        if (active == null || active.getPath() == null
-                || !changed.contains(active.getPath().toAbsolutePath().normalize())) return;
-        edits.redraw(active.getContent());
     }
 }

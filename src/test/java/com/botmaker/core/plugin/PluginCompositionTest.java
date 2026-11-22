@@ -71,7 +71,7 @@ class PluginCompositionTest {
         LoadedPlugin basics = plugin("com.botmaker.basics", Duration.class, String.class);
         LoadedPlugin other = plugin("com.example.other", Channel.class);
 
-        PluginHost.Composition composed = PluginHost.compose(List.of(sdk, basics, other));
+        PluginComposition composed = PluginComposition.of(List.of(sdk, basics, other));
 
         assertEquals(List.of(sdk, other), composed.bound(),
                 "classpath order decides, and only the clashing plugin leaves");
@@ -86,7 +86,7 @@ class PluginCompositionTest {
 
     @Test
     void theRejectionSaysWhichTypesClashedAndWhoAlreadyDeclaredThem() {
-        PluginHost.Composition composed = PluginHost.compose(
+        PluginComposition composed = PluginComposition.of(
                 List.of(plugin("com.botmaker.sdk", Duration.class), plugin("com.botmaker.basics", Duration.class)));
 
         String line = composed.rejected().getFirst().describe();
@@ -99,7 +99,7 @@ class PluginCompositionTest {
     void aPluginWhoseOwnDeclarationsThrowIsRejectedAndTheRestStillBind() {
         LoadedPlugin good = plugin("com.example.good", Channel.class);
 
-        PluginHost.Composition composed = PluginHost.compose(List.of(throwing("com.example.broken"), good));
+        PluginComposition composed = PluginComposition.of(List.of(throwing("com.example.broken"), good));
 
         assertEquals(List.of(good), composed.bound());
         assertEquals(List.of("com.example.broken"),
@@ -109,7 +109,7 @@ class PluginCompositionTest {
 
     @Test
     void aSetThatComposesRejectsNothing() {
-        PluginHost.Composition composed = PluginHost.compose(
+        PluginComposition composed = PluginComposition.of(
                 List.of(plugin("a", Channel.class), plugin("b", Image.class)));
 
         assertEquals(List.of(), composed.rejected());
@@ -131,7 +131,7 @@ class PluginCompositionTest {
         LoadedPlugin plugin = TestPlugins.loaded("com.example.chat",
                 StudioPlugin.declare().types(TestPlugins.components(() -> List.of(channel))));
 
-        PluginHost.Composition composed = PluginHost.compose(List.of(plugin));
+        PluginComposition composed = PluginComposition.of(List.of(plugin));
 
         String written = composed.grammar().initializerOfAny(new Channel("general")).orElseThrow().source();
         assertEquals("new " + Channel.class.getCanonicalName() + "(\"general\")", written);
@@ -146,7 +146,7 @@ class PluginCompositionTest {
     void aDeclaredTypeBecomesASlotEditorAfterThePluginsOwn() {
         LoadedPlugin plugin = plugin("com.example.chat", Channel.class);
 
-        List<PluginHost.OwnedEditor> editors = PluginHost.mergeOwnedSlotEditors(List.of(plugin));
+        List<PluginHost.OwnedEditor> editors = new PluginSlots(List.of(plugin)).ownedEditors();
 
         assertEquals(1, editors.size());
         assertEquals(TestPlugins.coordinate("com.example.chat"), editors.getFirst().plugin());
@@ -162,6 +162,6 @@ class PluginCompositionTest {
         LoadedPlugin plugin = TestPlugins.loaded("com.example.chat",
                 StudioPlugin.declare().types(TestPlugins.holder(() -> List.of(plain))));
 
-        assertEquals(List.of(), PluginHost.mergeOwnedSlotEditors(List.of(plugin)));
+        assertEquals(List.of(), new PluginSlots(List.of(plugin)).ownedEditors());
     }
 }
