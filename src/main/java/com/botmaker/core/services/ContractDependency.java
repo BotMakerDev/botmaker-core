@@ -28,7 +28,7 @@ import java.util.jar.JarFile;
  *
  * <p><b>Present is decided by the class, on the resolved classpath, and never by a name.</b> The SDK brings the
  * contract at {@code compile}; a direct entry beside it would win by nearest-wins and pin the bot to a
- * contract its SDK was not built against — the trap {@code MavenService.BOT_DEPENDENCIES}' javadoc records
+ * contract its SDK was not built against — the trap {@code PomDefaults.BOT_DEPENDENCIES}' javadoc records
  * for the toolkit. So a classpath that already carries {@code Param}, however it got there, is left alone,
  * and so is a pom that declares the coordinate but has not resolved yet.
  */

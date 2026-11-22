@@ -42,7 +42,7 @@ import java.util.Set;
  * on a BotMaker spelling of a Java call.
  *
  * <p><b>And since 2026-09-04 "imports nothing" is a property of the pom as well as of this file.</b> A blank
- * project's {@code pom.xml} names no plugin — see {@code MavenService.BLANK_DEPENDENCIES} — so there is no
+ * project's {@code pom.xml} names no plugin — see {@code PomDefaults.BLANK_DEPENDENCIES} — so there is no
  * BotMaker API on its classpath to import even if this file wanted to. That is the platform rule reaching
  * project creation: the SDK is one plugin among any number, and choosing it is the user's to make, one step
  * away in <b>Project ▸ Plugins &amp; Libraries</b>.

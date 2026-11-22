@@ -137,11 +137,11 @@ class DevGitTest {
 
     @Test
     void aRemoteIsHttpsWithNoCredentialsInIt(@TempDir Path root) throws Exception {
-        assertNull(ProjectVcs.remoteProblem("backup", "https://example.org/me/bot.git"));
-        assertNotNull(ProjectVcs.remoteProblem("backup", "http://example.org/me/bot.git"));
-        assertNotNull(ProjectVcs.remoteProblem("backup", "git@github.com:me/bot.git"));
-        assertNotNull(ProjectVcs.remoteProblem("backup", "https://me:ghp_secret@github.com/me/bot.git"));
-        assertNotNull(ProjectVcs.remoteProblem("bad name", "https://example.org/me/bot.git"));
+        assertNull(GitRemotes.remoteProblem("backup", "https://example.org/me/bot.git"));
+        assertNotNull(GitRemotes.remoteProblem("backup", "http://example.org/me/bot.git"));
+        assertNotNull(GitRemotes.remoteProblem("backup", "git@github.com:me/bot.git"));
+        assertNotNull(GitRemotes.remoteProblem("backup", "https://me:ghp_secret@github.com/me/bot.git"));
+        assertNotNull(GitRemotes.remoteProblem("bad name", "https://example.org/me/bot.git"));
 
         ProjectVcs vcs = project(root);
         vcs.addRemote("backup", "https://example.org/me/bot.git");
@@ -151,12 +151,12 @@ class DevGitTest {
 
     @Test
     void theGitHubTokenGoesToGitHubOnly() {
-        assertEquals("t", ProjectVcs.tokenFor("https://github.com/me/bot.git", "t"));
-        assertEquals("t", ProjectVcs.tokenFor("HTTPS://GitHub.com/me/bot", "t"));
-        assertNull(ProjectVcs.tokenFor("https://gitlab.com/me/bot.git", "t"));
-        assertNull(ProjectVcs.tokenFor("https://github.com.evil.example/me/bot.git", "t"));
-        assertNull(ProjectVcs.tokenFor("file:///tmp/bot.git", "t"));
-        assertNull(ProjectVcs.tokenFor("https://github.com/me/bot.git", null));
+        assertEquals("t", GitTransfer.tokenFor("https://github.com/me/bot.git", "t"));
+        assertEquals("t", GitTransfer.tokenFor("HTTPS://GitHub.com/me/bot", "t"));
+        assertNull(GitTransfer.tokenFor("https://gitlab.com/me/bot.git", "t"));
+        assertNull(GitTransfer.tokenFor("https://github.com.evil.example/me/bot.git", "t"));
+        assertNull(GitTransfer.tokenFor("file:///tmp/bot.git", "t"));
+        assertNull(GitTransfer.tokenFor("https://github.com/me/bot.git", null));
     }
 
     @Test

@@ -116,10 +116,10 @@ class ContractDependencyTest {
 
     @Test
     void anOlderBroughtContractDoesNotReplaceTheEntry() {
-        assertTrue(MavenService.notOlder("v0.5.0", "v0.4.0"));
-        assertTrue(MavenService.notOlder("0.4.0", "v0.4.0"));
-        assertFalse(MavenService.notOlder("v0.3.1", "v0.4.0"), "it may lack what the bot uses, @Refactor say");
-        assertFalse(MavenService.notOlder(null, "v0.4.0"));
+        assertTrue(PluginShadows.notOlder("v0.5.0", "v0.4.0"));
+        assertTrue(PluginShadows.notOlder("0.4.0", "v0.4.0"));
+        assertFalse(PluginShadows.notOlder("v0.3.1", "v0.4.0"), "it may lack what the bot uses, @Refactor say");
+        assertFalse(PluginShadows.notOlder(null, "v0.4.0"));
     }
 
     @Test

@@ -317,11 +317,11 @@ class ProjectVcsTest {
 
     @Test
     void aPushRefusedByGitHubSaysWhoGrantsIt() {
-        String said = ProjectVcs.explainRefusal("https://github.com/BotMakerDev/botmaker-gamebot.git",
+        String said = GitTransfer.explainRefusal("https://github.com/BotMakerDev/botmaker-gamebot.git",
                 "Push failed: https://github.com/BotMakerDev/botmaker-gamebot.git: git-receive-pack not permitted");
         assertTrue(said.startsWith("GitHub refused the push to BotMakerDev/botmaker-gamebot."), said);
         assertTrue(said.contains("organizations/BotMakerDev/settings/oauth_application_policy"), said);
-        assertEquals("Push failed: timeout", ProjectVcs.explainRefusal("https://github.com/a/b.git", "Push failed: timeout"));
+        assertEquals("Push failed: timeout", GitTransfer.explainRefusal("https://github.com/a/b.git", "Push failed: timeout"));
     }
 
     /** The Versions tab shows a failure's deepest cause, so the explanation must be the deepest. */
@@ -329,12 +329,12 @@ class ProjectVcsTest {
     void anExplainedRefusalIsTheMessageTheTabShows() {
         String url = "https://github.com/BotMakerDev/botmaker-gamebot.git";
         Exception jgit = new Exception(url + ": git-receive-pack not permitted on '" + url + "'");
-        Throwable shown = new RuntimeException("wrapped", ProjectVcs.pushFailure(url, jgit));
+        Throwable shown = new RuntimeException("wrapped", GitTransfer.pushFailure(url, jgit));
         while (shown.getCause() != null) shown = shown.getCause();
         assertTrue(shown.getMessage().startsWith("GitHub refused the push to BotMakerDev/botmaker-gamebot."),
                 shown.getMessage());
 
-        IOException other = ProjectVcs.pushFailure(url, new Exception("timeout"));
+        IOException other = GitTransfer.pushFailure(url, new Exception("timeout"));
         assertEquals("Push failed: timeout", other.getMessage());
         assertTrue(other.getCause() != null, "an unexplained failure keeps its cause");
     }

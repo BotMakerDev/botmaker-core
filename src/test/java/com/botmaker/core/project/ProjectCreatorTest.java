@@ -152,7 +152,7 @@ class ProjectCreatorTest {
     // theSpecCarriesTheFullPackage went on 2026-09-01 with ProjectSpecs. It held that the *whole* package
     // (com.mybot) crossed to the SDK where ProjectConfig.packageName() is the last segment alone (mybot) —
     // a half-name that would have compiled the project into the wrong package. There is no boundary left for
-    // it to cross: StarterSources and MavenService.pomXml both take the ProjectConfig itself.
+    // it to cross: StarterSources and PomDefaults.pomXml both take the ProjectConfig itself.
 
     /**
      * The one file a new project starts with is Studio's, and it is the only {@code .java} either half of

@@ -6,54 +6,16 @@ package com.botmaker.core.services;
 import com.botmaker.cli.bmk.BotFile;
 import com.botmaker.cli.bmk.BotFiles;
 import com.botmaker.plugin.host.PluginPoms;
-import com.botmaker.core.plugin.DuplicatePlugins;
 import com.botmaker.core.project.ProjectConfig;
 import com.botmaker.core.project.UserLibrary;
-import com.botmaker.core.runtime.JavacRelease;
-import com.botmaker.core.sharing.UnpackedBots;
-import org.apache.maven.model.Dependency;
 import org.apache.maven.model.Model;
-import org.apache.maven.model.Repository;
-import org.apache.maven.model.io.xpp3.MavenXpp3Reader;
-import org.apache.maven.model.io.xpp3.MavenXpp3Writer;
-import org.apache.maven.repository.internal.MavenRepositorySystemUtils;
-import org.eclipse.aether.DefaultRepositorySystemSession;
-import org.eclipse.aether.RepositorySystem;
-import org.eclipse.aether.artifact.Artifact;
-import org.eclipse.aether.artifact.DefaultArtifact;
-import org.eclipse.aether.collection.CollectRequest;
-import org.eclipse.aether.graph.Exclusion;
-import org.eclipse.aether.repository.LocalRepository;
-import org.eclipse.aether.repository.RemoteRepository;
-import org.eclipse.aether.repository.RepositoryPolicy;
-import org.eclipse.aether.resolution.ArtifactRequest;
-import org.eclipse.aether.resolution.ArtifactResolutionException;
-import org.eclipse.aether.resolution.ArtifactResult;
-import org.eclipse.aether.resolution.DependencyRequest;
-import org.eclipse.aether.resolution.DependencyResolutionException;
-import org.eclipse.aether.resolution.DependencyResult;
-import org.eclipse.aether.supplier.RepositorySystemSupplier;
-import org.eclipse.aether.transfer.AbstractTransferListener;
-import org.eclipse.aether.transfer.TransferEvent;
-import org.eclipse.aether.transfer.TransferResource;
-import org.eclipse.aether.util.artifact.JavaScopes;
-import org.eclipse.aether.util.filter.ScopeDependencyFilter;
 
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.io.StringWriter;
-import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Properties;
-import java.util.Set;
-import java.util.TreeMap;
 import java.util.stream.Collectors;
 
 /**
@@ -62,6 +24,10 @@ import java.util.stream.Collectors;
  * <p>Replaces the old Gradle integration: the project descriptor (pom.xml) is built with the
  * Maven Model API (no hand-written build string), and dependencies are resolved transitively
  * in-process with Maven Resolver (Aether) — no system {@code mvn} binary is required.
+ *
+ * <p>The work is in one class per kind: {@link PomDefaults} (what a pom Studio writes holds), {@link PomEdits},
+ * {@link PluginShadows} and {@link MavenResolver}, over {@link PomModel}. The fallback versions stay here: the
+ * release rewrites them in this file by name ({@code sluice.yml}).
  */
 public final class MavenService {
 
@@ -74,14 +40,6 @@ public final class MavenService {
     // cannot enumerate its siblings, so a pom it wrote would silently omit theirs. Only the composer can
     // write the manifest of what it composed. Creation still lands in one pass: ProjectCreator hands this
     // text to Authoring.createProject as a caller file.
-
-    /** Default remote repositories used both in generated POMs and during resolution. */
-    private static final Map<String, String> DEFAULT_REPOSITORIES = new LinkedHashMap<>();
-    static {
-        DEFAULT_REPOSITORIES.put("central", "https://repo.maven.apache.org/maven2/");
-        DEFAULT_REPOSITORIES.put("jitpack", "https://jitpack.io");
-        DEFAULT_REPOSITORIES.put("google", "https://dl.google.com/dl/android/maven2/");
-    }
 
     /** Maven coordinate of the BotMaker SDK (published from GitHub tags via JitPack). */
     public static final String SDK_GROUP_ID = "com.github.BotMakerDev";
@@ -138,239 +96,32 @@ public final class MavenService {
         return !PluginPoms.read(jar).isEmpty();
     }
 
-    /** Dependencies every generated project gets (mirrors the old build.gradle). */
-    private record Dep(String groupId, String artifactId, String version, String scope) {}
-
-    // There is no TOOLKIT_FALLBACK_VERSION any more, and its absence is the point (2026-09-06).
-    //
-    // A generated pom used to declare botmaker-plugin-toolkit at a version this constant held, `provided`,
-    // for the SDK plugin's sake. It was a landmine rather than a service: botmaker-sdk has declared the
-    // toolkit at plain `compile` scope since 2026-09-04, so it is transitive and arrives with the SDK — and
-    // Maven's nearest-wins mediation makes a bot's own direct entry BEAT the version the pinned SDK
-    // resolved. An SDK built against a newer toolkit therefore failed at runtime with NoSuchMethodError,
-    // in a project whose pom looked deliberate. Two pins for one artifact is what this constant was.
-    //
-    // Do not reinstate it. Whichever toolkit the pinned SDK was built against is the only right answer, and
-    // the SDK's own pom is the only thing that knows it. release.sh's PLUGIN_TOOLKIT -> STUDIO forcing edge
-    // and check_fallback_versions' second constant went with it.
-
-    /**
-     * The whole of a <b>blank</b> project's dependencies: a test framework, and nothing else.
-     *
-     * <p><b>A blank project names no plugin, and therefore has no bot API</b> (2026-09-04). Until then every
-     * project Studio created pinned {@code botmaker-sdk} plus the eight entries below, so "blank" meant a bot
-     * project with a {@code System.out.println} in it — and a user who wanted a plain Java project could not
-     * have one. The platform's own rule is that the SDK is one plugin among any number; a starting point that
-     * names it is a starting point that has chosen one, which is a choice belonging to the person starting.
-     *
-     * <p>So a blank project opens with <b>no palette, no plugin toolbar buttons, no pictures, no capture and
-     * no pilot</b>. That is not a degraded state to be minimised — it is what a project with no plugins
-     * installed looks like, and it is reachable in one step from **Project ▸ Manage Plugins…**, which
-     * installs the SDK as an ordinary dependency exactly as it installs anybody else's plugin. The richer
-     * starting point is a published bot, cloned by New Project.
-     *
-     * <p>JUnit is here rather than in {@link #BOT_DEPENDENCIES} because it is the one entry that is not about
-     * BotMaker at all: it is what a Maven project is expected to come with, and a user who writes a test on
-     * day one should not have to add it. {@link #DEFAULT_REPOSITORIES} is unchanged for both shapes, so a
-     * blank project can <em>add</em> a BotMaker library later without anybody hand-editing a repository in.
-     */
-    private static final List<Dep> BLANK_DEPENDENCIES = List.of(
-            new Dep("org.junit.jupiter", "junit-jupiter", "5.9.3", "test")
-    );
-
-    /**
-     * What a pom that names the SDK plugin has to carry — <b>the list, kept, for a project that wants one</b>.
-     *
-     * <p>Nothing Studio creates writes this any more: a blank project takes {@link #BLANK_DEPENDENCIES} and a
-     * project made from a published bot brings its author's own pom, versions and all. It stays because it
-     * is the written statement of the paragraph below, which a bot's author needs and which is not
-     * derivable from anywhere else, and because {@link #DEFAULT_GROUP_ARTIFACTS} must go on recognising every
-     * one of these in the pom of a project that already exists.
-     *
-     * <h2>Every entry is a library the <em>bot's own source</em> may name</h2>
-     *
-     * <p>The list held five more until 2026-09-06, and every one of them was here on behalf of a
-     * <b>plugin</b> rather than of the bot. Three left in the morning: {@code botmaker-plugin-toolkit}, which
-     * the SDK declares at {@code compile} scope and so brings transitively — a direct entry here
-     * <em>outranked</em> it by nearest-wins, pinning a bot to a toolkit its SDK was not built against — and
-     * {@code javafx-controls}/{@code javafx-graphics}, which {@code PluginLoader} resolves <b>parent-first</b>
-     * so the host's own copy is what every plugin links whatever a bot's pom says.
-     *
-     * <p>The last two, {@code io.javalin:javalin} and {@code com.google.zxing:core}, were real — the SDK's
-     * plugin half needs a web server and a QR encoder, its pom marks both {@code optional} so a headless bot
-     * links neither, and <b>{@code optional} is not transitive</b>. What was wrong was <em>where they were
-     * written down</em>: in Studio, spelled out for one plugin, so the second plugin to need something of its
-     * own had no way to say so. They are {@code editorDependencies} in that plugin's registry entry now, and
-     * {@link #installPlugin} declares whatever the entry names, for any plugin. Nothing here lists them, and
-     * {@link #isDefaultDependency} is what stops them reading as user libraries.
-     *
-     * <p><b>The generalisation, restated:</b> a plugin's dependencies are declared by whoever puts that
-     * plugin on a classpath — here that is this pom, because this pom is what names the plugin. What changed
-     * is that the list of them is the plugin's own to publish rather than Studio's to know.
-     */
-    private static final List<Dep> BOT_DEPENDENCIES = List.of(
-            new Dep(SDK_GROUP_ID, SDK_ARTIFACT_ID, SDK_FALLBACK_VERSION, null),
-            new Dep("net.java.dev.jna", "jna", "5.13.0", null),
-            new Dep("net.java.dev.jna", "jna-platform", "5.13.0", null),
-            // Jackson stays even though nothing generated needs it any more: a java-model project's settings
-            // are Java literals, not a JSON read at startup. It is on the list for what the user might write,
-            // and taking it away would break a bot that imports it for a gain nobody would notice.
-            new Dep("com.fasterxml.jackson.core", "jackson-databind", "2.15.2", null),
-            new Dep("org.junit.jupiter", "junit-jupiter", "5.9.3", "test")
-    );
-
-    /**
-     * {@code groupId:artifactId} of every built-in dependency — these are never treated as user libraries.
-     *
-     * <p>A "user library" is anything in the pom that is not on this list, so this set and the pom writers
-     * must stay one list or the dialog offers to delete a dependency it cannot re-add. That is an argument
-     * for one owner, and the owner is whoever writes the pom — Studio, again.
-     *
-     * <p><b>It is the union of both lists, and narrowing it to the blank one would be a data-loss bug.</b>
-     * This classifies the dependencies of <em>any</em> project's pom, not only of one Studio wrote today: a
-     * bot created before 2026-09-04, and every project unpacked from a gallery template, carries the
-     * {@link #BOT_DEPENDENCIES} set. Left out of here, the SDK, the toolkit and JavaFX would read as user
-     * libraries — offered for deletion in Manage Libraries, and then genuinely dropped by
-     * {@link #writeUserLibraries}, which keeps what {@link #isDefaultDependency} recognises and discards the
-     * rest.
-     */
-    /**
-     * Coordinates {@link #BOT_DEPENDENCIES} <b>used to</b> write and no longer does — recognised here, never
-     * generated.
-     *
-     * <p>The lists above describe the pom Studio writes today; this set is why removing an entry from one of
-     * them is not enough. {@link #isDefaultDependency} classifies the pom of <em>any</em> project, and every
-     * bot created before 2026-09-06 declares these three. Dropped from the union, they would read as user
-     * libraries — offered for deletion in Manage Libraries and then genuinely discarded by
-     * {@link #writeUserLibraries}, which keeps only what is recognised. A dependency stops being written long
-     * before the last pom that has it is opened, so the two questions are separate and this set is the
-     * second one's answer.
-     */
-    private static final Set<String> RETIRED_GROUP_ARTIFACTS = Set.of(
-            // Retired 2026-09-06. The SDK brings the toolkit transitively at compile scope, and a direct
-            // entry outranked it by nearest-wins; JavaFX is parent-first in PluginLoader, so the host's own
-            // is what every plugin links. Left in an existing pom they are harmless — an unused provided
-            // dependency — and taking them out is Manage Libraries' business, not a rewrite's.
-            // The old groupId is the one every such pom actually names: the coordinate moved on 2026-10-05.
-            "com.github.LiQiyeDev:botmaker-plugin-toolkit",
-            "com.github.BotMakerDev:botmaker-plugin-toolkit",
-            "org.openjfx:javafx-controls",
-            "org.openjfx:javafx-graphics");
-
-    private static final Set<String> DEFAULT_GROUP_ARTIFACTS =
-            java.util.stream.Stream.concat(
-                            java.util.stream.Stream.concat(
-                                            BLANK_DEPENDENCIES.stream(), BOT_DEPENDENCIES.stream())
-                                    .map(d -> d.groupId() + ":" + d.artifactId()),
-                            RETIRED_GROUP_ARTIFACTS.stream())
-                    .collect(Collectors.toUnmodifiableSet());
-
-    /**
-     * Whether a pom entry is BotMaker's rather than the user's — <b>a named coordinate, or any
-     * {@code provided} dependency</b>.
-     *
-     * <p>The second arm arrived 2026-09-06 with {@code editorDependencies}, and it is the only rule that can
-     * work: what a plugin needs in the editor is declared by <em>that plugin's</em> registry entry, so the
-     * set of coordinates is open and Studio cannot hold a list of it. What it can say is that
-     * {@link #installPlugin} writes them at {@code provided} and nothing else in a bot's pom is
-     * {@code provided} — the scope means <i>present while the code is edited, absent when the bot runs</i>,
-     * which is exactly what an editor-side companion is and is nothing a user adds through Manage Libraries
-     * (that dialog writes no scope at all).
-     *
-     * <p>The cost is bounded and one-directional: a {@code provided} dependency somebody hand-added is not
-     * <em>listed</em> in Manage Libraries, so it cannot be removed there. It is not <em>lost</em> —
-     * {@link #writeUserLibraries} keeps everything this method recognises — and the failure it replaces was
-     * the other way round, a companion offered for deletion and then genuinely discarded.
-     */
-    private static boolean isDefaultDependency(Dependency d) {
-        return DEFAULT_GROUP_ARTIFACTS.contains(d.getGroupId() + ":" + d.getArtifactId())
-                || "provided".equals(d.getScope());
-    }
-
     // =========================================================================
     // POM GENERATION (Maven Model API)
     // =========================================================================
 
     /**
-     * A <b>blank</b> project's {@code pom.xml} as text — {@link #BLANK_DEPENDENCIES}, and no plugin named.
+     * A <b>blank</b> project's {@code pom.xml} as text — {@link PomDefaults#BLANK_DEPENDENCIES}, and no plugin
+     * named.
      *
      * <p>This is what project creation writes. See {@link #botPomXml} for the shape a project that wants the
-     * SDK carries, and {@link #BLANK_DEPENDENCIES} for why creation no longer writes that one.
+     * SDK carries, and {@link PomDefaults#BLANK_DEPENDENCIES} for why creation no longer writes that one.
      */
     public static String blankPomXml(ProjectConfig cfg) {
-        return pomXml(cfg, null);
+        return PomDefaults.pomXml(cfg, null);
     }
 
     /**
      * A project's {@code pom.xml} as text, <b>naming the SDK plugin</b> and everything its plugin half needs
-     * — {@link #BOT_DEPENDENCIES}, with the SDK pinned to {@code sdkVersion} (blank →
+     * — {@link PomDefaults#BOT_DEPENDENCIES}, with the SDK pinned to {@code sdkVersion} (blank →
      * {@link #SDK_FALLBACK_VERSION}).
      *
      * <p>Nothing creates a project this way since 2026-09-04. It is what {@code ProjectRepair} rebuilds a
      * missing pom as for a project that already had one, and what a test builds a bot-shaped fixture with.
      */
     public static String botPomXml(ProjectConfig cfg, String sdkVersion) {
-        return pomXml(cfg, sdkVersion == null || sdkVersion.isBlank()
+        return PomDefaults.pomXml(cfg, sdkVersion == null || sdkVersion.isBlank()
                 ? SDK_FALLBACK_VERSION : sdkVersion.trim());
-    }
-
-    /**
-     * Builds a {@code pom.xml} for the given project using the Maven Model API and returns it as text. The
-     * model is assembled as an object graph and serialized with {@link MavenXpp3Writer} — no XML string
-     * templating, so a project name with an {@code &} in it cannot produce a pom that does not parse.
-     *
-     * <p><b>{@code sdkVersion} is {@code null} for a blank project</b>, which is the one thing this method
-     * branches on: it selects {@link #BLANK_DEPENDENCIES} over {@link #BOT_DEPENDENCIES}. Null rather than
-     * blank, because blank already means "pin the fallback" to every caller that ever passed a user's typed
-     * version through, and a project with no SDK at all is a different statement from one whose version was
-     * left empty. Both public spellings above say which they mean in their names.
-     *
-     * <p>Text rather than a write, because project <em>creation</em> does not write this file itself: it
-     * hands the text to {@code Authoring.createProject}, which commits it in the same all-or-none pass as
-     * the files the SDK owns. Composing it here and committing it there is what keeps both halves — Studio
-     * knows the whole dependency set (the SDK is only one plugin), and a failed creation still leaves
-     * nothing behind.
-     */
-    private static String pomXml(ProjectConfig cfg, String resolvedSdkVersion) {
-        List<Dep> dependencies = resolvedSdkVersion == null ? BLANK_DEPENDENCIES : BOT_DEPENDENCIES;
-        Model model = new Model();
-        model.setModelVersion("4.0.0");
-        model.setGroupId("com." + cfg.packageName());
-        model.setArtifactId(cfg.projectName());
-        model.setVersion("0.0.1-SNAPSHOT");
-        model.setPackaging("jar");
-
-        Properties props = new Properties();
-        props.setProperty("maven.compiler.release", String.valueOf(JavacRelease.NEW_PROJECT));
-        props.setProperty("project.build.sourceEncoding", "UTF-8");
-        model.setProperties(props);
-
-        DEFAULT_REPOSITORIES.forEach((id, url) -> {
-            Repository repo = new Repository();
-            repo.setId(id);
-            repo.setUrl(url);
-            model.addRepository(repo);
-        });
-
-        for (Dep d : dependencies) {
-            Dependency dep = new Dependency();
-            dep.setGroupId(d.groupId());
-            dep.setArtifactId(d.artifactId());
-            boolean isSdk = SDK_GROUP_ID.equals(d.groupId()) && SDK_ARTIFACT_ID.equals(d.artifactId());
-            dep.setVersion(isSdk ? resolvedSdkVersion : d.version());
-            if (d.scope() != null) dep.setScope(d.scope());
-            model.addDependency(dep);
-        }
-
-        StringWriter out = new StringWriter();
-        try {
-            new MavenXpp3Writer().write(out, model);
-        } catch (IOException impossible) {
-            // A StringWriter does not fail. Wrapping rather than declaring keeps every caller's throws
-            // clause about the filesystem, which is the only IO any of them can do anything about.
-            throw new UncheckedIOException(impossible);
-        }
-        return out.toString();
     }
 
     /**
@@ -446,14 +197,7 @@ public final class MavenService {
 
     /** {@link #resolveClasspath(Path, ProgressReporter)}, keeping what failed. */
     public static Resolution resolve(Path projectDir, ProgressReporter progress) {
-        // A bot opened from a .bmk runs with the jars its bot.json lists, never its pom's: the pom's JitPack
-        // dependencies may be gone, which is why the file packs them (2026-10-25).
-        Optional<Resolution> unpacked = UnpackedBots.classpath(projectDir, progress);
-        if (unpacked.isPresent()) return unpacked.get();
-        Collected collected = collect(projectDir, progress);
-        List<String> jars = new ArrayList<>();
-        collectJars(collected.results(), jars);
-        return new Resolution(jars, collected.problems());
+        return MavenResolver.resolve(projectDir, progress);
     }
 
     /**
@@ -464,21 +208,7 @@ public final class MavenService {
      * @throws IOException naming the dependencies that did not resolve
      */
     public static List<BotFile.Jar> resolvedJars(Path projectDir) throws IOException {
-        Collected collected = collect(projectDir, ProgressReporter.NONE);
-        if (!collected.problems().isEmpty()) {
-            throw new IOException("Some of the bot's libraries did not resolve: "
-                    + String.join("; ", collected.problems()));
-        }
-        Map<String, BotFile.Jar> jars = new TreeMap<>();
-        for (ArtifactResult result : collected.results()) {
-            Artifact a = result.getArtifact();
-            if (a == null || a.getPath() == null || !"jar".equals(a.getExtension())) continue;
-            if (BotFiles.isNative(a.getClassifier())) continue;
-            String coordinate = a.getGroupId() + ":" + a.getArtifactId() + ":" + a.getBaseVersion()
-                    + (a.getClassifier().isEmpty() ? "" : ":" + a.getClassifier());
-            jars.putIfAbsent(coordinate, new BotFile.Jar(coordinate, a.getPath()));
-        }
-        return List.copyOf(jars.values());
+        return MavenResolver.resolvedJars(projectDir);
     }
 
     /**
@@ -498,228 +228,7 @@ public final class MavenService {
      * is already whole, a {@code .bmk}'s.
      */
     public static Fetched fetch(List<String> coordinates, ProgressReporter progress) {
-        RepositorySystem system = new RepositorySystemSupplier().get();
-        DefaultRepositorySystemSession session = newSession(system);
-        session.setTransferListener(new AbstractTransferListener() {
-            @Override
-            public void transferInitiated(TransferEvent event) {
-                progress.report(-1, "Downloading " + fileName(event.getResource()));
-            }
-        });
-        List<RemoteRepository> repositories = buildRemoteRepositories(new Model());
-        List<ArtifactRequest> requests = new ArrayList<>();
-        for (String coordinate : coordinates) {
-            String[] p = coordinate.split(":");
-            if (p.length < 3) continue;
-            requests.add(new ArtifactRequest(new DefaultArtifact(p[0], p[1], p.length > 3 ? p[3] : "", "jar", p[2]),
-                    repositories, null).setRequestContext(coordinate));
-        }
-        List<ArtifactResult> results;
-        try {
-            results = system.resolveArtifacts(session, requests);
-        } catch (ArtifactResolutionException e) {
-            results = e.getResults();
-        }
-        Map<String, Path> files = new LinkedHashMap<>();
-        for (ArtifactResult result : results) {
-            if (result.isResolved() && result.getArtifact().getPath() != null) {
-                files.put(result.getRequest().getRequestContext(), result.getArtifact().getPath());
-            }
-        }
-        List<String> missing = coordinates.stream().filter(c -> !files.containsKey(c)).toList();
-        return new Fetched(files, missing);
-    }
-
-    /** The pom's dependencies resolved, with what failed. */
-    private record Collected(List<ArtifactResult> results, List<String> problems) {}
-
-    private static Collected collect(Path projectDir, ProgressReporter progress) {
-        Path pomPath = projectDir.resolve("pom.xml");
-        if (!Files.exists(pomPath)) {
-            System.err.println("No pom.xml found at " + pomPath);
-            return new Collected(List.of(), List.of("pom.xml — not found"));
-        }
-
-        Model model;
-        try (InputStream in = Files.newInputStream(pomPath)) {
-            model = new MavenXpp3Reader().read(in);
-        } catch (Exception e) {
-            System.err.println("Failed to read pom.xml: " + e.getMessage());
-            return new Collected(List.of(), List.of("pom.xml — " + e.getMessage()));
-        }
-
-        RepositorySystem system = new RepositorySystemSupplier().get();
-        DefaultRepositorySystemSession session = newSession(system);
-        DownloadAggregator downloads = new DownloadAggregator();
-        session.setTransferListener(new AbstractTransferListener() {
-            @Override
-            public void transferInitiated(TransferEvent event) {
-                progress.report(downloads.fraction(), "Downloading " + fileName(event.getResource()));
-            }
-            @Override
-            public void transferProgressed(TransferEvent event) {
-                downloads.progressed(event.getResource(), event.getTransferredBytes());
-                progress.report(downloads.fraction(), "Downloading " + fileName(event.getResource()));
-            }
-            @Override
-            public void transferSucceeded(TransferEvent event) {
-                downloads.finished(event.getResource(), event.getTransferredBytes());
-                progress.report(downloads.fraction(), "Downloaded " + fileName(event.getResource()));
-            }
-            @Override
-            public void transferFailed(TransferEvent event) {
-                downloads.finished(event.getResource(), event.getTransferredBytes());
-            }
-        });
-
-        List<RemoteRepository> remoteRepos = buildRemoteRepositories(model);
-
-        CollectRequest collectRequest = new CollectRequest();
-        collectRequest.setRepositories(remoteRepos);
-        // Test dependencies are collected, then left out of what is resolved: they take part in choosing versions,
-        // as in Maven. Left out of the graph, a library's older JUnit won over the pom's own and a bot's .bmk from
-        // Studio differed from the one `mvn dependency:list` makes, which the catalog rebuilds (2026-10-25).
-        for (Dependency d : model.getDependencies()) {
-            if ("sources".equals(d.getClassifier())) continue;
-            String classifier = d.getClassifier() == null ? "" : d.getClassifier();
-            // A template pins its plugin as ${botmaker.sdk.version}; handed the placeholder, the resolver looked
-            // for a version of that name and the project bound no plugin at all (until 2026-10-01).
-            Artifact artifact = new DefaultArtifact(
-                    d.getGroupId(), d.getArtifactId(), classifier, "jar", versionOf(model, d));
-            String scope = d.getScope() == null ? "compile" : d.getScope();
-            collectRequest.addDependency(new org.eclipse.aether.graph.Dependency(artifact, scope, false,
-                    exclusionsOf(d)));
-        }
-        // The pom's own <dependencyManagement> pins transitive versions as Maven does. An imported BOM is not read.
-        if (model.getDependencyManagement() != null) {
-            for (Dependency d : model.getDependencyManagement().getDependencies()) {
-                if ("import".equals(d.getScope())) continue;
-                String classifier = d.getClassifier() == null ? "" : d.getClassifier();
-                Artifact artifact = new DefaultArtifact(
-                        d.getGroupId(), d.getArtifactId(), classifier, "jar", versionOf(model, d));
-                collectRequest.addManagedDependency(new org.eclipse.aether.graph.Dependency(artifact,
-                        d.getScope() == null ? "" : d.getScope(), null, exclusionsOf(d)));
-            }
-        }
-
-        DependencyRequest dependencyRequest = new DependencyRequest(collectRequest,
-                new ScopeDependencyFilter(null, List.of(JavaScopes.TEST)));
-        List<ArtifactResult> results = new ArrayList<>();
-        List<String> problems = new ArrayList<>();
-        try {
-            DependencyResult result = system.resolveDependencies(session, dependencyRequest);
-            results.addAll(result.getArtifactResults());
-        } catch (DependencyResolutionException e) {
-            System.err.println("Some dependencies failed to resolve: " + e.getMessage());
-            if (e.getResult() != null && e.getResult().getArtifactResults() != null) {
-                results.addAll(e.getResult().getArtifactResults());
-                collectProblems(e.getResult().getArtifactResults(), problems);
-            }
-            // A collection failure (a pom that is not there at all) has no artifact results to name.
-            if (problems.isEmpty()) problems.add(firstLine(e.getMessage()));
-        }
-        return new Collected(results, problems);
-    }
-
-    /** A resolver session over {@code ~/.m2}, the one every resolution here starts from. */
-    private static DefaultRepositorySystemSession newSession(RepositorySystem system) {
-        DefaultRepositorySystemSession session = MavenRepositorySystemUtils.newSession();
-        Path localRepo = Path.of(System.getProperty("user.home"), ".m2", "repository");
-        session.setLocalRepositoryManager(
-                system.newLocalRepositoryManager(session, new LocalRepository(localRepo)));
-        // Expose the JVM's system properties (notably java.version) to the model builder so POMs whose
-        // effective model depends on JDK-activated profiles resolve correctly. Without this, bytedeco's
-        // javacpp-presets parent fails ("Failed to determine Java version for profile doclint-java8-disable"),
-        // the descriptor read is silently ignored, and the whole opencv subtree — including the opencv main
-        // jar that carries org.opencv.core.Mat — is dropped from the bot's runtime classpath.
-        session.setSystemProperties(System.getProperties());
-        return session;
-    }
-
-    private static void collectProblems(List<ArtifactResult> results, List<String> out) {
-        if (results == null) return;
-        for (ArtifactResult ar : results) {
-            if (ar.isResolved() || ar.getRequest() == null || ar.getRequest().getArtifact() == null) continue;
-            Artifact a = ar.getRequest().getArtifact();
-            String reason = ar.getExceptions().isEmpty() ? "not found"
-                    : firstLine(ar.getExceptions().getFirst().getMessage());
-            out.add(a.getGroupId() + ":" + a.getArtifactId() + ":" + a.getVersion() + " — " + reason);
-        }
-    }
-
-    private static String firstLine(String message) {
-        if (message == null || message.isBlank()) return "could not be resolved";
-        int newline = message.indexOf('\n');
-        return newline < 0 ? message : message.substring(0, newline);
-    }
-
-    /**
-     * Aggregates bytes across all concurrent Aether transfers into a single overall fraction. New artifacts
-     * are discovered mid-resolve, so the denominator grows as downloads start — the fraction is honest (real
-     * bytes) but may briefly step back when a new large jar appears. Thread-safe: Aether fires transfer
-     * callbacks from worker threads.
-     */
-    private static final class DownloadAggregator {
-        /** resource identity → {transferredBytes, contentLength (-1 if unknown)} for in-flight transfers. */
-        private final Map<TransferResource, long[]> active = new java.util.IdentityHashMap<>();
-        private long completedBytes = 0;
-
-        synchronized void progressed(TransferResource resource, long transferred) {
-            active.put(resource, new long[]{transferred, resource.getContentLength()});
-        }
-
-        synchronized void finished(TransferResource resource, long transferred) {
-            long[] prev = active.remove(resource);
-            long bytes = transferred > 0 ? transferred : (prev != null ? prev[0] : 0);
-            completedBytes += Math.max(0, bytes);
-        }
-
-        /** Overall completed-fraction in [0,1], or -1 when nothing with a known size is in flight yet. */
-        synchronized double fraction() {
-            long transferred = completedBytes;
-            long total = completedBytes;
-            for (long[] v : active.values()) {
-                transferred += v[0];
-                total += Math.max(v[1], v[0]); // unknown length → count its own transferred bytes as the total
-            }
-            return total > 0 ? Math.min(1.0, (double) transferred / total) : -1;
-        }
-    }
-
-    /** The trailing file name of a transfer resource (e.g. {@code opencv-4.9.0.jar}), for progress text. */
-    private static String fileName(TransferResource resource) {
-        String name = resource.getResourceName();
-        if (name == null) return "";
-        int slash = name.lastIndexOf('/');
-        return slash >= 0 ? name.substring(slash + 1) : name;
-    }
-
-    private static void collectJars(List<ArtifactResult> results, List<String> out) {
-        if (results == null) return;
-        for (ArtifactResult ar : results) {
-            if (ar.getArtifact() != null && ar.getArtifact().getPath() != null) {
-                out.add(ar.getArtifact().getPath().toAbsolutePath().toString());
-            }
-        }
-    }
-
-    private static List<RemoteRepository> buildRemoteRepositories(Model model) {
-        Map<String, String> repos = new LinkedHashMap<>(DEFAULT_REPOSITORIES);
-        for (Repository r : model.getRepositories()) {
-            if (r.getUrl() != null) repos.put(r.getId(), r.getUrl());
-        }
-        // Disable snapshot fetching on every remote: in this project SNAPSHOT coordinates are always
-        // local-only dev builds (botmaker-sdk / botmaker-shared at their main -SNAPSHOT, installed to ~/.m2
-        // by the umbrella reactor). Letting a remote (notably jitpack) answer for a SNAPSHOT could shadow the
-        // freshly reinstalled local jar. Releases are non-SNAPSHOT, so user libraries are unaffected.
-        RepositoryPolicy noSnapshots = new RepositoryPolicy(
-                false, RepositoryPolicy.UPDATE_POLICY_NEVER, RepositoryPolicy.CHECKSUM_POLICY_WARN);
-        List<RemoteRepository> result = new ArrayList<>();
-        repos.forEach((id, url) ->
-                result.add(new RemoteRepository.Builder(id, "default", url)
-                        .setSnapshotPolicy(noSnapshots)
-                        .build()));
-        return result;
+        return MavenResolver.fetch(coordinates, progress);
     }
 
     // =========================================================================
@@ -728,16 +237,11 @@ public final class MavenService {
 
     /**
      * Reads the user-added libraries from {@code projectDir/pom.xml}: every dependency that is not one
-     * of the built-in {@link #DEFAULT_DEPENDENCIES}. Returns an empty list if the pom is missing or
-     * unreadable.
+     * of the built-in ones ({@link PomDefaults#isDefaultDependency}). Returns an empty list if the pom is missing
+     * or unreadable.
      */
     public static List<UserLibrary> readUserLibraries(Path projectDir) {
-        Model model = readModel(projectDir);
-        if (model == null) return List.of();
-        return model.getDependencies().stream()
-                .filter(d -> !isDefaultDependency(d))
-                .map(d -> new UserLibrary(d.getGroupId(), d.getArtifactId(), d.getVersion()))
-                .collect(Collectors.toList());
+        return new PomEdits(projectDir).readUserLibraries();
     }
 
     /**
@@ -747,8 +251,8 @@ public final class MavenService {
      * {@link #readUserLibraries} answers <i>what did the user add</i> — which is the right question for
      * <b>Manage Libraries</b>, whose rows are things a user may delete. It is the wrong question for
      * <b>Manage Plugins</b>, which asks <i>is this plugin installed</i>: {@code botmaker-sdk} is on
-     * {@link #DEFAULT_GROUP_ARTIFACTS}, so the one plugin that exists today was invisible to that check by
-     * construction and its row read <i>Install</i> forever. Pressing it again then appended a second
+     * {@link PomDefaults#DEFAULT_GROUP_ARTIFACTS}, so the one plugin that exists today was invisible to that
+     * check by construction and its row read <i>Install</i> forever. Pressing it again then appended a second
      * {@code botmaker-sdk} dependency, because {@link #writeUserLibraries} keeps the pom's defaults
      * <em>and</em> appends the list it is handed.
      *
@@ -759,11 +263,7 @@ public final class MavenService {
      * pom's properties, so the text may be handed to it as is.
      */
     public static List<UserLibrary> readDeclaredLibraries(Path projectDir) {
-        Model model = readModel(projectDir);
-        if (model == null) return List.of();
-        return model.getDependencies().stream()
-                .map(d -> new UserLibrary(d.getGroupId(), d.getArtifactId(), d.getVersion()))
-                .collect(Collectors.toList());
+        return new PomEdits(projectDir).readDeclaredLibraries();
     }
 
     /**
@@ -773,11 +273,7 @@ public final class MavenService {
      * meaningless to anybody outside this project — a gallery entry naming the plugins a bot requires, say.
      */
     public static Map<String, String> readProperties(Path projectDir) {
-        Model model = readModel(projectDir);
-        if (model == null) return Map.of();
-        Map<String, String> out = new LinkedHashMap<>();
-        model.getProperties().forEach((k, v) -> out.put(String.valueOf(k), String.valueOf(v)));
-        return out;
+        return new PomEdits(projectDir).readProperties();
     }
 
     /**
@@ -815,15 +311,7 @@ public final class MavenService {
      */
     public static void installPlugin(Path projectDir, UserLibrary plugin,
                                      List<UserLibrary> editorDependencies) throws IOException {
-        Model model = requireModel(projectDir);
-        model.getDependencies().removeIf(d -> sameArtifact(d, plugin.groupId(), plugin.artifactId()));
-        Dependency dep = new Dependency();
-        dep.setGroupId(plugin.groupId());
-        dep.setArtifactId(plugin.artifactId());
-        dep.setVersion(plugin.version());
-        model.getDependencies().add(dep);
-        declareProvided(model, editorDependencies);
-        writeModel(projectDir, model);
+        new PomEdits(projectDir).installPlugin(plugin, editorDependencies);
     }
 
     /**
@@ -832,27 +320,7 @@ public final class MavenService {
      */
     public static List<UserLibrary> declareCompanions(Path projectDir, List<UserLibrary> companions)
             throws IOException {
-        Model model = requireModel(projectDir);
-        List<UserLibrary> added = declareProvided(model, companions);
-        if (!added.isEmpty()) writeModel(projectDir, model);
-        return added;
-    }
-
-    private static List<UserLibrary> declareProvided(Model model, List<UserLibrary> companions) {
-        List<UserLibrary> added = new ArrayList<>();
-        for (UserLibrary companion : companions) {
-            boolean present = model.getDependencies().stream()
-                    .anyMatch(d -> sameArtifact(d, companion.groupId(), companion.artifactId()));
-            if (present) continue;
-            Dependency dep = new Dependency();
-            dep.setGroupId(companion.groupId());
-            dep.setArtifactId(companion.artifactId());
-            dep.setVersion(companion.version());
-            dep.setScope("provided");
-            model.getDependencies().add(dep);
-            added.add(companion);
-        }
-        return added;
+        return new PomEdits(projectDir).declareCompanions(companions);
     }
 
     /**
@@ -872,56 +340,7 @@ public final class MavenService {
      * May block on the network — call it off the FX thread.
      */
     public static List<Shadowed> dropShadowedPlugins(Path projectDir) throws IOException {
-        Model model = requireModel(projectDir);
-        List<Dependency> plugins = new ArrayList<>();
-        for (Dependency d : model.getDependencies()) {
-            String scope = d.getScope() == null ? "compile" : d.getScope();
-            if (!"compile".equals(scope) && !"runtime".equals(scope)) continue;
-            // A template pins its plugin as ${botmaker.basics.version}; a resolver handed the placeholder
-            // resolves nothing, and the plugin would never be seen.
-            resolveArtifact(model, d.getGroupId(), d.getArtifactId(), "", versionOf(model, d))
-                    .filter(MavenService::declaresPlugin).ifPresent(jar -> plugins.add(d));
-        }
-        if (plugins.size() < 2) return List.of();
-
-        Map<String, Set<String>> brings = new LinkedHashMap<>();
-        treesBelow(model, plugins).forEach((plugin, tree) -> brings.put(plugin, tree.keySet()));
-
-        List<Shadowed> removed = shadowed(brings);
-        if (removed.isEmpty()) return removed;
-        Set<String> gone = new java.util.HashSet<>();
-        for (Shadowed s : removed) gone.add(s.coordinate());
-        model.getDependencies().removeIf(d -> gone.contains(coordinate(d)));
-        writeModel(projectDir, model);
-        return removed;
-    }
-
-    /**
-     * Each of {@code declared}'s {@code groupId:artifactId} mapped to every coordinate in its own tree, collected
-     * one at a time so the pom's own conflict resolution cannot hide an edge. A tree that cannot be collected
-     * brings what could be read of it. May block on the network.
-     */
-    private static Map<String, Map<String, String>> treesBelow(Model model, List<Dependency> declared) {
-        RepositorySystem system = new RepositorySystemSupplier().get();
-        DefaultRepositorySystemSession session = newSession(system);
-        List<RemoteRepository> repositories = buildRemoteRepositories(model);
-        Map<String, Map<String, String>> brings = new LinkedHashMap<>();
-        for (Dependency each : declared) {
-            Map<String, String> below = new java.util.HashMap<>();
-            CollectRequest request = new CollectRequest();
-            request.setRoot(new org.eclipse.aether.graph.Dependency(new DefaultArtifact(
-                    each.getGroupId(), each.getArtifactId(), "", "jar", versionOf(model, each)), "compile"));
-            request.setRepositories(repositories);
-            try {
-                collectBelow(system.collectDependencies(session, request).getRoot(), below, true);
-            } catch (org.eclipse.aether.collection.DependencyCollectionException e) {
-                if (e.getResult() != null && e.getResult().getRoot() != null) {
-                    collectBelow(e.getResult().getRoot(), below, true);
-                }
-            }
-            brings.put(coordinate(each), below);
-        }
-        return brings;
+        return new PluginShadows(projectDir).dropShadowedPlugins();
     }
 
     /**
@@ -944,57 +363,7 @@ public final class MavenService {
      * on the network: call it off the FX thread.
      */
     public static boolean dropRedundantContract(Path projectDir, UserLibrary contract) throws IOException {
-        Model model = requireModel(projectDir);
-        Dependency direct = model.getDependencies().stream()
-                .filter(d -> sameArtifact(d, contract.groupId(), contract.artifactId()))
-                .findFirst().orElse(null);
-        if (direct == null) return false;
-        String pinned = versionOf(model, direct);
-        if (pinned == null) return false;
-
-        List<Dependency> plugins = new ArrayList<>();
-        for (Dependency d : model.getDependencies()) {
-            String scope = d.getScope() == null ? "compile" : d.getScope();
-            if (!"compile".equals(scope) && !"runtime".equals(scope)) continue;
-            if (d == direct || excludes(d, contract)) continue;
-            resolveArtifact(model, d.getGroupId(), d.getArtifactId(), "", versionOf(model, d))
-                    .filter(MavenService::declaresPlugin).ifPresent(jar -> plugins.add(d));
-        }
-        if (plugins.isEmpty()) return false;
-
-        String wanted = contract.groupId() + ":" + contract.artifactId();
-        boolean brought = treesBelow(model, plugins).values().stream()
-                .flatMap(tree -> tree.entrySet().stream())
-                .anyMatch(e -> e.getKey().equals(wanted) && notOlder(e.getValue(), pinned));
-        if (!brought) return false;
-        model.getDependencies().remove(direct);
-        writeModel(projectDir, model);
-        return true;
-    }
-
-    /** {@code d}'s {@code <exclusions>}, as the resolver applies them below it. */
-    private static List<Exclusion> exclusionsOf(Dependency d) {
-        return d.getExclusions().stream().map(x -> new Exclusion(x.getGroupId(), x.getArtifactId(), "*", "*"))
-                .toList();
-    }
-
-    private static boolean excludes(Dependency d, UserLibrary library) {
-        return d.getExclusions().stream().anyMatch(x ->
-                ("*".equals(x.getGroupId()) || library.groupId().equals(x.getGroupId()))
-                        && ("*".equals(x.getArtifactId()) || library.artifactId().equals(x.getArtifactId())));
-    }
-
-    /** Whether {@code version} is {@code pinned} or newer, a leading {@code v} ignored; false when unreadable. */
-    static boolean notOlder(String version, String pinned) {
-        if (version == null || pinned == null) return false;
-        try {
-            org.eclipse.aether.version.VersionScheme scheme = new org.eclipse.aether.util.version.GenericVersionScheme();
-            org.eclipse.aether.version.Version brought = scheme.parseVersion(version.replaceFirst("^v", ""));
-            org.eclipse.aether.version.Version ours = scheme.parseVersion(pinned.replaceFirst("^v", ""));
-            return brought.compareTo(ours) >= 0;
-        } catch (org.eclipse.aether.version.InvalidVersionSpecificationException e) {
-            return false;
-        }
+        return new PluginShadows(projectDir).dropRedundantContract(contract);
     }
 
     /** A declared plugin {@link #dropShadowedPlugins} removed, and the declared plugin that brings it. */
@@ -1015,64 +384,11 @@ public final class MavenService {
     }
 
     /**
-     * Which of {@code brings}' keys another key brings: {@code brings} maps each declared plugin's
-     * {@code groupId:artifactId} to every coordinate in its own tree. Never removes both of two plugins that
-     * claim to bring each other, which no real pom can produce but a broken one might. Pure.
-     */
-    static List<Shadowed> shadowed(Map<String, Set<String>> brings) {
-        List<Shadowed> out = new ArrayList<>();
-        Set<String> removed = new java.util.HashSet<>();
-        for (String plugin : brings.keySet()) {
-            for (Map.Entry<String, Set<String>> other : brings.entrySet()) {
-                if (other.getKey().equals(plugin) || removed.contains(other.getKey())) continue;
-                if (other.getValue().contains(plugin)) {
-                    out.add(new Shadowed(plugin, other.getKey()));
-                    removed.add(plugin);
-                    break;
-                }
-            }
-        }
-        return out;
-    }
-
-    /** Every {@code groupId:artifactId} under {@code node}, each with the version its tree resolved it at. */
-    private static void collectBelow(org.eclipse.aether.graph.DependencyNode node, Map<String, String> out,
-                                     boolean root) {
-        if (node == null) return;
-        if (!root && node.getArtifact() != null) {
-            out.putIfAbsent(node.getArtifact().getGroupId() + ":" + node.getArtifact().getArtifactId(),
-                    node.getArtifact().getVersion());
-        }
-        for (org.eclipse.aether.graph.DependencyNode child : node.getChildren()) collectBelow(child, out, false);
-    }
-
-    /** {@code d}'s version, with a whole-{@code ${property}} pin read from the pom's properties. */
-    private static String versionOf(Model model, Dependency d) {
-        String v = d.getVersion();
-        if (v == null) return null;
-        return propertyOf(v).map(model.getProperties()::getProperty).orElse(v);
-    }
-
-    private static String coordinate(Dependency d) {
-        return d.getGroupId() + ":" + d.getArtifactId();
-    }
-
-    /**
      * Declares {@code library} at {@code compile} scope unless the pom already names its coordinate, and
      * answers whether it wrote. A declared version is never moved: that is Manage Libraries' question.
      */
     public static boolean declareIfAbsent(Path projectDir, UserLibrary library) throws IOException {
-        Model model = requireModel(projectDir);
-        boolean present = model.getDependencies().stream()
-                .anyMatch(d -> sameArtifact(d, library.groupId(), library.artifactId()));
-        if (present) return false;
-        Dependency dep = new Dependency();
-        dep.setGroupId(library.groupId());
-        dep.setArtifactId(library.artifactId());
-        dep.setVersion(library.version());
-        model.getDependencies().add(dep);
-        writeModel(projectDir, model);
-        return true;
+        return new PomEdits(projectDir).declareIfAbsent(library);
     }
 
     /**
@@ -1095,37 +411,7 @@ public final class MavenService {
      */
     public static void removePlugin(Path projectDir, String groupId, String artifactId,
                                     List<UserLibrary> editorDependencies) throws IOException {
-        Model model = requireModel(projectDir);
-        model.getDependencies().removeIf(d -> sameArtifact(d, groupId, artifactId));
-        boolean stillDeclared = model.getDependencies().stream().anyMatch(d -> DuplicatePlugins.sameArtifact(
-                d.getGroupId(), d.getArtifactId(), groupId, artifactId));
-        if (stillDeclared) {
-            writeModel(projectDir, model);
-            return;
-        }
-        for (UserLibrary companion : editorDependencies) {
-            model.getDependencies()
-                    .removeIf(d -> sameArtifact(d, companion.groupId(), companion.artifactId()));
-        }
-        writeModel(projectDir, model);
-    }
-
-    private static boolean sameArtifact(Dependency d, String groupId, String artifactId) {
-        return groupId.equals(d.getGroupId()) && artifactId.equals(d.getArtifactId());
-    }
-
-    private static Model requireModel(Path projectDir) throws IOException {
-        Model model = readModel(projectDir);
-        if (model == null) {
-            throw new IOException("No pom.xml found at " + projectDir.resolve("pom.xml"));
-        }
-        return model;
-    }
-
-    private static void writeModel(Path projectDir, Model model) throws IOException {
-        try (OutputStream out = Files.newOutputStream(projectDir.resolve("pom.xml"))) {
-            new MavenXpp3Writer().write(out, model);
-        }
+        new PomEdits(projectDir).removePlugin(groupId, artifactId, editorDependencies);
     }
 
     /**
@@ -1156,22 +442,7 @@ public final class MavenService {
      * {@code ${botmaker.sdk.version}} (2026-09-24), and a resolver handed the placeholder text resolves nothing.
      */
     public static Optional<String> readDependencyVersion(Path projectDir, String groupId, String artifactId) {
-        Model model = readModel(projectDir);
-        if (model == null) return Optional.empty();
-        return model.getDependencies().stream()
-                .filter(d -> groupId.equals(d.getGroupId()) && artifactId.equals(d.getArtifactId()))
-                .map(Dependency::getVersion)
-                .filter(v -> v != null && !v.isBlank())
-                .map(v -> propertyOf(v).map(model.getProperties()::getProperty).orElse(v))
-                .findFirst();
-    }
-
-    /** {@code name} for a version written exactly {@code ${name}}, otherwise empty. */
-    private static Optional<String> propertyOf(String version) {
-        String v = version.strip();
-        return v.startsWith("${") && v.endsWith("}") && v.length() > 3
-                ? Optional.of(v.substring(2, v.length() - 1))
-                : Optional.empty();
+        return new PomEdits(projectDir).readDependencyVersion(groupId, artifactId);
     }
 
     // resolveSdkSourcesJar stood here until 2026-09-28. The API docs read every bound plugin's sources jar
@@ -1193,13 +464,13 @@ public final class MavenService {
      * The same, for a caller that has <b>no project</b> — {@code ProjectCreator}, which must know what the
      * chosen SDK contains <em>before</em> a pom exists to read repositories from.
      *
-     * <p>Resolving against an empty model is not a compromise here: {@link #buildRemoteRepositories} starts
-     * from {@link #DEFAULT_REPOSITORIES}, and those are exactly the repositories {@link #blankPomXml} is about to
-     * declare. The only thing a project pom adds is a repository the <em>user</em> put there, which by
-     * definition a project that does not exist yet has none of.
+     * <p>Resolving against an empty model is not a compromise here:
+     * {@link MavenResolver#buildRemoteRepositories} starts from {@link PomDefaults#DEFAULT_REPOSITORIES}, and those
+     * are exactly the repositories {@link #blankPomXml} is about to declare. The only thing a project pom adds is a
+     * repository the <em>user</em> put there, which by definition a project that does not exist yet has none of.
      */
     public static Optional<Path> resolveSdkJar(String version) {
-        return resolveSdkArtifact(new Model(), version, "");
+        return MavenResolver.resolveArtifact(new Model(), SDK_GROUP_ID, SDK_ARTIFACT_ID, "", version);
     }
 
     /**
@@ -1226,38 +497,9 @@ public final class MavenService {
      */
     public static Optional<Path> resolveArtifact(Path projectDir, String groupId, String artifactId,
                                                  String classifier, String version) {
-        Model model = readModel(projectDir);
+        Model model = PomModel.readModel(projectDir);
         if (model == null) return Optional.empty();
-        return resolveArtifact(model, groupId, artifactId, classifier, version);
-    }
-
-    private static Optional<Path> resolveSdkArtifact(Model model, String version, String classifier) {
-        return resolveArtifact(model, SDK_GROUP_ID, SDK_ARTIFACT_ID, classifier, version);
-    }
-
-    private static Optional<Path> resolveArtifact(Model model, String groupId, String artifactId,
-                                                  String classifier, String version) {
-        if (version == null || version.isBlank()) {
-            return Optional.empty();
-        }
-        // A pin read off the pom as written (readDeclaredLibraries) is still ${botmaker.sdk.version} text here;
-        // the pom it came from says what it means (2026-10-01: the gamebot's SDK jar never resolved).
-        String pinned = propertyOf(version).map(model.getProperties()::getProperty).orElse(version);
-        Artifact artifact = new DefaultArtifact(groupId, artifactId, classifier, "jar", pinned.trim());
-
-        RepositorySystem system = new RepositorySystemSupplier().get();
-        DefaultRepositorySystemSession session = newSession(system);
-
-        ArtifactRequest request = new ArtifactRequest();
-        request.setArtifact(artifact);
-        request.setRepositories(buildRemoteRepositories(model));
-        try {
-            ArtifactResult result = system.resolveArtifact(session, request);
-            return Optional.ofNullable(result.getArtifact().getPath());
-        } catch (ArtifactResolutionException e) {
-            System.err.println("Could not resolve artifact " + artifact + ": " + e.getMessage());
-            return Optional.empty();
-        }
+        return MavenResolver.resolveArtifact(model, groupId, artifactId, classifier, version);
     }
 
     /**
@@ -1276,32 +518,13 @@ public final class MavenService {
      * properties untouched. The pom is read, mutated and written back in place (no regeneration).
      *
      * <p><b>A blank {@code sdkVersion} pins nothing, and does not add the SDK.</b>
-     * {@link #setManagedDependencyVersion} only ever edits a dependency that is already declared, so a blank
-     * project keeps naming no plugin however often its libraries are edited — which is what makes
+     * {@link PomEdits#setManagedDependencyVersion} only ever edits a dependency that is already declared, so a
+     * blank project keeps naming no plugin however often its libraries are edited — which is what makes
      * {@code LibraryService} usable on one at all.
      */
     public static void writeUserLibraries(Path projectDir, List<UserLibrary> libs, String sdkVersion)
             throws IOException {
-        Model model = requireModel(projectDir);
-
-        // Keep the built-in deps, drop the previous user deps, then append the new ones.
-        List<Dependency> kept = model.getDependencies().stream()
-                .filter(MavenService::isDefaultDependency)
-                .collect(Collectors.toList());
-        for (UserLibrary lib : libs) {
-            Dependency dep = new Dependency();
-            dep.setGroupId(lib.groupId());
-            dep.setArtifactId(lib.artifactId());
-            dep.setVersion(lib.version());
-            kept.add(dep);
-        }
-        model.setDependencies(kept);
-
-        if (sdkVersion != null && !sdkVersion.isBlank()) {
-            setManagedDependencyVersion(model, SDK_GROUP_ID, SDK_ARTIFACT_ID, sdkVersion.trim());
-        }
-
-        writeModel(projectDir, model);
+        new PomEdits(projectDir).writeUserLibraries(libs, sdkVersion);
     }
 
     /**
@@ -1314,7 +537,7 @@ public final class MavenService {
      * the repositories, the properties — is untouched, exactly as {@link #installPlugin} leaves them.
      *
      * <p><b>It only ever re-versions what the pom already declares</b>, the same rule
-     * {@link #setManagedDependencyVersion} has always had. A coordinate that is not there is silently
+     * {@link PomEdits#setManagedDependencyVersion} has always had. A coordinate that is not there is silently
      * skipped rather than added: the window's rows are built from the pom, so a missing one means the pom
      * moved underneath the window, and quietly acquiring a dependency is the wrong answer to that.
      *
@@ -1322,41 +545,6 @@ public final class MavenService {
      */
     public static void setDependencyVersions(Path projectDir, Map<String, String> versionsByCoordinate)
             throws IOException {
-        Model model = requireModel(projectDir);
-        versionsByCoordinate.forEach((coordinate, version) -> {
-            if (version == null || version.isBlank()) return;
-            int colon = coordinate.indexOf(':');
-            if (colon <= 0 || colon == coordinate.length() - 1) return;
-            setManagedDependencyVersion(model, coordinate.substring(0, colon),
-                    coordinate.substring(colon + 1), version.trim());
-        });
-        writeModel(projectDir, model);
-    }
-
-    /**
-     * Sets the version of the matching dependency already present in the model (no-op if absent). A pin
-     * written as {@code ${property}} the pom declares moves the property, so the pom keeps its spelling.
-     */
-    private static void setManagedDependencyVersion(Model model, String groupId, String artifactId,
-                                                    String version) {
-        for (Dependency d : model.getDependencies()) {
-            if (groupId.equals(d.getGroupId()) && artifactId.equals(d.getArtifactId())) {
-                Optional<String> property = d.getVersion() == null ? Optional.empty() : propertyOf(d.getVersion())
-                        .filter(model.getProperties()::containsKey);
-                if (property.isPresent()) model.getProperties().setProperty(property.get(), version);
-                else d.setVersion(version);
-            }
-        }
-    }
-
-    private static Model readModel(Path projectDir) {
-        Path pomPath = projectDir.resolve("pom.xml");
-        if (!Files.exists(pomPath)) return null;
-        try (InputStream in = Files.newInputStream(pomPath)) {
-            return new MavenXpp3Reader().read(in);
-        } catch (Exception e) {
-            System.err.println("Failed to read pom.xml: " + e.getMessage());
-            return null;
-        }
+        new PomEdits(projectDir).setDependencyVersions(versionsByCoordinate);
     }
 }

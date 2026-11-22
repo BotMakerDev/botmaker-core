@@ -30,7 +30,8 @@ per user.
   (`MavenService`), `config`, `events` (`EventBus`), and the parts of `project.managed`, `project.params`,
   `project.vcs`, `sharing`, `runtime` and `parser.refactor` those need. Studio's `/botmaker/host.properties` is read
   by `config.AppVersion` and `HostContract` from the classpath: in-process it is Studio's; the core's own process
-  (phase 10) needs its own.
+  (phase 10) needs its own. `ProjectVcs` and `MavenService` are the public methods only (2026-11-22), over
+  package-private classes beside them: `Git*` by what git is asked, `Pom*`, `PluginShadows` and `MavenResolver`.
 - The edit engine came too (phase 6b, 2026-11-05): `parser` (`CodeEditor`, its handlers, factories and guard),
   `state`, `project.managed`, `project.params`, `migrate`, `index`, part of `validation` and `nav`. `CodeEditor` reports
   through `parser.EditorOutput`, which `server.OpenProject` tells its clients (Studio's tests: `BusEditorOutput`). It is

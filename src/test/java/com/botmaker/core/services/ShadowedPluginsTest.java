@@ -25,9 +25,9 @@ class ShadowedPluginsTest {
         brings.put("g:basics", Set.of("g:studio-api"));
         brings.put("g:sdk", Set.of("g:basics", "g:studio-api", "g:shared"));
 
-        assertEquals(List.of(new MavenService.Shadowed("g:basics", "g:sdk")), MavenService.shadowed(brings));
+        assertEquals(List.of(new MavenService.Shadowed("g:basics", "g:sdk")), PluginShadows.shadowed(brings));
         assertEquals("basics is brought by sdk, so its own entry was removed.",
-                MavenService.Shadowed.sentence(MavenService.shadowed(brings)));
+                MavenService.Shadowed.sentence(PluginShadows.shadowed(brings)));
     }
 
     @Test
@@ -36,7 +36,7 @@ class ShadowedPluginsTest {
         brings.put("g:a", Set.of("x:lib"));
         brings.put("g:b", Set.of("x:lib"));
 
-        assertEquals(List.of(), MavenService.shadowed(brings));
+        assertEquals(List.of(), PluginShadows.shadowed(brings));
         assertEquals("", MavenService.Shadowed.sentence(List.of()));
     }
 
@@ -46,6 +46,6 @@ class ShadowedPluginsTest {
         brings.put("g:a", Set.of("g:b"));
         brings.put("g:b", Set.of("g:a"));
 
-        assertEquals(1, MavenService.shadowed(brings).size());
+        assertEquals(1, PluginShadows.shadowed(brings).size());
     }
 }

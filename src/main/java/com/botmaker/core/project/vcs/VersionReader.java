@@ -59,7 +59,7 @@ public final class VersionReader {
         try (Git git = vcs.open(); DiffFormatter fmt = new DiffFormatter(OutputStream.nullOutputStream())) {
             Repository repo = git.getRepository();
             String oldPath = path;
-            for (DiffEntry e : ProjectVcs.entries(repo, fmt, sha, null)) {
+            for (DiffEntry e : GitVersions.entries(repo, fmt, sha, null)) {
                 if (path.equals(e.getNewPath()) && e.getChangeType() != DiffEntry.ChangeType.DELETE) {
                     oldPath = e.getChangeType() == DiffEntry.ChangeType.ADD ? path : e.getOldPath();
                     break;

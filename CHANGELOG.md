@@ -19,6 +19,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   after the move.
 - Nothing the user sees: `CodeEditor` is split by kind of edit (`EditGate`, `MemberEdits`, `ExpressionEdits`,
   `CallEdits`, `SlotEdits`, `StatementEdits`, `SwitchEdits`, package-private) and keeps its public methods.
+- Nothing the user sees: `ProjectVcs` is split by what git is asked (`GitFolder`, `GitVersions`, `GitMerges`,
+  `GitBranches`, `GitRemotes`, `GitTransfer`, `GitTags`) and `MavenService` by what is done to a pom (`PomModel`,
+  `PomDefaults`, `PomEdits`, `PluginShadows`, `MavenResolver`), all package-private; both keep their public methods.
 
 ### Fixed
 
