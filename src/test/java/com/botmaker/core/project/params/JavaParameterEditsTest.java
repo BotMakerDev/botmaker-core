@@ -5,7 +5,6 @@ package com.botmaker.core.project.params;
 
 import com.botmaker.core.project.params.TestValues;
 import com.botmaker.core.project.params.JavaParameterEdits;
-import com.botmaker.core.project.params.Visibility;
 import com.botmaker.core.project.params.JavaParameterSource;
 import com.botmaker.core.project.params.JavaParameter;
 import com.botmaker.java.grammar.JavaValue;
@@ -197,15 +196,6 @@ class JavaParameterEditsTest {
     // ---- annotation members ---------------------------------------------------------------------------
 
     @Test
-    void aMemberIsAddedToAnAnnotationThatHasOthers() {
-        String edited = JavaParameterEdits.setMembers(SOURCE, "Parameters", "maxAttempts",
-                Map.of("visibility", "public"));
-
-        assertTrue(edited.contains("description = \"Tries\""), edited);
-        assertTrue(edited.contains("@Param(description = \"Tries\", visibility = Param.PUBLIC)"), edited);
-    }
-
-    @Test
     void aBareParamGrowsMembersWhenOneIsSet() {
         String edited = JavaParameterEdits.setMembers(SOURCE, "Parameters", "restBetween",
                 Map.of("description", "Timing"));
@@ -264,6 +254,31 @@ class JavaParameterEditsTest {
         assertEquals(List.of("maxAttempts"), JavaParameterEdits.stripRemovedMembers(field).fields());
     }
 
+    /** A visibility went in 0.20 (2026-11-22): off a group, its methods' Shown and a field, which is left bare. */
+    @Test
+    void stripRemovedMembersTakesVisibility() {
+        String group = """
+                package com.example.bot.params.bot;
+
+                import com.botmaker.plugin.api.params.Param;
+
+                @Param(visibility = "public", description = "The run's own")
+                public class Running {
+
+                    @Param.Shown(visibility = Param.PUBLIC, description = "How many times")
+                    public int tries() { return 3; }
+                }
+                """;
+        JavaParameterEdits.Stripped stripped = JavaParameterEdits.stripRemovedMembers(group);
+
+        assertFalse(stripped.source().contains("visibility"), stripped.source());
+        assertEquals(List.of("Running", "tries"), stripped.fields());
+
+        String field = SOURCE.replace("@Param(description = \"Tries\")", "@Param(visibility = Param.PUBLIC)");
+        String bare = JavaParameterEdits.stripRemovedMembers(field).source();
+        assertFalse(bare.contains("visibility") || bare.contains("@Param("), bare);
+    }
+
     // ---- adding and removing --------------------------------------------------------------------------
 
     @Test
@@ -302,18 +317,6 @@ class JavaParameterEditsTest {
 
         assertFalse(edited.contains("\t"), edited);
         assertTrue(edited.contains("\n    public static String label = \"hello\";"), edited);
-    }
-
-    @Test
-    void aPublicVisibilityIsWrittenAsTheAnnotationsConstant() {
-        String edited = JavaParameterEdits.setMembers(SOURCE, "Parameters", "maxAttempts",
-                Map.of("visibility", "public"));
-
-        assertTrue(edited.contains("visibility = Param.PUBLIC"), edited);
-        assertFalse(edited.contains("\"public\""), edited);
-        JavaParameter parameter = JavaParameterSource.read(null, edited, TestValues.GRAMMAR).stream()
-                .filter(p -> p.name().equals("maxAttempts")).findFirst().orElseThrow();
-        assertEquals(Visibility.PUBLIC, parameter.row().visibility());
     }
 
     @Test

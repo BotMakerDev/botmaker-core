@@ -14,7 +14,6 @@ import com.botmaker.core.run.claims.RunRegistry.LiveRun;
 import com.botmaker.java.grammar.JavaValue;
 import com.botmaker.java.grammar.ValueGrammar;
 import com.botmaker.java.index.PoolReader;
-import com.botmaker.plugin.api.params.Param;
 import com.botmaker.plugin.api.run.PluginPool;
 import com.botmaker.plugin.api.source.ManagedParam;
 import com.botmaker.plugin.api.source.ManagedValue;
@@ -267,9 +266,9 @@ class DealerTest {
     }
 
     static final ManagedParam<Boolean> SETUP = ManagedValue.param(TestValue.Id.DO_SETUP).in(TestValue.Holder.SDK)
-            .startsAs(DealerTest::yes).shown("Setup", Param.Visibility.EDITOR).because("Mine.");
+            .startsAs(DealerTest::yes).shown("Setup").because("Mine.");
     static final ManagedParam<Boolean> PAUSE = ManagedValue.param(TestValue.Id.PAUSE).in(TestValue.Holder.SDK)
-            .startsAs(DealerTest::yes).shown("Pause", Param.Visibility.EDITOR).because("Mine.");
+            .startsAs(DealerTest::yes).shown("Pause").because("Mine.");
 
     private static PoolReader.Reading reading(String method, String parameter, String... elements) {
         List<JavaValue> values = new ArrayList<>();

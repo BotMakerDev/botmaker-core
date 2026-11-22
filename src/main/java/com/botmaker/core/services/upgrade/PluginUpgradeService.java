@@ -18,6 +18,7 @@ import com.botmaker.core.project.ProjectState;
 import com.botmaker.core.project.UserLibrary;
 import com.botmaker.core.project.managed.ManagedRepairs;
 import com.botmaker.core.project.managed.MigrationSteps;
+import com.botmaker.core.project.params.FieldAudience;
 import com.botmaker.core.project.params.FieldParameters;
 import com.botmaker.core.project.params.JavaParameters;
 import com.botmaker.java.index.BotIndex;
@@ -37,6 +38,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -381,6 +383,11 @@ public final class PluginUpgradeService {
         return repair(movedTo(versions), "the move to " + String.join(", ", versions.values()));
     }
 
+    /** Who saw the bot's {@code @Param} fields, read before {@link #stripRemovedParamMembers} takes that off them. */
+    public FieldAudience fieldAudience() {
+        return FieldAudience.of(config, state);
+    }
+
     /** {@link JavaParameters#stripRemovedMembers} over this project: one sentence per file it changed. */
     public List<String> stripRemovedParamMembers() {
         return JavaParameters.stripRemovedMembers(config, state);
@@ -391,12 +398,19 @@ public final class PluginUpgradeService {
      * first with a contract that takes {@code @Param} on a class (2026-11-04). Written like {@link #repairCode}: never
      * refuses, and what it cannot do stays as written and is said back.
      */
-    public Values repairFieldParameters(Map<String, String> versions) {
+    public Values repairFieldParameters(Map<String, String> versions, FieldAudience audience) {
         Optional<List<String>> target = movedTo(versions);
-        if (target.isEmpty()) return Values.NOTHING;
+        if (target.isEmpty()) {
+            // Their visibility is already off, so what it said is said back rather than lost.
+            return audience.shown().isEmpty() ? Values.NOTHING : new Values(0, List.of(),
+                    List.of("The fields its users set stay fields, since the libraries the bot moves to could not be"
+                            + " read, and a later upgrade makes each a constant: move them to params/ by hand: "
+                            + String.join(", ", new TreeSet<>(audience.shown())) + "."), List.of());
+        }
         FieldParameters.Plan plan;
         try {
-            plan = FieldParameters.plan(config, BotSources.index(config, state).against(target.get()), PluginHost.grammar());
+            plan = FieldParameters.plan(config, BotSources.index(config, state).against(target.get()),
+                    PluginHost.grammar(), audience);
         } catch (RuntimeException e) {
             return new Values(0, List.of(), List.of("This bot's @Param fields were left as written: " + e + "."),
                     List.of());

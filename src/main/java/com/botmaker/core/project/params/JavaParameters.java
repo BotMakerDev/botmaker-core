@@ -4,7 +4,6 @@
 package com.botmaker.core.project.params;
 
 import com.botmaker.core.project.params.JavaParameterEdits;
-import com.botmaker.core.project.params.Visibility;
 import com.botmaker.core.project.params.ParameterRow;
 import com.botmaker.core.project.params.JavaParameterSource;
 import com.botmaker.core.project.params.JavaParameter;
@@ -248,7 +247,7 @@ public final class JavaParameters {
     }
 
     /**
-     * Applies {@code wanted} to the field {@code parameter} names — name, type, category, note, visibility,
+     * Applies {@code wanted} to the field {@code parameter} names — name, type, category, note,
      * bounds, choices and value, each through the edit that owns it.
      *
      * <p><b>Only what differs is written, and the order matters.</b> The name first, because everything
@@ -346,13 +345,6 @@ public final class JavaParameters {
         Map<String, String> members = new LinkedHashMap<>();
         if (!wanted.description().equals(before.description())) {
             members.put("description", wanted.description());
-        }
-        if (wanted.visibility() != before.visibility()) {
-            // The annotation spells a visibility as the plugin's own id string — the contract's enum is off a
-            // bot's classpath — and EDITOR is the default, so the editor-only case removes the member rather
-            // than writing the default down.
-            members.put("visibility", wanted.visibility() == Visibility.PUBLIC
-                    ? Visibility.PUBLIC.id() : "");
         }
         if (!members.isEmpty()) {
             setMembers(config, state, held, members);
@@ -1180,8 +1172,8 @@ public final class JavaParameters {
 
     /**
      * Takes {@code @Param}'s removed members ({@code min}, {@code max}, {@code options}, 2026-10-29; {@code category},
-     * 2026-11-05, also off {@code @Param.Shown}) off every field, group and group method in the bot, so an older bot
-     * compiles against the current contract. Answers one sentence per file changed, naming what changed; none when
+     * 2026-11-05, and {@code visibility}, 2026-11-22, both also off {@code @Param.Shown}) off every field, group and
+     * group method in the bot, so an older bot compiles against the current contract. Answers one sentence per file changed, naming what changed; none when
      * there was nothing to take off. Run by the upgrade pass.
      */
     public static List<String> stripRemovedMembers(ProjectConfig config, ProjectState state) {
@@ -1191,7 +1183,7 @@ public final class JavaParameters {
             if (!source.contains("Param")) return null;   // a cheap skip; the parse decides what an @Param is
             JavaParameterEdits.Stripped stripped = JavaParameterEdits.stripRemovedMembers(source);
             if (stripped.fields().isEmpty()) return null;
-            said.add("@Param no longer takes min, max, options or category; removed from "
+            said.add("@Param no longer takes min, max, options, category or visibility; removed from "
                     + String.join(", ", stripped.fields())
                     + " in " + visited.getFileName() + ".");
             return stripped.source();

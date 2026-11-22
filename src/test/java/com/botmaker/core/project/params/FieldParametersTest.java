@@ -12,6 +12,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.net.URISyntaxException;
 import java.nio.file.Path;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -54,11 +55,32 @@ class FieldParametersTest {
         return config.mainPackageDir().resolve(name + ".java").toAbsolutePath().normalize();
     }
 
+    /** The plan as an upgrade makes it: the audience read, then the visibility stripped, then the fields moved. */
     private static FieldParameters.Plan plan(ProjectConfig config, Map<String, String> sources) {
+        Set<String> shown = new HashSet<>();
         Map<Path, String> files = new LinkedHashMap<>();
-        sources.forEach((name, text) -> files.put(source(config, name), text));
+        sources.forEach((name, text) -> {
+            shown.addAll(FieldAudience.read(text).shown());
+            files.put(source(config, name), JavaParameterEdits.stripRemovedMembers(text).source());
+        });
         return FieldParameters.plan(config, BotIndex.over(files, List.of(locationOf(Param.class)), config.sourceRoot()),
-                GRAMMAR);
+                GRAMMAR, new FieldAudience(shown));
+    }
+
+    @Test
+    void anAudienceReadsTheConstantAndTheStringAndNamesEachField() {
+        FieldAudience audience = FieldAudience.read("""
+                import com.botmaker.plugin.api.params.Param;
+
+                class Parameters {
+                    @Param(visibility = Param.PUBLIC) public static int a = 1, b = 2;
+                    @Param(visibility = "public") public static int c = 3;
+                    @Param(visibility = Param.EDITOR) public static int d = 4;
+                    @Param public static int e = 5;
+                }
+                """);
+
+        assertEquals(Set.of("Parameters.a", "Parameters.b", "Parameters.c"), audience.shown());
     }
 
     @Test

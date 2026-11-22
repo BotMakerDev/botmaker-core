@@ -5,6 +5,19 @@ All notable changes to `botmaker-core`.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this module uses
 [semantic versioning](https://semver.org/). `release.sh` refuses to cut a version with no section here.
 
+## [Unreleased]
+
+### Removed
+
+- A parameter's visibility, which the contract no longer has: `ParameterRow.visibility`, `isPublic` and `Visibility`.
+  An upgrade and *Migrate first* take `visibility = …` off a bot's `@Param` and `@Param.Shown`, after reading which
+  fields it named public: those become parameters, every other field a constant of its author, as before.
+
+### Changed
+
+- *Migrate first* also moves a bot's public `@Param` fields to `params/`, since which ones are public is not written
+  after the move.
+
 ## [0.3.1] — 2026-11-22
 
 ### Added

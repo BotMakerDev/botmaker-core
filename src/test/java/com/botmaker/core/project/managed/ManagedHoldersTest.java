@@ -228,10 +228,10 @@ class ManagedHoldersTest {
     }
 
     private static final ManagedValue<Boolean> DO_SETUP = ManagedValue.param(TestValue.Id.DO_SETUP).in(TestValue.Holder.SDK)
-            .startsAs(ManagedHoldersTest::setUpFirst).shown("Set up first",Param.Visibility.PUBLIC).because("Mine.");
+            .startsAs(ManagedHoldersTest::setUpFirst).shown("Set up first").because("Mine.");
 
     private static final ManagedValue<java.time.Duration> PAUSE = ManagedValue.param(TestValue.Id.PAUSE).in(TestValue.Holder.SDK)
-            .startsAs(ManagedHoldersTest::noPause).shown("",Param.Visibility.EDITOR).because("Mine.");
+            .startsAs(ManagedHoldersTest::noPause).shown("").because("Mine.");
 
     /**
      * A plugin's parameters are methods of its group in {@code params/}, beside the holder's folder (2026-11-04):
@@ -368,7 +368,7 @@ class ManagedHoldersTest {
     @Test
     void anUnwritableParameterCostsOnlyItself() {
         ManagedValue<java.awt.Point> spot = ManagedValue.param(TestValue.Id.MINE).in(TestValue.Holder.SDK)
-                .startsAs(ManagedHoldersTest::somewhere).shown("",Param.Visibility.EDITOR).because("Mine.");
+                .startsAs(ManagedHoldersTest::somewhere).shown("").because("Mine.");
         List<ManagedValue<?>> declared = List.of(DECLARED.getFirst(), spot);
         String source = assertInstanceOf(ManagedHolders.Plan.Write.class, ManagedHolders.plan(
                 ProjectConfig.forDirectory(dir.resolve("bot")), SDK, DECLARED.getFirst(), declared,
@@ -385,7 +385,7 @@ class ManagedHoldersTest {
     @Test
     void anEmptySetOfClassesParameterIsWritten() {
         ManagedValue<java.util.Set<Class<? extends TestOutcome>>> skip = ManagedValue.param(TestValue.Id.NAMES)
-                .in(TestValue.Holder.SDK).startsAs(ManagedHoldersTest::skipNothing).shown("Skipped",Param.Visibility.PUBLIC)
+                .in(TestValue.Holder.SDK).startsAs(ManagedHoldersTest::skipNothing).shown("Skipped")
                 .because("Mine.");
         String had = """
                 package com.bot.params.com_github_botmakerdev.botmaker_sdk;

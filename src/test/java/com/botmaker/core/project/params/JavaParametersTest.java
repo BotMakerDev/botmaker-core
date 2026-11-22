@@ -5,7 +5,6 @@ package com.botmaker.core.project.params;
 
 import com.botmaker.core.project.params.TestValues;
 import com.botmaker.core.project.params.JavaParameterEdits;
-import com.botmaker.core.project.params.Visibility;
 import com.botmaker.core.project.params.ParameterRow;
 import com.botmaker.core.project.params.JavaParameter;
 import com.botmaker.plugin.api.params.Param;
@@ -584,7 +583,6 @@ class JavaParametersTest {
         JavaParameter entry = only(config);
         ParameterRow wanted = entry.row().toBuilder()
                 .description("Attempts before it gives up")
-                .visibility(Visibility.PUBLIC)
                 .build();
         Optional<ParameterRow> stored =
                 JavaParameters.declare(config, null, entry, wanted, entry.form(), TestValues.GRAMMAR).stored();
@@ -592,8 +590,6 @@ class JavaParametersTest {
         assertTrue(stored.isPresent());
         String source = Files.readString(config.mainPackageDir().resolve("Parameters.java"));
         assertTrue(source.contains("description = \"Attempts before it gives up\""), source);
-        assertTrue(source.contains("visibility = Param.PUBLIC"), source);
-        assertEquals(Visibility.PUBLIC, stored.get().visibility());
     }
 
     /** The class is the category (2026-11-05): an edit that refiles a parameter is refused, and nothing is written. */
@@ -838,7 +834,7 @@ class JavaParametersTest {
 
     private static ParameterRow renamed(ParameterRow row, String name) {
         return ParameterRow.named(name, row.typeName()).value(row.value()).description(row.description())
-                .category(row.category()).visibility(row.visibility()).build();
+                .category(row.category()).build();
     }
 
     private static String parameters(String fields) {

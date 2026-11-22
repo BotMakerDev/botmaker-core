@@ -495,7 +495,7 @@ public final class JavaParameterEdits {
                 }
                 MemberValuePair replacement = ast.newMemberValuePair();
                 replacement.setName(ast.newSimpleName(entry.getKey()));
-                replacement.setValue(memberValue(ast, existing, entry.getKey(), entry.getValue()));
+                replacement.setValue(memberValue(ast, entry.getKey(), entry.getValue()));
                 if (present != null) {
                     pairs.replace(present, replacement, null);
                 } else {
@@ -508,9 +508,9 @@ public final class JavaParameterEdits {
     /**
      * The {@code @Param} members the contract removed: {@code min}, {@code max} and {@code options} in 0.14
      * (2026-10-29), rules about the value, not the field; {@code category} in 0.15 (2026-11-05), since the group class
-     * is the category. {@code @Param.Shown} lost {@code category} too.
+     * is the category; {@code visibility} in 0.20 (2026-11-22). {@code @Param.Shown} lost the last two too.
      */
-    public static final Set<String> REMOVED_MEMBERS = Set.of("min", "max", "options", "category");
+    public static final Set<String> REMOVED_MEMBERS = Set.of("min", "max", "options", "category", "visibility");
 
     /**
      * {@code source} with {@link #REMOVED_MEMBERS} taken off every {@code @Param} and {@code @Param.Shown} in it, and
@@ -550,18 +550,27 @@ public final class JavaParameterEdits {
                 : new Stripped(AstRewriteHelper.applyRewrite(rewrite, source), List.copyOf(fields));
     }
 
-    /** Removes {@link #REMOVED_MEMBERS} from {@code annotation} in {@code rewrite}; true when it held one. */
+    /**
+     * Removes {@link #REMOVED_MEMBERS} from {@code annotation} in {@code rewrite}, which is written bare when nothing
+     * is left; true when it held one.
+     */
     private static boolean strip(ASTRewrite rewrite, Annotation annotation) {
         if (!(annotation instanceof NormalAnnotation normal)) return false;
-        ListRewrite pairs = rewrite.getListRewrite(normal, NormalAnnotation.VALUES_PROPERTY);
-        boolean any = false;
+        List<MemberValuePair> removed = new ArrayList<>();
         for (Object each : normal.values()) {
             MemberValuePair pair = (MemberValuePair) each;
-            if (!REMOVED_MEMBERS.contains(pair.getName().getIdentifier())) continue;
-            pairs.remove(pair, null);
-            any = true;
+            if (REMOVED_MEMBERS.contains(pair.getName().getIdentifier())) removed.add(pair);
         }
-        return any;
+        if (removed.isEmpty()) return false;
+        if (removed.size() == normal.values().size()) {
+            MarkerAnnotation bare = normal.getAST().newMarkerAnnotation();
+            bare.setTypeName((Name) JavaLevel.copy(normal.getAST(), normal.getTypeName()));
+            rewrite.replace(normal, bare, null);
+            return true;
+        }
+        ListRewrite pairs = rewrite.getListRewrite(normal, NormalAnnotation.VALUES_PROPERTY);
+        removed.forEach(pair -> pairs.remove(pair, null));
+        return true;
     }
 
     /**
@@ -751,15 +760,9 @@ public final class JavaParameterEdits {
     }
 
     /**
-     * A member's value as the author would write it: a string literal, except a visibility the annotation has
-     * a constant for, which is written {@code Param.PUBLIC}.
-     *
-     * <p>The annotation declares {@code PUBLIC} and {@code EDITOR} precisely so nobody types the string, and
-     * {@link JavaParameterSource} reads the constant back as the same id — so the field this window writes
-     * reads like the ones beside it rather than like a tool wrote it. The qualifier is the annotation's own
-     * name <i>as written</i>, so a file that imports {@code Param} and one that spells it out both compile.
+     * A member's value as the author would write it: a string literal, or a number for a bound.
      */
-    private static Expression memberValue(AST ast, Annotation annotation, String member, String value) {
+    private static Expression memberValue(AST ast, String member, String value) {
         if (member.equals("min") || member.equals("max")) {
             // Numbers since 2026-09-22, when @Param's bounds became double: a string here would not compile.
             String digits = value.strip();
@@ -771,14 +774,6 @@ public final class JavaParameterEdits {
             minus.setOperator(org.eclipse.jdt.core.dom.PrefixExpression.Operator.MINUS);
             minus.setOperand(number);
             return minus;
-        }
-        if (member.equals("visibility")) {
-            String constant = value.equals(Visibility.PUBLIC.id()) ? "PUBLIC"
-                    : value.equals(Visibility.EDITOR_ONLY.id()) ? "EDITOR" : null;
-            if (constant != null) {
-                return ast.newQualifiedName(ast.newName(annotation.getTypeName().getFullyQualifiedName()),
-                        ast.newSimpleName(constant));
-            }
         }
         StringLiteral literal = ast.newStringLiteral();
         literal.setLiteralValue(value);

@@ -185,7 +185,7 @@ class ProjectUpgradeTest {
             import com.botmaker.plugin.api.params.Param;
 
             public class Subject1 {
-                @Param(category = "Limits", min = 1)
+                @Param(category = "Limits", min = 1, visibility = Param.PUBLIC)
                 public static int attempts = 3;
             }
             """;
@@ -207,10 +207,11 @@ class ProjectUpgradeTest {
 
             String source = Files.readString(root.resolve("project/src/main/java/com/mybot/Subject1.java"));
             assertFalse(source.contains("min ="), source);
+            assertFalse(source.contains("visibility"), source);
             assertFalse(source.contains("category ="), "the group is the category since 2026-11-05: " + source);
             assertTrue(source.contains("public static int attempts = 3;"), source);
             assertTrue(result.filesRewritten() >= 1, result.summary());
-            assertTrue(result.summary().contains("attempts"), result.summary());
+            assertTrue(result.summary().contains("removed from attempts in Subject1.java."), result.summary());
         }
     }
 

@@ -7,7 +7,6 @@ import com.botmaker.core.project.managed.TestValue;
 import com.botmaker.core.run.claims.RunRegistry.Hold;
 import com.botmaker.core.run.claims.RunRegistry.LiveRun;
 import com.botmaker.java.grammar.ValueGrammar;
-import com.botmaker.plugin.api.params.Param;
 import com.botmaker.plugin.api.run.LiveRuns;
 import com.botmaker.plugin.api.run.PluginPool;
 import com.botmaker.plugin.api.source.ManagedParam;
@@ -32,7 +31,7 @@ class RegistryHoldsTest {
     }
 
     static final ManagedParam<Boolean> SETUP = ManagedValue.param(TestValue.Id.DO_SETUP).in(TestValue.Holder.SDK)
-            .startsAs(RegistryHoldsTest::yes).shown("Setup", Param.Visibility.EDITOR).because("Mine.");
+            .startsAs(RegistryHoldsTest::yes).shown("Setup").because("Mine.");
 
     @TempDir
     Path dir;

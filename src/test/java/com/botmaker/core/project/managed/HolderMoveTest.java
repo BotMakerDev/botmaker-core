@@ -153,9 +153,9 @@ class HolderMoveTest {
     /** The SDK's {@code Sdk} holder with a value and a parameter, and its parameter-only group {@code Values}. */
     private static final List<ManagedValue<?>> WITH_PARAMS = List.of(DECLARED.getFirst(),
             ManagedValue.param(TestValue.Id.DO_SETUP).in(TestValue.Holder.VALUES).startsAs(HolderMoveTest::setup)
-                    .shown("Setup", null).because("Mine."),
+                    .shown("Setup").because("Mine."),
             ManagedValue.param(TestValue.Id.PAUSE).in(TestValue.Holder.SDK).startsAs(HolderMoveTest::setup)
-                    .shown("Pause", null).because("Mine."));
+                    .shown("Pause").because("Mine."));
     private static final List<PluginFiles.Holder> WITH_GROUPS = List.of(
             new PluginFiles.Holder(SDK, "SDK", "com_github_botmakerdev.botmaker_sdk", "Sdk", WITH_PARAMS),
             new PluginFiles.Holder(SDK, "SDK", "com_github_botmakerdev.botmaker_sdk", "Values", WITH_PARAMS));

@@ -4,7 +4,6 @@
 package com.botmaker.core.project.params;
 
 import com.botmaker.core.project.params.JavaParameterEdits;
-import com.botmaker.core.project.params.Visibility;
 import com.botmaker.core.project.params.JavaParameterSource;
 import com.botmaker.core.project.params.JavaParameter;
 import com.botmaker.plugin.api.params.Param;
@@ -60,8 +59,9 @@ import java.util.Set;
 /**
  * Studio's upgrade of a bot's own {@code @Param} fields, the form before groups (2026-11-04, plan
  * {@code 2026-11-04-private-values.md} phase 6c): each becomes one method of {@code params/bot/<Class>.java} and its
- * starting copy, at the field's current value, and every read of it calls the method. A field that is not
- * {@code Param.PUBLIC} only the author sets, so it is no parameter: it stays where it is, a plain constant.
+ * starting copy, at the field's current value, and every read of it calls the method. A field its
+ * {@link FieldAudience} does not show only the author sets, so it is no parameter: it stays where it is, a plain
+ * constant.
  *
  * <p>A field the bot's code assigns stays a field and is said back: a method cannot take the assignment, and what a
  * run sets is written by the plugin that offers it, which Studio does not name. So does one whose value needs its
@@ -105,8 +105,11 @@ public final class FieldParameters {
     /** One field the upgrade looks at, with every use of it. */
     private record Field(JavaParameter parameter, int start, List<Usages.Usage> uses, Path file) {}
 
-    /** The upgrade of {@code index}'s own {@code @Param} fields; {@code index} is the bot on the classpath it moves to. */
-    public static Plan plan(ProjectConfig config, BotIndex index, ValueGrammar grammar) {
+    /**
+     * The upgrade of {@code index}'s own {@code @Param} fields; {@code index} is the bot on the classpath it moves to,
+     * {@code audience} what its fields said before the visibility came off them.
+     */
+    public static Plan plan(ProjectConfig config, BotIndex index, ValueGrammar grammar, FieldAudience audience) {
         List<Field> fields = new ArrayList<>();
         List<String> left = new ArrayList<>();
         for (JavaParameter parameter : JavaParameters.over(index, grammar)) {
@@ -122,7 +125,7 @@ public final class FieldParameters {
         }
         if (fields.isEmpty()) return Plan.leaving(left);
 
-        Plan plan = index.read(units -> over(config, index, grammar, units, fields, left));
+        Plan plan = index.read(units -> over(config, index, grammar, audience, units, fields, left));
         if (plan.isEmpty()) return plan;
         Map<Path, String> checked = new LinkedHashMap<>(plan.rewrites());
         plan.deleted().forEach(gone -> checked.put(gone, ""));
@@ -137,7 +140,7 @@ public final class FieldParameters {
         return plan;
     }
 
-    private static Plan over(ProjectConfig config, BotIndex index, ValueGrammar grammar,
+    private static Plan over(ProjectConfig config, BotIndex index, ValueGrammar grammar, FieldAudience audience,
                              Map<Path, CompilationUnit> units, List<Field> fields, List<String> left) {
         List<Field> constants = new ArrayList<>();
         List<Field> candidates = new ArrayList<>();
@@ -148,8 +151,8 @@ public final class FieldParameters {
                 left.add(stays(field.parameter(), "it is not a field the upgrade can read"));
             } else if (field.file().startsWith(config.mainPackageDir().resolve("plugins").toAbsolutePath().normalize())) {
                 left.add(stays(field.parameter(), "it is in a plugin's file"));
-            } else if (field.parameter().row().visibility() == Visibility.EDITOR_ONLY) {
-                // @Param's own default: an author who never named a visibility wrote an author-only value.
+            } else if (!audience.shows(field.parameter())) {
+                // @Param's old default: an author who never named a visibility wrote an author-only value.
                 constants.add(field);
             } else {
                 candidates.add(field);

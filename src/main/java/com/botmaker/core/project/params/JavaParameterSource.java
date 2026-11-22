@@ -163,7 +163,6 @@ public final class JavaParameterSource {
                 .value(kept(fragment.getInitializer(), source))
                 .description(string(members, "description"))
                 .category(className)
-                .visibility(Visibility.fromId(string(members, "visibility")))
                 .build();
         return new JavaParameter(file, className, row, form, initializer, note.isEmpty(), note, "", "");
     }

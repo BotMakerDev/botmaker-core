@@ -3,6 +3,7 @@
 
 package com.botmaker.core.services.upgrade;
 
+import com.botmaker.core.project.params.FieldAudience;
 import com.botmaker.core.services.upgrade.PluginUpgradeService.Report;
 
 import java.nio.file.Path;
@@ -146,8 +147,10 @@ public final class ProjectUpgrade {
                     for (Row row : moving) checked.add(row.upgrades().compare(row.targetVersion(), false));
 
                     moving.getFirst().upgrades().snapshot(snapshotMessage(moving));
-                    // The contract's own break (0.14, 2026-10-29): @Param lost its value rules. No @Migrate rule
-                    // can rewrite an annotation member, so they come off here, before the code is repaired.
+                    // The contract's own breaks (0.14, 2026-10-29; 0.20, 2026-11-22): @Param lost its value rules and
+                    // its visibility. No @Migrate rule can rewrite an annotation member, so they come off here, before
+                    // the code is repaired; who saw a field is kept for the move of the fields below.
+                    FieldAudience audience = moving.getFirst().upgrades().fieldAudience();
                     List<String> stripped = moving.getFirst().upgrades().stripRemovedParamMembers();
 
                     Map<String, String> versions = new LinkedHashMap<>();
@@ -170,9 +173,9 @@ public final class ProjectUpgrade {
                     List<String> repaired = new ArrayList<>(stripped);
                     List<Path> deleted = new ArrayList<>();
                     int files = code.files() + stripped.size();
-                    // Before the values: a plugin's parameter is that plugin's, and these are the bot's own. Not in
-                    // moveOnly, which leaves the bot's code as it is; a field still reads there.
-                    PluginUpgradeService.Values fields = moving.getFirst().upgrades().repairFieldParameters(versions);
+                    // Before the values: a plugin's parameter is that plugin's, and these are the bot's own.
+                    PluginUpgradeService.Values fields =
+                            moving.getFirst().upgrades().repairFieldParameters(versions, audience);
                     repaired.addAll(fields.repaired());
                     left.addAll(fields.left());
                     deleted.addAll(fields.deleted());
@@ -191,6 +194,8 @@ public final class ProjectUpgrade {
     /**
      * <i>Migrate first</i> (2026-10-16): one snapshot and the pom moved, the bot's code and values left as they are,
      * for its author to carry over in Migrate — which reads what the move broke against the jars loaded before it.
+     * What the contract itself broke is repaired here: {@code @Param}'s removed members, and the fields they showed to
+     * the bot's users, which become parameters (2026-11-22).
      */
     public static CompletableFuture<Result> moveOnly(List<Row> rows, PomWriter writer) {
         List<Row> moving = rows.stream()
@@ -202,7 +207,9 @@ public final class ProjectUpgrade {
                 .supplyAsync(() -> {
                     moving.getFirst().upgrades().snapshot(snapshotMessage(moving));
                     // The contract's break is no plugin's to migrate, so it is repaired here too (see run).
-                    List<String> stripped = moving.getFirst().upgrades().stripRemovedParamMembers();
+                    FieldAudience audience = moving.getFirst().upgrades().fieldAudience();
+                    List<String> repaired = new ArrayList<>(moving.getFirst().upgrades().stripRemovedParamMembers());
+                    int files = repaired.size();
                     Map<String, String> versions = new LinkedHashMap<>();
                     List<Moved> moved = new ArrayList<>();
                     for (Row row : moving) {
@@ -210,7 +217,14 @@ public final class ProjectUpgrade {
                         moved.add(new Moved(row.upgrades().displayName(), row.upgrades().currentVersion(),
                                 row.targetVersion()));
                     }
-                    return new Pass(versions, new Result(moved, stripped.size(), 0, List.of(), stripped, List.of()));
+                    // A field still reads after the move, but not which ones the users set: those move now, while
+                    // that is known, or a later upgrade would make each of them its author's constant.
+                    PluginUpgradeService.Values fields = audience.shown().isEmpty() ? PluginUpgradeService.Values.NOTHING
+                            : moving.getFirst().upgrades().repairFieldParameters(versions, audience);
+                    repaired.addAll(fields.repaired());
+                    files += fields.files();
+                    return new Pass(versions,
+                            new Result(moved, files, 0, fields.left(), repaired, fields.deleted()));
                 })
                 .thenCompose(pass -> writer.write(pass.versions()).thenApply(v -> pass.result()));
     }

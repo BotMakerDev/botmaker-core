@@ -35,7 +35,7 @@ class ParameterRowTest {
         assertThrows(IllegalArgumentException.class, () -> ParameterRow.named(null, "String"));
     }
 
-    /** Every default is the reading that keeps a project open: a value and a visibility absent. */
+    /** Every default is the reading that keeps a project open: a value absent. */
     @Test
     void everyDefaultIsTheSafeReading() {
         ParameterRow bare = row("rest").build();
@@ -46,8 +46,6 @@ class ParameterRowTest {
         assertEquals("rest", bare.displayLabel());
         assertEquals("", bare.category());
         assertEquals(ParameterRow.GENERAL, bare.categoryOrGeneral());
-        assertEquals(Visibility.PUBLIC, bare.visibility());
-        assertTrue(bare.isPublic());
     }
 
     /** A row with no type at all is blank rather than a {@code null} the host would trip over. */
@@ -71,7 +69,6 @@ class ParameterRowTest {
     void withValueKeepsEverythingElseAndEqualityIsByComponent() {
         ParameterRow declared = ParameterRow.named("rest", "java.time.Duration")
                 .value(java("java.time.Duration.ofSeconds(3)")).description("How long to wait").category("Timing")
-                .visibility(Visibility.EDITOR_ONLY)
                 .build();
 
         ParameterRow edited = declared.withValue(java("java.time.Duration.ofSeconds(5)"));
@@ -105,12 +102,5 @@ class ParameterRowTest {
 
         assertEquals("Timing", filed.category());
         assertEquals(ParameterRow.GENERAL, row("rest").build().categoryOrGeneral());
-    }
-
-    @Test
-    void anUnknownVisibilityIdReadsAsEditorOnly() {
-        assertEquals(Visibility.PUBLIC, Visibility.fromId("public"));
-        assertEquals(Visibility.EDITOR_ONLY, Visibility.fromId("something newer"));
-        assertEquals(Visibility.EDITOR_ONLY, Visibility.fromId(null));
     }
 }

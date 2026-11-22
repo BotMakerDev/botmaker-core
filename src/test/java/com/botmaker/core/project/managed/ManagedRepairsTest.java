@@ -252,7 +252,7 @@ class ManagedRepairsTest {
     }
 
     static final ManagedValue<List<Integer>> NUMBERS = ManagedValue.param(TestValue.Id.NAMES).in(TestValue.Holder.SDK)
-            .startsAs(ManagedRepairsTest::noNumbers).shown("Numbers", null).because("New.");
+            .startsAs(ManagedRepairsTest::noNumbers).shown("Numbers").because("New.");
 
     public static List<Integer> noNumbers() {
         return List.of();
@@ -289,11 +289,11 @@ class ManagedRepairsTest {
     }
 
     static final ManagedValue<java.util.Set<Class<? extends TestOutcome>>> SKIP = ManagedValue.param(TestValue.Id.WORDS)
-            .in(TestValue.Holder.SDK).startsAs(ManagedRepairsTest::noSkip).shown("Skip", null).because("New.");
+            .in(TestValue.Holder.SDK).startsAs(ManagedRepairsTest::noSkip).shown("Skip").because("New.");
     static final ManagedValue<String[]> TAGS = ManagedValue.param(TestValue.Id.WORDS_TOO).in(TestValue.Holder.SDK)
-            .startsAs(ManagedRepairsTest::noTags).shown("Tags", null).because("New.");
+            .startsAs(ManagedRepairsTest::noTags).shown("Tags").because("New.");
     static final ManagedValue<Boolean> SETUP = ManagedValue.param(TestValue.Id.DO_SETUP).in(TestValue.Holder.SDK)
-            .startsAs(ManagedRepairsTest::setup).shown("Setup", null).because("New.");
+            .startsAs(ManagedRepairsTest::setup).shown("Setup").because("New.");
 
     public static java.util.Set<Class<? extends TestOutcome>> noSkip() {
         return java.util.Set.of();

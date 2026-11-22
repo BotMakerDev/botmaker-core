@@ -29,10 +29,6 @@ import java.util.List;
  * <p><b>Nothing is cached.</b> The source file is the truth and it is cheap to re-read, which is why these
  * are static functions over a {@link ProjectConfig} rather than a service with state. The lists are small
  * and a menu is built when it is opened.
- *
- * <p><b>Visibility is not consulted.</b> {@link ParameterRow#isPublic()} says who may change a value while
- * the bot is being <em>run</em>; this list is about what the bot's own code may read, which is every
- * parameter the bot declares.
  */
 public final class HostParameters {
 

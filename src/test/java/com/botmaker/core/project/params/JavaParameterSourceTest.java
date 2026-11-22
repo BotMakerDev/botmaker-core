@@ -4,7 +4,6 @@
 package com.botmaker.core.project.params;
 
 import com.botmaker.core.project.params.TestValues;
-import com.botmaker.core.project.params.Visibility;
 import com.botmaker.core.project.params.ParameterRow;
 import com.botmaker.core.project.params.JavaParameterSource;
 import com.botmaker.core.project.params.JavaParameter;
@@ -91,14 +90,13 @@ class JavaParameterSourceTest {
     @Test
     void everyAnnotationMemberIsRead() {
         JavaParameter parameter = read(wrap("""
-                    @Param(description = "How many times to try", visibility = "public")
+                    @Param(description = "How many times to try")
                     public static int maxAttempts = 10;
                 """)).getFirst();
 
         ParameterRow row = parameter.row();
         assertEquals("Parameters", row.category(), "the class holding it, 2026-11-05");
         assertEquals("How many times to try", row.description());
-        assertEquals(Visibility.PUBLIC, row.visibility());
     }
 
     /** A bot from before contract 0.14 still lists its parameter; the removed members are ignored. */
@@ -114,14 +112,13 @@ class JavaParameterSourceTest {
     }
 
     @Test
-    void anUnadornedParameterIsInItsClassAndNotPublic() {
+    void anUnadornedParameterIsInItsClass() {
         ParameterRow row = read(wrap("""
                     @Param
                     public static int a = 1;
                 """)).getFirst().row();
 
         assertEquals("Parameters", row.category());
-        assertEquals(Visibility.EDITOR_ONLY, row.visibility());
     }
 
     @Test
@@ -382,22 +379,6 @@ class JavaParameterSourceTest {
 
         assertFalse(parameter.editable());
         assertFalse(TestValues.GRAMMAR.known(parameter.form()));
-    }
-
-    @Test
-    void theAnnotationsOwnConstantsAreReadAsTheStringsTheyAre() {
-        // Param.PUBLIC exists so that nobody writes "public"; a reader that could not read it would make
-        // the better spelling mean the opposite of what it says.
-        List<JavaParameter> found = read(wrap("""
-                    @Param(visibility = Param.PUBLIC)
-                    public static int a = 1;
-
-                    @Param(visibility = com.botmaker.plugin.basics.params.Param.EDITOR)
-                    public static int b = 2;
-                """));
-
-        assertEquals(Visibility.PUBLIC, found.get(0).row().visibility());
-        assertEquals(Visibility.EDITOR_ONLY, found.get(1).row().visibility());
     }
 
     @Test

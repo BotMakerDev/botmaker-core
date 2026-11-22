@@ -60,7 +60,6 @@ public final class ParameterRow {
     private final JavaValue value;
     private final String description;
     private final String category;
-    private final Visibility visibility;
     private final Param.Changes changes;
 
     private ParameterRow(Builder b) {
@@ -70,7 +69,6 @@ public final class ParameterRow {
         this.value = b.value;
         this.description = b.description == null ? "" : b.description;
         this.category = b.category == null ? "" : b.category.trim();
-        this.visibility = b.visibility == null ? Visibility.PUBLIC : b.visibility;
     }
 
     /**
@@ -129,16 +127,6 @@ public final class ParameterRow {
         return category.isBlank() ? GENERAL : category;
     }
 
-    /** Whether whoever runs the bot is offered this row at all. */
-    public Visibility visibility() {
-        return visibility;
-    }
-
-    /** True when whoever runs the bot is offered this row. */
-    public boolean isPublic() {
-        return visibility == Visibility.PUBLIC;
-    }
-
     /** When it changes: outside a run (the window edits it) or during one (the bot writes it). */
     public Param.Changes changes() {
         return changes;
@@ -168,7 +156,6 @@ public final class ParameterRow {
                 .value(value)
                 .description(description)
                 .category(category)
-                .visibility(visibility)
                 .changes(changes);
     }
 
@@ -182,14 +169,13 @@ public final class ParameterRow {
                 && sameValue(other)
                 && description.equals(other.description)
                 && category.equals(other.category)
-                && visibility == other.visibility
                 && changes == other.changes;
     }
 
     /** Without the value: two trees that match may be laid out differently, so no hash of one is stable. */
     @Override
     public int hashCode() {
-        return Objects.hash(name, typeName, description, category, visibility, changes);
+        return Objects.hash(name, typeName, description, category, changes);
     }
 
     @Override
@@ -205,7 +191,6 @@ public final class ParameterRow {
         private JavaValue value;
         private String description;
         private String category;
-        private Visibility visibility;
         private Param.Changes changes;
 
         private Builder(String name, String typeName) {
@@ -234,12 +219,6 @@ public final class ParameterRow {
         /** The category: the simple name of the class holding the parameter, which the reader sets. */
         public Builder category(String category) {
             this.category = category;
-            return this;
-        }
-
-        /** Whether the bot's user is offered this. Defaults to {@link Visibility#PUBLIC} — a parameter exists to be set. */
-        public Builder visibility(Visibility visibility) {
-            this.visibility = visibility;
             return this;
         }
 
