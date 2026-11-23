@@ -56,8 +56,8 @@ public class MethodHandler {
         ExpressionStatement stmt = ctx.ast().newExpressionStatement(createMethodInvocation(ctx, choice));
         LambdaCallHandler.freshenParams(stmt, targetBody);
 
-        // Insert into body
-        AstRewriteHelper.getListRewriteForBody(ctx.rewriter(), targetBody).insertAt(stmt, index, null);
+        // A colon case's list is its switch's, so a bare insertAt put the call above the case label.
+        NodeCreator.insertIntoBody(ctx, targetBody, stmt, index, originalCode);
 
         return ctx.applyTo(originalCode);
     }

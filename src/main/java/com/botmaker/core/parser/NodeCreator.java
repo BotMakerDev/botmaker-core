@@ -9,6 +9,7 @@ import com.botmaker.java.edit.EditContext;
 import com.botmaker.java.grammar.SourceParser;
 import com.botmaker.java.edit.factories.ExpressionFactory;
 import com.botmaker.java.edit.factories.InitializerFactory;
+import com.botmaker.java.edit.helpers.AstRewriteHelper;
 import com.botmaker.core.parser.factories.StatementFactory;
 import com.botmaker.core.parser.handlers.MethodHandler;
 import com.botmaker.java.edit.palette.BlockType;
@@ -98,6 +99,15 @@ public class NodeCreator {
      */
     public static Statement createDefaultStatement(EditContext ctx, BlockType type, ASTNode context) {
         return StatementFactory.createStatement(ctx, type, context);
+    }
+
+    /**
+     * Inserts {@code statement} into {@code body} at its child index, as every palette insert does: a colon case's
+     * statements after its label, a block's counting the comments drawn in it.
+     */
+    public static void insertIntoBody(EditContext ctx, ASTNode body, Statement statement, int index, String source) {
+        StatementEdits.insertIntoList(AstRewriteHelper.getListRewriteForBody(ctx.rewriter(), body), body, statement,
+                index, source);
     }
 
     public static Expression createDefaultInitializer(AST ast, ResolvedType type) {

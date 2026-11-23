@@ -31,6 +31,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - The refusal journal names the edit that wrote broken code when it was an insert. It said `insert`, the helper every
   insert goes through.
+- `edit_code` inserts a palette call into a `case`'s body: it wrote the call above the case label, which was refused as
+  "Index -1 out of bounds". A call now lands where every other block does.
 
 ## [0.3.1] — 2026-11-22
 
