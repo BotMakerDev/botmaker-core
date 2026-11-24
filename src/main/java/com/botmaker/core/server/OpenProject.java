@@ -872,8 +872,8 @@ public final class OpenProject implements AutoCloseable {
         }
 
         @Override
-        public void startEntry(String title, String mainClass) {
-            ask(new Request.RunEntry(0, title, mainClass));
+        public void startEntry(String title, String mainClass, String arguments) {
+            ask(new Request.RunEntry(0, title, mainClass, arguments));
         }
 
         @Override

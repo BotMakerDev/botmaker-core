@@ -5,6 +5,14 @@ All notable changes to `botmaker-core`.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this module uses
 [semantic versioning](https://semver.org/). `release.sh` refuses to cut a version with no section here.
 
+## [Unreleased]
+
+### Added
+
+- A plugin's window starts its declared run with arguments (`Runs.start(entry, arguments)`): `HostRuns` checks them
+  against the entry's parameters, says on the status line what does not fit, and hands their text to the run as
+  the assistant's `run_bot` with `args` does (`HostRuns.Requests.startEntry` takes the arguments).
+
 ## [0.3.3] — 2026-11-24
 
 ### Changed

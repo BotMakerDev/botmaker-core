@@ -10,6 +10,7 @@ import com.botmaker.plugin.api.run.RunEntry;
 import com.botmaker.plugin.api.run.RunProperty;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -51,8 +52,11 @@ public final class HostRuns implements Runs {
     public interface Requests {
         void start();
 
-        /** Runs the declared entry titled {@code title} with main class {@code mainClass}, as its toolbar button does. */
-        void startEntry(String title, String mainClass);
+        /**
+         * Runs the declared entry titled {@code title} with main class {@code mainClass}, as its toolbar button does,
+         * handed {@code arguments}, {@link RunEntry#arguments}' text ({@code ""}: none).
+         */
+        void startEntry(String title, String mainClass, String arguments);
 
         void stop();
 
@@ -155,16 +159,33 @@ public final class HostRuns implements Runs {
     /** Runs {@code entry} as its button does; refused, with a status line, while a run goes or when none declares it. */
     @Override
     public void start(RunEntry entry) {
+        start(entry, Map.of());
+    }
+
+    /** As {@link #start(RunEntry)}, handed {@code arguments}; refused, with a status line, when one does not fit. */
+    @Override
+    public void start(RunEntry entry, Map<String, ?> arguments) {
         if (entry == null) return;
         if (running) {
             requests.status("Can't start " + entry.title() + ": a run is going.");
-        } else if (!declared.test(entry)) {
+            return;
+        }
+        if (!declared.test(entry)) {
             requests.status("Can't start " + entry.title() + ": no loaded plugin declares it.");
-        } else if (entry.needsArguments()) {
-            // Runs.start gives none, nor does the shell's botmaker tool; the assistant's run_bot gives them.
+            return;
+        }
+        String text;
+        try {
+            text = entry.arguments(arguments);
+        } catch (IllegalArgumentException misfit) {
+            requests.status("Can't start " + entry.title() + ": " + misfit.getMessage());
+            return;
+        }
+        if (text.isEmpty() && entry.needsArguments()) {
+            // A button gives none, nor does the shell's botmaker tool; the assistant's run_bot gives them.
             requests.status("Can't start " + entry.title() + " without its arguments: run_bot with args starts it.");
         } else {
-            requests.startEntry(entry.title(), entry.mainClass());
+            requests.startEntry(entry.title(), entry.mainClass(), text);
         }
     }
 

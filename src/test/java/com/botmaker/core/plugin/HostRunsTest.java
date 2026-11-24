@@ -3,12 +3,14 @@
 
 package com.botmaker.core.plugin;
 
+import com.botmaker.plugin.api.assist.Describe;
 import com.botmaker.plugin.api.run.RunEntry;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.OptionalLong;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -33,8 +35,8 @@ class HostRunsTest {
         }
 
         @Override
-        public void startEntry(String title, String mainClass) {
-            asked.add("entry " + title + " " + mainClass);
+        public void startEntry(String title, String mainClass, String arguments) {
+            asked.add(("entry " + title + " " + mainClass + " " + arguments).strip());
         }
 
         @Override
@@ -61,6 +63,25 @@ class HostRunsTest {
     void startEntryAsksTheHost() {
         runs(true).start(EXPLORE);
         assertEquals(List.of("entry Keep exploring " + Explore.class.getName()), asked);
+    }
+
+    /** A run's arguments: what it explores toward, optional. */
+    public record Toward(@Describe(value = "the goal", optional = true) String goal) {}
+
+    private static final RunEntry TOWARD = RunEntry.of("Keep exploring", Explore::main).takes(Toward.class).offBar();
+
+    @Test
+    void anEntrysArgumentsReachTheHostAsTheirText() {
+        runs(true).start(TOWARD, Map.of("goal", "sign in"));
+        assertEquals(List.of("entry Keep exploring " + Explore.class.getName() + " "
+                + TOWARD.arguments(Map.of("goal", "sign in"))), asked);
+    }
+
+    @Test
+    void anArgumentTheEntryDoesNotTakeIsRefused() {
+        runs(true).start(TOWARD, Map.of("budget", 3));
+        assertEquals(1, asked.size());
+        assertTrue(asked.getFirst().startsWith("status Can't start Keep exploring: "), asked.getFirst());
     }
 
     @Test
