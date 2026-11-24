@@ -5,6 +5,16 @@ All notable changes to `botmaker-core`.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this module uses
 [semantic versioning](https://semver.org/). `release.sh` refuses to cut a version with no section here.
 
+## [0.3.3] — 2026-11-24
+
+### Changed
+
+- Built against botmaker-sdk 1.12.2 (was 1.12.1).
+- Built against botmaker-studio-api 0.20.0 (was 0.19.1).
+- Built against botmaker-plugin-host 0.14.2 (was 0.14.1).
+- Built against botmaker-cli 0.14.3 (was 0.14.2).
+- Built against botmaker-java 0.4.2 (was 0.4.1).
+
 ## [0.3.2] — 2026-11-24
 
 ### Removed
