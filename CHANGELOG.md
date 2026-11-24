@@ -5,7 +5,7 @@ All notable changes to `botmaker-core`.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this module uses
 [semantic versioning](https://semver.org/). `release.sh` refuses to cut a version with no section here.
 
-## [Unreleased]
+## [0.3.2] — 2026-11-24
 
 ### Removed
 
@@ -26,6 +26,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   `PluginComposition`, `PluginSlots`, `PluginBars`, `PluginParts`, `PluginAssistant`, `PluginPalette`, `PluginClasses`)
   and `HostPluginValues` by what is written (`WritePerformer`, `HolderWrites`, `SetWrites`, `MethodWrites`, `BotWrites`,
   `DeclaredValues`), all package-private; both keep their public methods.
+- Built against botmaker-cli 0.14.2 (was 0.14.1).
 
 ### Fixed
 
