@@ -13,6 +13,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   against the entry's parameters, says on the status line what does not fit, and hands their text to the run as
   the assistant's `run_bot` with `args` does (`HostRuns.Requests.startEntry` takes the arguments).
 
+### Fixed
+
+- A plugin's `-SNAPSHOT` built again and reloaded serves its values of this PC (`HostFolders`): the first build bound
+  kept serving until the core ended, so a value the rebuild added was never written and each run's write of it was
+  refused.
+
 ## [0.3.3] — 2026-11-24
 
 ### Changed

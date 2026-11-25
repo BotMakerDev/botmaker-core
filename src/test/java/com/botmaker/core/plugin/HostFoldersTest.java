@@ -5,6 +5,7 @@ package com.botmaker.core.plugin;
 
 import com.botmaker.core.project.ProjectPreferences;
 import com.botmaker.plugin.api.StudioPlugin;
+import com.botmaker.plugin.api.source.ManagedValue;
 import com.botmaker.plugin.api.source.PluginValues;
 import com.botmaker.plugin.host.LoadedPlugin;
 import com.botmaker.plugin.host.PluginCoordinate;
@@ -16,6 +17,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
@@ -76,6 +78,41 @@ class HostFoldersTest {
 
         HostFolders.bound(List.of(at("2.1.0")), CLASSPATH);
         assertEquals("2.1.0", HostFolders.servingVersion(older.coordinate()), "a newer bind takes over");
+    }
+
+    /**
+     * A {@code -SNAPSHOT} built again under the same version, with one value more (2026-11-25: a reload kept serving
+     * the old build, so {@code Runs.java} never gained the value and every run's write of it was refused).
+     */
+    @Test
+    void aRebuiltJarOfTheSameVersionServesAndAddsItsNewValue() throws Exception {
+        Path jar = Files.createDirectories(root.resolve("repo/com/example/pc/2.0.0-SNAPSHOT"))
+                .resolve("pc-2.0.0-SNAPSHOT.jar");
+        Files.writeString(jar, "first build");
+        Files.setLastModifiedTime(jar, FileTime.fromMillis(1_000_000));
+        LoadedPlugin first = built(jar, HostValuesTest.GREETING);
+        HostFolders.bound(List.of(first), CLASSPATH);
+        assertEquals(List.of(), HostFolders.readyForRun());
+        HostValues served = (HostValues) HostFolders.of(first);
+        assertTrue(served.open(HostValuesTest.SPEED).isEmpty(), "not declared yet");
+
+        HostFolders.bound(List.of(built(jar, HostValuesTest.GREETING)), CLASSPATH);
+        assertSame(served, HostFolders.of(first), "the same build bound again keeps the copy serving");
+
+        Files.setLastModifiedTime(jar, FileTime.fromMillis(2_000_000));
+        LoadedPlugin rebuilt = built(jar, HostValuesTest.GREETING, HostValuesTest.SPEED);
+        HostFolders.bound(List.of(rebuilt), CLASSPATH);
+        assertEquals(List.of(), HostFolders.readyForRun());
+
+        HostValues now = (HostValues) HostFolders.of(rebuilt);
+        assertEquals(3, now.open(HostValuesTest.SPEED).orElseThrow().value(Integer.class).orElseThrow());
+        assertTrue(now.open(HostValuesTest.GREETING).isPresent(), "what was there stays");
+    }
+
+    private static LoadedPlugin built(Path jar, ManagedValue<?>... values) {
+        StudioPlugin plugin = TestPlugins.plugin(StudioPlugin.declare().values(TestPlugins.holder(
+                () -> List.of(values))));
+        return new LoadedPlugin(TestPlugins.coordinate("pc"), "pc", jar, plugin);
     }
 
     @Test

@@ -11,6 +11,7 @@ import com.botmaker.plugin.host.PluginCoordinate;
 import com.botmaker.shared.tools.UserDirs;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -37,24 +38,47 @@ public final class HostFolders {
 
     private HostFolders() {}
 
-    /** The copy that serves one plugin, and the version it is. */
-    record Served(String version, HostValues values) {}
+    /**
+     * The copy that serves one plugin, the version it is, and when its jar was built, which tells two builds of one
+     * {@code -SNAPSHOT} apart ({@link #builtAt}).
+     */
+    record Served(String version, long builtAt, HostValues values) {
+
+        /**
+         * Whether a build at {@code version}, its jar written at {@code builtAt}, leaves this copy serving. Any other
+         * build of one dev version takes over, not only a later one: the home's copy of a jar carries the time it was
+         * copied.
+         */
+        boolean staysOver(String version, long builtAt) {
+            int newer = HostValues.compare(version, this.version);
+            return newer < 0
+                    || newer == 0 && (builtAt == this.builtAt || !ReleasedPlugins.isDevVersion(version));
+        }
+    }
 
     /**
-     * Takes in what a bind brought: each plugin newer than (or as new as) the copy serving it now serves instead, its
-     * declared values and {@code classpath} with it.
+     * Takes in what a bind brought: each plugin newer than the copy serving it, by version or as another build of the
+     * same dev version, now serves instead, its declared values and {@code classpath} with it. A build whose
+     * declaration fails leaves the copy serving now as it is.
      */
     static void bound(List<LoadedPlugin> plugins, List<String> classpath) {
         List<Path> compiled = classpath.stream().map(Path::of).toList();
         for (LoadedPlugin plugin : plugins) {
             String version = ReleasedPlugins.versionOf(plugin.jar());
-            List<ManagedValue<?>> declared = declared(plugin);
+            List<ManagedValue<?>> declared;
+            try {
+                declared = plugin.plugin().managedValues();
+            } catch (RuntimeException | LinkageError e) {
+                continue;
+            }
             boolean keeps = declared.stream().anyMatch(ManagedValue::onHost);
             PluginCoordinate folder = canonical(plugin.coordinate());
-            // The copy serving now stays on a tie: a plugin that kept its PluginValues keeps the one that serves.
+            long builtAt = builtAt(plugin.jar());
+            // The copy serving now stays for the same build: a plugin that kept its PluginValues keeps the one that
+            // serves. A build made again under its version (a -SNAPSHOT) may declare other values, so it serves.
             SERVED.compute(key(folder), (key, now) ->
-                    now != null && HostValues.compare(version, now.version()) <= 0 ? now
-                            : keeps ? new Served(version, new HostValues(root(), folder, version, declared,
+                    now != null && now.staysOver(version, builtAt) ? now
+                            : keeps ? new Served(version, builtAt, new HostValues(root(), folder, version, declared,
                             PluginHost.grammar(), HomeServices.BARE, () -> compiled))
                             // A newer version that keeps nothing of this PC ends the older copy's serving.
                             : null);
@@ -135,11 +159,12 @@ public final class HostFolders {
         return said;
     }
 
-    private static List<ManagedValue<?>> declared(LoadedPlugin plugin) {
+    /** When {@code jar} was last written, or 0 when that cannot be read. */
+    private static long builtAt(Path jar) {
         try {
-            return plugin.plugin().managedValues();
-        } catch (RuntimeException | LinkageError e) {
-            return List.of();
+            return Files.getLastModifiedTime(jar).toMillis();
+        } catch (IOException unreadable) {
+            return 0;
         }
     }
 
