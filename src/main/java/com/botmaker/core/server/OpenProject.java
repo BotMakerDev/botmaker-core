@@ -43,6 +43,7 @@ import com.botmaker.core.project.vcs.ProjectVcs;
 import com.botmaker.core.run.CodeExecutionService;
 import com.botmaker.core.run.DebuggingService;
 import com.botmaker.core.run.RunCheck;
+import com.botmaker.core.pilot.RunViews;
 import com.botmaker.core.run.RunEntries;
 import com.botmaker.core.run.RunTelemetry;
 import com.botmaker.core.run.claims.PooledRuns;
@@ -220,6 +221,8 @@ public final class OpenProject implements AutoCloseable {
     private final HostRuns runs;
     /** The companions of the entry that runs: this process alone starts them, one set per run. */
     private final RunEntries.Companions companions;
+    /** What the Remote Pilot shows of the run that goes: the plugins' views, one set per run. */
+    private final RunViews views;
     /** The thread {@link #owner} runs on, so a write made on it is not queued behind itself. */
     private volatile Thread ownerThread;
     /** The batch open now and how many opened it, on the owner thread; null when none is ({@link Request.Batch}). */
@@ -260,6 +263,7 @@ public final class OpenProject implements AutoCloseable {
         // too, land on the project's thread; a run, the history and the run properties are this project's.
         HostServices services = HostServices.forProject(config);
         this.companions = RunEntries.Companions.bound(services);
+        this.views = RunViews.bound(services, () -> { });
         this.values =HostPluginValues.writing(config, state, services, new PluginEdits());
         HostPluginValues.installForwarding(config, state, services, this::written);
         this.runs = HostRuns.install(new PluginRuns(), execution::runningBotPid, new RunProperties());
@@ -365,6 +369,11 @@ public final class OpenProject implements AutoCloseable {
     /** What runs now with its companions, and their class names: the dashboard's Runs and Companions. */
     Optional<String> runningTitle() {
         return companions.runningTitle();
+    }
+
+    /** The views of the run that goes, which the Remote Pilot asks what to show. */
+    RunViews views() {
+        return views;
     }
 
     List<String> companionsGoing() {
@@ -1158,10 +1167,12 @@ public final class OpenProject implements AutoCloseable {
             case CoreEvent.RunState run when run.phase() == CoreEvent.RunState.Phase.RUNNING -> {
                 runs.ran(true);
                 companions.started();
+                views.started();
             }
             case CoreEvent.RunState run when run.phase() == CoreEvent.RunState.Phase.ENDED -> {
                 runs.ran(false);
                 companions.ended();
+                views.ended();
             }
             case CoreEvent.RunFrame frame -> runs.telemetry(frame.payload());
             case CoreEvent.RunTraced traced -> runs.trace(traced.traceLine());
@@ -1236,6 +1247,7 @@ public final class OpenProject implements AutoCloseable {
         }
         control.shutdown();
         companions.ended();
+        views.ended();
         HostPluginValues.clear();
         HostRuns.clear();
         HostHistory.clear();
