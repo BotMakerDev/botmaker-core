@@ -120,10 +120,10 @@ class RunRegistryTest {
     void aClaimOfAPooledElementIsRefusedWhileItIsHeldAndAHoldWhileItIsClaimed() {
         RunRegistry registry = registry();
         // As the SDK pool's hold of a Pixel is written; the SDK's PlaceClaimsTest pins its side of the same key.
-        String id = "com.botmaker.sdk.api.bot.SdkValue$Id.INSTANCE";
-        Hold pixel = Hold.plugin(SDK, id, "com.botmaker.sdk.api.capture.Instance.named(\"Pixel 10\")");
-        assertEquals("com.github.BotMakerDev:botmaker-sdk/" + id + "/com.botmaker.sdk.api.capture.Instance"
-                + ".named(\"Pixel 10\")", pixel.key());
+        String id = "com.botmaker.sdk.api.bot.SdkValue$Id.PLACE";
+        Hold pixel = Hold.plugin(SDK, id, "com.botmaker.sdk.api.capture.Place.android(\"Pixel 10\")");
+        assertEquals("com.github.BotMakerDev:botmaker-sdk/" + id + "/com.botmaker.sdk.api.capture.Place"
+                + ".android(\"Pixel 10\")", pixel.key());
         registry.hold(run("pooled", "farm", pixel));
         registry.hold(run("alone", "arena"));
 
