@@ -233,13 +233,19 @@ public final class PoolSources {
             values.putIfAbsent(element, candidate);
         }
         typed.put(parameter.id(), Map.copyOf(values));
+        // What the plugin lets several runs hold at once (PluginPool.sharing), by element; one run each otherwise.
+        Map<String, Integer> shares = new HashMap<>();
+        values.forEach((element, candidate) -> {
+            int share = pool.sharedBy(candidate);
+            if (share > 1) shares.put(element, share);
+        });
         Dealer.Narrowing narrowing = (free, picks) -> {
             List<T> given = free.stream().map(values::get).toList();
             List<T> left = pool.left(given, picksOf(picks, typed), services);
             return free.stream().filter(element -> left.contains(values.get(element))).toList();
         };
         return Dealer.Source.plugin(coordinate, parameter.id(), method, List.copyOf(values.keySet()))
-                .narrowedBy(narrowing);
+                .narrowedBy(narrowing).sharedBy(shares);
     }
 
     /** The row's picks as a plugin reads them: its own parameters' and other plugins', each its typed value. */

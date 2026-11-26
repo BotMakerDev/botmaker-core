@@ -58,11 +58,13 @@ public final class Dealer {
      * @param name      what its elements are called in a reason, {@code accounts}
      * @param elements  every element, as the grammar writes it, in the order to deal
      * @param take      how many elements a run takes; {@code 0} for one
-     * @param each      how many live runs may hold one element at once
+     * @param each      how many live runs may hold one element at once, unless {@code shares} says otherwise for it
      * @param rotates   whether the element used least recently is dealt first, rather than the row's last one
+     * @param shares    by element, how many live runs may hold that one at once, in place of {@code each}: what a
+     *                  plugin's {@code PluginPool.sharing} answered (2026-11-27)
      */
     public record Source(Hold.Kind kind, String owner, String parameter, String name, List<String> elements, int take,
-                         int each, boolean rotates, Narrowing narrowing) {
+                         int each, boolean rotates, Narrowing narrowing, Map<String, Integer> shares) {
 
         public Source {
             Objects.requireNonNull(kind, "kind");
@@ -73,36 +75,46 @@ public final class Dealer {
             elements = List.copyOf(new LinkedHashSet<>(elements));
             if (take < 0) throw new IllegalArgumentException("take " + take + " < 0");
             if (each < 1) throw new IllegalArgumentException("each " + each + " < 1");
+            shares = Map.copyOf(Objects.requireNonNull(shares, "shares"));
+            shares.forEach((element, n) -> {
+                if (n < 1) throw new IllegalArgumentException("share of " + element + " " + n + " < 1");
+            });
         }
 
         /** A bot's own pool: one element a run, held by one run, sticky. */
         public static Source bot(String bot, String parameter, String name, List<String> elements) {
-            return new Source(Hold.Kind.BOT, bot, parameter, name, elements, 0, 1, false, Narrowing.NONE);
+            return new Source(Hold.Kind.BOT, bot, parameter, name, elements, 0, 1, false, Narrowing.NONE, Map.of());
         }
 
         /** A plugin's pool, held for every bot on this PC. */
         public static Source plugin(String coordinate, String parameter, String name, List<String> elements) {
-            return new Source(Hold.Kind.PLUGIN, coordinate, parameter, name, elements, 0, 1, false, Narrowing.NONE);
+            return new Source(Hold.Kind.PLUGIN, coordinate, parameter, name, elements, 0, 1, false, Narrowing.NONE,
+                    Map.of());
         }
 
         /** This pool, each run taking {@code k} elements. */
         public Source taking(int k) {
-            return new Source(kind, owner, parameter, name, elements, k, each, rotates, narrowing);
+            return new Source(kind, owner, parameter, name, elements, k, each, rotates, narrowing, shares);
         }
 
         /** This pool, {@code n} live runs sharing an element. */
         public Source sharedBy(int n) {
-            return new Source(kind, owner, parameter, name, elements, take, n, rotates, narrowing);
+            return new Source(kind, owner, parameter, name, elements, take, n, rotates, narrowing, shares);
+        }
+
+        /** This pool, {@code byElement} live runs sharing each element it names, the others as {@link #each}. */
+        public Source sharedBy(Map<String, Integer> byElement) {
+            return new Source(kind, owner, parameter, name, elements, take, each, rotates, narrowing, byElement);
         }
 
         /** This pool, its least recently used element dealt first. */
         public Source rotating() {
-            return new Source(kind, owner, parameter, name, elements, take, each, true, narrowing);
+            return new Source(kind, owner, parameter, name, elements, take, each, true, narrowing, shares);
         }
 
         /** This pool, its free elements narrowed by the row's earlier picks. */
         public Source narrowedBy(Narrowing by) {
-            return new Source(kind, owner, parameter, name, elements, take, each, rotates, by);
+            return new Source(kind, owner, parameter, name, elements, take, each, rotates, by, shares);
         }
 
         /** How many elements one run takes. */
@@ -110,9 +122,14 @@ public final class Dealer {
             return Math.max(1, take);
         }
 
+        /** How many live runs may hold {@code element} at once. */
+        public int each(String element) {
+            return shares.getOrDefault(element, each);
+        }
+
         /** {@code element} as the registry holds it for a run. */
         public Hold hold(String element) {
-            return new Hold(kind, owner, parameter, element, each);
+            return new Hold(kind, owner, parameter, element, each(element));
         }
     }
 
@@ -470,7 +487,7 @@ public final class Dealer {
         private int share(Source pool, String element) {
             Hold asked = pool.hold(element);
             return request.live().stream().flatMap(run -> run.holds().stream()).filter(asked::sameElement)
-                    .mapToInt(Hold::share).reduce(pool.each(), Math::min);
+                    .mapToInt(Hold::share).reduce(pool.each(element), Math::min);
         }
 
         private Optional<LiveRun> holder(Source pool, String element) {
@@ -498,6 +515,8 @@ public final class Dealer {
                 out.sort(Comparator.comparingInt(
                         element -> mine.contains(element) ? 0 : others.contains(element) ? 2 : 1));
             }
+            // A pool shared whole spreads its rows; a plugin's per-element shares keep its own order, so an element no
+            // run limits (a desktop) does not crowd out those it listed first.
             if (pool.each() > 1) {
                 out.sort(Comparator.comparingInt((String element) -> slots(pool, element, false)).reversed());
             }
@@ -528,10 +547,11 @@ public final class Dealer {
         private void explain(int dealt) {
             int before = reasons.size();
             for (Source pool : pools) {
-                int all = pool.elements().stream().mapToInt(element -> share(pool, element)).sum();
-                int room = pool.elements().stream()
-                        .mapToInt(element -> Math.max(0, share(pool, element) - held(pool, element))).sum();
-                int needed = request.runs() * pool.perRun();
+                // As longs: an element any number of runs share counts Integer.MAX_VALUE.
+                long all = pool.elements().stream().mapToLong(element -> share(pool, element)).sum();
+                long room = pool.elements().stream()
+                        .mapToLong(element -> Math.max(0, share(pool, element) - held(pool, element))).sum();
+                long needed = (long) request.runs() * pool.perRun();
                 // Another run's hold is a reason only where the pool falls short.
                 if (needed > room) {
                     for (String element : pool.elements()) {
@@ -543,7 +563,7 @@ public final class Dealer {
                     }
                 }
                 if (needed > all) {
-                    int missing = Math.ceilDiv(needed - all, pool.each());
+                    int missing = (int) Math.ceilDiv(needed - all, (long) pool.each());
                     reasons.add(new Reason(Reason.Kind.TOO_FEW, pool.parameter(), List.of(), missing,
                             missing + " more of " + pool.name() + (missing == 1 ? " is" : " are") + " needed"));
                 }

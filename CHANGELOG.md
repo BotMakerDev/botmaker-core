@@ -12,6 +12,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - `pilot.RunViews` (2026-11-27): the core builds each plugin's `views(...)` view when a run starts, starts it with the
   project's services and drops it when the run ends, so the Remote Pilot (moving into the core) can ask what the run
   shows and draw each telemetry frame. Nothing serves it yet.
+- A plugin's pool deals a candidate to as many live runs as its `PluginPool.sharing` allows (2026-11-27), each
+  held at that share in the registry; the plugin's order is kept, so a candidate with no limit (a desktop) takes the
+  rows the ones listed before it leave, and a plugin lists it last. The dealer counts such a share as a long, so no limit never overflows.
 - Every run is live in this PC's registry (`run.claims.HeldRun`): ▶ Run, `run_bot`, a plugin's own run and each side
   run, not only several runs at once. Each holds nothing, so its start is never refused, and its claims are served
   and checked against every other run's. Each held run reads a plan file of its own (`botmaker-run-<runId>.properties`,

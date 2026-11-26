@@ -116,6 +116,24 @@ class DealerTest {
     }
 
     @Test
+    void anElementThePluginSharesWithAnyIsDealtToEveryRowLeftInItsOrder() {
+        Source places = Source.plugin(SDK, INSTANCE, "place", List.of("i1", "i2", "desktop"))
+                .sharedBy(Map.of("desktop", Integer.MAX_VALUE));
+        LiveRun arena = LiveRun.ofThisProcess("r1", "Arena bot", List.of(places.hold("desktop")));
+        Dealing dealing = Dealer.deal(Request.of(List.of(places), 5, List.of(arena)));
+
+        assertTrue(dealing.complete(), dealing.words());
+        assertEquals(List.of("i1", "i2", "desktop", "desktop", "desktop"), picked(dealing, INSTANCE),
+                "the instances listed first are dealt first");
+        assertEquals(Integer.MAX_VALUE, places.hold("desktop").share());
+        assertEquals(1, places.hold("i1").share());
+
+        Dealing short_ = Dealer.deal(Request.of(List.of(Source.plugin(SDK, INSTANCE, "place", List.of("i1"))
+                .sharedBy(Map.of("i1", 2))), 3, List.of()));
+        assertEquals("2 of 3 can run: 1 more of place is needed", short_.words());
+    }
+
+    @Test
     void anInstanceAnotherBotsRunHoldsIsNotDealt() {
         LiveRun arena = LiveRun.ofThisProcess("r1", "Arena bot", List.of(Hold.plugin(SDK, INSTANCE, "i1")));
         Dealing dealing = Dealer.deal(Request.of(List.of(instances(3), accounts(3)), 3, List.of(arena)));
