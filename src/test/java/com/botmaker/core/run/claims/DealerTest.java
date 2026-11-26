@@ -133,6 +133,16 @@ class DealerTest {
     }
 
     @Test
+    void anInstanceALoneRunClaimedIsNotDealt() {
+        LiveRun lone = new LiveRun("r1", "Arena bot", ProcessHandle.current().pid(), 0, List.of(),
+                List.of(Hold.plugin(SDK, INSTANCE, "i1").key()));
+        Dealing dealing = Dealer.deal(Request.of(List.of(instances(3)), 3, List.of(lone)));
+
+        assertEquals(List.of("i2", "i3"), picked(dealing, INSTANCE));
+        assertEquals("2 of 3 can run: i1 is held by a run of Arena bot", dealing.words());
+    }
+
+    @Test
     void aPinIsDealtAsGivenAndKeptFromTheRowsBeforeIt() {
         Request pinned = Request.of(List.of(accounts(3)), 3, List.of())
                 .pinned(Map.of(1, Map.of(ACCOUNT, List.of("a1"))));

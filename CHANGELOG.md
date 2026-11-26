@@ -9,6 +9,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Every run is live in this PC's registry (`run.claims.HeldRun`): ▶ Run, `run_bot`, a plugin's own run and each side
+  run, not only several runs at once. Each holds nothing, so its start is never refused, and its claims are served
+  and checked against every other run's. Each held run reads a plan file of its own (`botmaker-run-<runId>.properties`,
+  deleted at its end), and the plan says whether the run is one of several (`RunPlan.several`), so a dealt run whose
+  claims cannot be checked stops even when it rewrites no method. A debug session and ▶ Try are not held.
+- A run-time claim is checked against the other runs' pooled holds, and a hold against their claims:
+  `RunRegistry.Hold.key()` (`owner/parameter/element`) is the claim that names a pooled element. A lone run on an
+  instance a pooled run plays is refused, and the deal skips an instance a lone run claimed.
+
 - A plugin's window starts its declared run with arguments (`Runs.start(entry, arguments)`): `HostRuns` checks them
   against the entry's parameters, says on the status line what does not fit, and hands their text to the run as
   the assistant's `run_bot` with `args` does (`HostRuns.Requests.startEntry` takes the arguments).

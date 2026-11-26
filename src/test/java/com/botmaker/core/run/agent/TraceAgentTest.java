@@ -130,6 +130,13 @@ class TraceAgentTest {
         plan.write(file);
         assertEquals(plan, RunPlan.read(file));
         assertEquals(Optional.of(base.resolve("this-pc")), RunPlan.read(file).hostValues(), "the values of this PC");
+        assertTrue(plan.several(), "a plan that rewrites a method is one of several");
+
+        // A dealt run whose pools rewrite nothing is still one of several.
+        RunPlan dealt = new RunPlan(plan.trace(), plan.runs(), plan.inner(), List.of(), plan.runId(), plan.registry(),
+                Optional.empty(), true);
+        dealt.write(file);
+        assertTrue(RunPlan.read(file).several());
         assertEquals("com.bot.params.bot.Farm#account()Ljava/lang/String;", account.key());
         assertEquals("Farm.account()", account.said());
     }

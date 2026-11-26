@@ -9,6 +9,7 @@ import com.botmaker.core.project.ProjectConfig;
 import com.botmaker.core.project.StudioProjectSettings;
 import com.botmaker.runlog.RunLog;
 import com.botmaker.core.run.agent.RunPlan;
+import com.botmaker.core.run.claims.HeldRun;
 import com.botmaker.core.run.agent.TracePlan;
 
 import java.io.IOException;
@@ -57,23 +58,38 @@ public final class BotJvm {
      * Empty only when the agent cannot be written: a run never fails over it.
      */
     public static List<String> runAgent(ProjectConfig config, StudioProjectSettings settings) {
-        return runAgent(config, settings, Optional.empty());
+        return runAgent(config, settings, Optional.empty(), Optional.empty());
+    }
+
+    /**
+     * {@link #runAgent} for a run live in the registry as {@code held} (a side run, spec
+     * {@code 2026-11-26-run-places-design.md} §5): its claims are checked against every other run's. Empty
+     * {@code held}: granted, as before.
+     */
+    public static List<String> runAgent(ProjectConfig config, StudioProjectSettings settings,
+                                        Optional<HeldRun> held) {
+        return runAgent(config, settings, Optional.empty(), held);
     }
 
     /**
      * {@link #runAgent} for a run whose plugins keep their values of this PC (2026-11-15): the caller readies the
      * folders before it ({@code HostFolders.readyForRun}) and commits what it wrote after ({@code afterRun}). A try,
-     * a debug session and a side run keep none.
+     * a debug session and a side run keep none. {@code held}: as {@link #runAgent(ProjectConfig,
+     * StudioProjectSettings, Optional)}.
      */
-    public static List<String> keepingRunAgent(ProjectConfig config, StudioProjectSettings settings) {
-        return runAgent(config, settings, Optional.of(HostFolders.root()));
+    public static List<String> keepingRunAgent(ProjectConfig config, StudioProjectSettings settings,
+                                               Optional<HeldRun> held) {
+        return runAgent(config, settings, Optional.of(HostFolders.root()), held);
     }
 
     private static List<String> runAgent(ProjectConfig config, StudioProjectSettings settings,
-                                         Optional<Path> hostValues) {
+                                         Optional<Path> hostValues, Optional<HeldRun> held) {
         if (config == null) return List.of();
         try {
-            return agent(config, settings, runPlan(config), List.of(), Optional.empty(), Optional.empty(), hostValues);
+            // A held run's plan is its own: two side runs started together would each read the other's run id.
+            Path plan = held.map(run -> run.forgetsAtEnd(runPlan(config, run.runId()))).orElseGet(() -> runPlan(config));
+            return agent(config, settings, plan, List.of(), false, held.map(HeldRun::runId),
+                    held.map(HeldRun::registry), hostValues);
         } catch (IOException | RuntimeException e) {
             System.err.println("Runs this time without its log and call trace: " + e.getMessage());
             return List.of();
@@ -90,8 +106,8 @@ public final class BotJvm {
      */
     public static Agent pooledAgent(ProjectConfig config, StudioProjectSettings settings, String runId,
                                     List<RunPlan.Pooled> pooled, Path registry) throws IOException {
-        Path plan = config.compiledOutputPath().resolveSibling("botmaker-run-" + runId + ".properties");
-        List<String> argument = agent(config, settings, plan, pooled, Optional.of(runId), Optional.of(registry),
+        Path plan = runPlan(config, runId);
+        List<String> argument = agent(config, settings, plan, pooled, true, Optional.of(runId), Optional.of(registry),
                 Optional.of(HostFolders.root()));
         return new Agent(argument, plan);
     }
@@ -105,20 +121,25 @@ public final class BotJvm {
     }
 
     private static List<String> agent(ProjectConfig config, StudioProjectSettings settings, Path plan,
-                                      List<RunPlan.Pooled> pooled, Optional<String> runId, Optional<Path> registry,
-                                      Optional<Path> hostValues) throws IOException {
+                                      List<RunPlan.Pooled> pooled, boolean several, Optional<String> runId,
+                                      Optional<Path> registry, Optional<Path> hostValues) throws IOException {
         List<String> offered = PluginHost.menuFacades().stream().map(f -> f.type().getName()).toList();
         RunAgentJar.Jars jars = RunAgentJar.jars();
         TracePlan trace = new TracePlan(Set.of(config.compiledOutputPath()), Set.copyOf(offered),
                 settings == null ? Set.of() : Set.copyOf(settings.hiddenTraceWriters()));
         new RunPlan(trace, Optional.of(config.projectPath().resolve(RunLog.FOLDER)), jars.inner(), pooled, runId,
-                registry, hostValues).write(plan);
+                registry, hostValues, several).write(plan);
         return List.of("-javaagent:" + jars.agent() + "=" + plan);
     }
 
     /** Where {@link #runAgent} writes the plan the agent reads once, at the JVM's start. */
     static Path runPlan(ProjectConfig config) {
         return config.compiledOutputPath().resolveSibling("botmaker-run.properties");
+    }
+
+    /** The plan of the run {@code runId} holds in the live runs, a file of its own. */
+    private static Path runPlan(ProjectConfig config, String runId) {
+        return config.compiledOutputPath().resolveSibling("botmaker-run-" + runId + ".properties");
     }
 
     static List<String> options(Map<String, String> runProperties) {

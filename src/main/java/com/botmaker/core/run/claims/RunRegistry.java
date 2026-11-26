@@ -106,6 +106,21 @@ public final class RunRegistry {
             return kind == other.kind && owner.equals(other.owner) && parameter.equals(other.parameter)
                     && element.equals(other.element);
         }
+
+        /**
+         * The element as a run-time claim names it, {@code owner/parameter/element}: a run that was dealt nothing and
+         * claims what it plays on (a plugin builds the same key for its own pool's element) is refused while another
+         * run holds it, and the other way round. Only a plugin's hold is claimed by its key: a bot's own pool is held
+         * under the bot, whose path could spell a coordinate.
+         */
+        public String key() {
+            return owner + "/" + parameter + "/" + element;
+        }
+
+        /** Whether a run-time claim of {@code key} names this hold's element. */
+        public boolean claimedBy(String key) {
+            return kind == Kind.PLUGIN && key().equals(key);
+        }
     }
 
     /**
@@ -212,8 +227,8 @@ public final class RunRegistry {
     }
 
     /**
-     * Claims {@code key} for {@code runId} while it runs: false when another live run holds it, or {@code runId} is
-     * not live. Claiming a key the run holds already answers true.
+     * Claims {@code key} for {@code runId} while it runs: false when another live run claims it or holds an element
+     * whose {@link Hold#key} it is, or {@code runId} is not live. Claiming a key the run holds already answers true.
      */
     public boolean claim(String runId, String key) {
         return locked(registry -> registry.claim(runId, key));
@@ -297,6 +312,10 @@ public final class RunRegistry {
                     return Optional.of(new Conflict(hold, live.stream()
                             .filter(other -> other.holds().stream().anyMatch(hold::sameElement)).findFirst()));
                 }
+                // A run that was dealt nothing claimed it at its start: it plays there, so it is not free.
+                Optional<LiveRun> claimer = live.stream()
+                        .filter(other -> other.claims().stream().anyMatch(hold::claimedBy)).findFirst();
+                if (claimer.isPresent()) return Optional.of(new Conflict(hold, claimer));
                 mine.add(hold);
             }
             write(run);
@@ -328,6 +347,11 @@ public final class RunRegistry {
             if (run.isEmpty()) return false;
             if (run.get().claims().contains(key)) return true;
             if (live.stream().anyMatch(other -> other.claims().contains(key))) return false;
+            // A pooled row's element, or what setup work holds (an Apply's instance), by the key a claim gives it.
+            if (live.stream().filter(other -> !other.runId().equals(runId))
+                    .anyMatch(other -> other.holds().stream().anyMatch(hold -> hold.claimedBy(key)))) {
+                return false;
+            }
             List<String> claims = new ArrayList<>(run.get().claims());
             claims.add(key);
             write(withClaims(run.get(), claims));

@@ -4,6 +4,9 @@
 package com.botmaker.core.run;
 
 import com.botmaker.core.project.ProjectConfig;
+import com.botmaker.core.run.claims.HeldRun;
+import com.botmaker.core.run.claims.RunRegistry;
+import com.botmaker.core.run.claims.SeveralRuns;
 import com.botmaker.core.runtime.JavacRelease;
 import com.botmaker.core.services.MavenService;
 import com.botmaker.core.services.ProgressReporter;
@@ -25,6 +28,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -79,7 +83,10 @@ public final class SideRunner implements SideRuns {
         }
         List<String> command = new ArrayList<>(List.of(config.javaExecutable()));
         command.addAll(BotJvm.options(properties));
-        command.addAll(BotJvm.runAgent(config, null));
+        // Live in the registry while it runs, holding nothing: the host that started it for an instance holds that
+        // instance, and what the run plays on otherwise it claims itself, against every other run.
+        Optional<HeldRun> held = HeldRun.open(RunRegistry.ofThisPc(), SeveralRuns.bot(dir));
+        command.addAll(BotJvm.runAgent(config, null, held));
         command.addAll(List.of("-cp", String.join(File.pathSeparator, classpath), config.entryClassName()));
         ProcessBuilder builder = new ProcessBuilder(command).directory(dir.toFile()).redirectErrorStream(true)
                 // appended: the next account's run must not wipe the output of the one that failed
@@ -88,9 +95,13 @@ public final class SideRunner implements SideRuns {
         if (environment != null) environment.forEach((name, value) -> {
             if (name != null && !name.isBlank() && value != null) builder.environment().put(name, value);
         });
-        Process process = builder.start();
+        Process process = started(builder, held);
+        held.ifPresent(run -> run.movedTo(process.toHandle()));
         LIVE.add(process);
-        process.onExit().thenRun(() -> LIVE.remove(process));
+        process.onExit().thenRun(() -> {
+            LIVE.remove(process);
+            held.ifPresent(HeldRun::close);
+        });
         return new Running(process);
     }
 
@@ -98,6 +109,16 @@ public final class SideRunner implements SideRuns {
     @Override
     public Path catalogCopy(String repo) throws IOException {
         return CatalogCopies.live().copyOf(repo);
+    }
+
+    /** {@code builder} started; {@code held} freed when it cannot start. */
+    private static Process started(ProcessBuilder builder, Optional<HeldRun> held) throws IOException {
+        try {
+            return builder.start();
+        } catch (IOException | RuntimeException e) {
+            held.ifPresent(HeldRun::close);
+            throw e;
+        }
     }
 
     /** The compiled classes, the resources, then the bot's jars. */

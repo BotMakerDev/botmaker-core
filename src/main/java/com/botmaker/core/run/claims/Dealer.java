@@ -451,11 +451,19 @@ public final class Dealer {
                     - (pinned ? 0 : counted(reserved, pool.parameter(), element));
         }
 
-        /** How many live runs hold {@code element}. */
+        /**
+         * How many live runs hold {@code element}. A run that claimed it while it ran ({@link Hold#key()}) holds it
+         * whole: the registry refuses its hold to any other run.
+         */
         private int held(Source pool, String element) {
             Hold asked = pool.hold(element);
-            return (int) request.live().stream().flatMap(run -> run.holds().stream()).filter(asked::sameElement)
+            int holds = (int) request.live().stream().flatMap(run -> run.holds().stream()).filter(asked::sameElement)
                     .count();
+            return claimer(asked).isPresent() ? Math.max(holds, share(pool, element)) : holds;
+        }
+
+        private Optional<LiveRun> claimer(Hold asked) {
+            return request.live().stream().filter(run -> run.claims().stream().anyMatch(asked::claimedBy)).findFirst();
         }
 
         /** How many runs may hold {@code element} at once: the least any hold of it allows, as the registry counts. */
@@ -468,7 +476,7 @@ public final class Dealer {
         private Optional<LiveRun> holder(Source pool, String element) {
             Hold asked = pool.hold(element);
             return request.live().stream().filter(run -> run.holds().stream().anyMatch(asked::sameElement))
-                    .findFirst();
+                    .findFirst().or(() -> claimer(asked));
         }
 
         /**

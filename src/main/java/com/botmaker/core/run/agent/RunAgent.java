@@ -67,8 +67,9 @@ public final class RunAgent {
             }
         }
         RunLines lines = plan.inner().map(jar -> inner(jar, plan)).orElse(null);
-        if (plan.runId().isPresent() && lines == null) {
-            // Its claims would all be granted, and two runs would take one key.
+        if (plan.runId().isPresent() && plan.several() && lines == null) {
+            // Its claims would all be granted, and two runs would take one key. One run dealt nothing goes on with
+            // them granted, as every run did before each was held.
             MainStop.install(instrumentation,
                     "this run is one of several, and its claims could not be checked against the others");
             return;

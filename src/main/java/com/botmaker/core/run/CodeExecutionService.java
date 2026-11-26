@@ -22,6 +22,7 @@ import com.botmaker.core.project.params.JavaParameter;
 import com.botmaker.core.run.claims.BoundMethods;
 import com.botmaker.core.run.claims.ClaimCalls;
 import com.botmaker.core.run.claims.Dealer;
+import com.botmaker.core.run.claims.HeldRun;
 import com.botmaker.core.run.claims.PoolSources;
 import com.botmaker.plugin.api.StudioServices;
 import com.botmaker.plugin.api.run.PluginPool;
@@ -226,6 +227,7 @@ public class CodeExecutionService {
 
         new Thread(() -> {
             boolean ran = false;
+            Optional<HeldRun> held = Optional.empty();
             try {
                 status("Compiling...");
                 phase(CoreEvent.RunState.Phase.COMPILING);
@@ -278,9 +280,11 @@ public class CodeExecutionService {
 
                 // Run the compiled main class directly:
                 // java [bot options] [session hand-off] -cp <classes:deps> <mainClass> [args]
+                // Live in the registry like a pooled run, holding nothing: what it plays on it claims, against them.
+                held = HeldRun.open(RunRegistry.ofThisPc(), bot());
                 List<String> command = new ArrayList<>(List.of(config.javaExecutable()));
                 command.addAll(BotJvm.options(state.getSettings()));
-                command.addAll(BotJvm.keepingRunAgent(config, state.getSettings()));
+                command.addAll(BotJvm.keepingRunAgent(config, state.getSettings(), held));
                 command.addAll(sessionHandoffArguments());
                 command.addAll(launch.tail(classpath));
                 ProcessBuilder pb = new ProcessBuilder(command)
@@ -289,6 +293,8 @@ public class CodeExecutionService {
                 startTelemetry(pb);
                 readyHostValues();
                 currentRunningProcess = pb.start();
+                ProcessHandle started = currentRunningProcess.toHandle();
+                held.ifPresent(live -> live.movedTo(started));
                 ran = true;
                 events.accept(new CoreEvent.RunProcess(currentRunningProcess.pid()));
                 // A stop that landed between the last check and the start found no process to kill.
@@ -317,6 +323,7 @@ public class CodeExecutionService {
                 status("Error: " + e.getMessage());
             } finally {
                 trying = false;
+                held.ifPresent(HeldRun::close);
                 // This run's folder, read while no next run can have made its own.
                 String endedRun = ran ? RunFolders.latest(config.projectPath()).map(Path::toString).orElse("") : "";
                 // What the run wrote to its parameters is on disk: read back, so the next edit lands on it.

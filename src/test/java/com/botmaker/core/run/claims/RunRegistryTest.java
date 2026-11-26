@@ -117,6 +117,44 @@ class RunRegistryTest {
     }
 
     @Test
+    void aClaimOfAPooledElementIsRefusedWhileItIsHeldAndAHoldWhileItIsClaimed() {
+        RunRegistry registry = registry();
+        // As the SDK pool's hold of a Pixel is written; the SDK's PlaceClaimsTest pins its side of the same key.
+        String id = "com.botmaker.sdk.api.bot.SdkValue$Id.INSTANCE";
+        Hold pixel = Hold.plugin(SDK, id, "com.botmaker.sdk.api.capture.Instance.named(\"Pixel 10\")");
+        assertEquals("com.github.BotMakerDev:botmaker-sdk/" + id + "/com.botmaker.sdk.api.capture.Instance"
+                + ".named(\"Pixel 10\")", pixel.key());
+        registry.hold(run("pooled", "farm", pixel));
+        registry.hold(run("alone", "arena"));
+
+        assertFalse(registry.claim("alone", pixel.key()), "a pooled run plays there");
+        assertTrue(registry.claim("pooled", pixel.key()), "its own hold is no other run's");
+        registry.release("pooled");
+        assertTrue(registry.claim("alone", pixel.key()));
+
+        var conflict = registry.hold(run("dealt", "farm", pixel));
+        assertTrue(conflict.isPresent(), "a run dealt nothing claimed it");
+        assertEquals("arena", conflict.get().by().orElseThrow().bot());
+        assertTrue(registry.hold(run("other", "farm", Hold.plugin(SDK, id, "x"))).isEmpty());
+    }
+
+    @Test
+    void aHeldRunIsLiveWithNothingHeldUntilItIsClosed() {
+        RunRegistry registry = registry();
+        HeldRun held = HeldRun.open(registry, "farm").orElseThrow();
+        LiveRun live = registry.live().getFirst();
+        assertEquals(held.runId(), live.runId());
+        assertEquals(List.of(), live.holds());
+        assertEquals(dir.toAbsolutePath().normalize(), held.registry());
+
+        held.movedTo(ProcessHandle.current());
+        assertTrue(registry.claim(held.runId(), "k"));
+        held.close();
+        held.close();
+        assertEquals(List.of(), registry.live());
+    }
+
+    @Test
     void aClaimIsRefusedToAnotherRunAndFreedWithItsRun() {
         RunRegistry registry = registry();
         registry.hold(run("r1", "farm"));
