@@ -138,6 +138,14 @@
             <artifactId>jetty-ee11-servlet</artifactId>
             <version>${jetty.version}</version>
         </dependency>
+        <!-- The Remote Pilot's socket to the phone (pilot, 2026-11-27): frames and gestures go both ways at frame
+             rate, which the `/studio` channels' one post per message could not carry. Jetty's own, at the version
+             above. -->
+        <dependency>
+            <groupId>org.eclipse.jetty.websocket</groupId>
+            <artifactId>jetty-websocket-jetty-server</artifactId>
+            <version>${jetty.version}</version>
+        </dependency>
 
         <!-- JGit: the project's own history and its sharing (project/vcs, sharing), no system git. -->
         <dependency>

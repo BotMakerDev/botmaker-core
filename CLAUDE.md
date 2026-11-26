@@ -78,7 +78,7 @@ per user.
 - `server` (phase 10, 2026-11-05) is the core's own process: `CoreMain`, `CoreServer` (the MCP, `/core`, `/core/quit`,
   the `/studio` channels), `CoreLauncher` (find or start one core per user, `core.json` and `core.lock` in the cache
   directory), `ProjectLock` (`.botmaker/core.lock` per open project). A channel is a stream of JSON lines from the core
-  and one post per message to it, not a WebSocket: Jetty's websocket jars are not a dependency. It carries
+  and one post per message to it, not a WebSocket (only `pilot` has one). It carries
   `server.Request`s, each answered by a `Reply.Answer` holding an `EditResult`, and `Reply.Told` with each `CoreEvent`
   (phase 10a); a new request is registered in its `@JsonSubTypes` and round-tripped in `RequestJsonTest`. `OpenProject`
   runs a project's asks on its one thread, in arrival order, and saves each accepted change as it lands; `Projects`
@@ -125,6 +125,13 @@ per user.
   together (`History.together`, 2026-11-21) turns into a queue (`queued`); the queue goes whole as `Request.Together`
   and `performAll` makes it as one step or, at the first refusal, puts back every file `project.FileJournal` heard. A
   new way a write touches a file (a create, a delete) tells `FileJournal.heard` first, or a refused together leaves it.
+- `pilot` (2026-11-27, spec `2026-11-26-pilot-in-core-design.md`; nothing starts it yet) is the Remote Pilot:
+  `PilotServer` serves the phone's page and WebSocket (Jetty's own websocket jar, one stack with the rest of the core),
+  `RunViews` holds what the plugins show (a set per run, one while idle) and asks it on the project's thread, never
+  from the frame loop (a view reads the project's values), `PilotRoutes` turns that into a `PilotRoute`
+  and `TargetCapture`, `PilotVideo` and `PilotInputService` work on it. A missing window or emulator is a
+  `PilotRoute.Missing` with its reason, never the desktop: the pilot may be on a public link. The wire is the phone
+  app's (`pilot-wire/wire-golden.json`, byte-identical in botmaker-pilot); a `telemetry.` message is the view's.
 - JavaFX stays `provided` because the contract's signatures name it: `PluginHost` binds slot editors that return a
   `Node`, and `HostServices` implements `StudioServices`, whose `Theme` and `Dialogs` name `Scene` and `Window`.
   Import no javafx and construct no Node here.

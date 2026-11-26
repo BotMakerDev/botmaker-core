@@ -221,7 +221,7 @@ public final class OpenProject implements AutoCloseable {
     private final HostRuns runs;
     /** The companions of the entry that runs: this process alone starts them, one set per run. */
     private final RunEntries.Companions companions;
-    /** What the Remote Pilot shows of the run that goes: the plugins' views, one set per run. */
+    /** What the Remote Pilot shows: the plugins' views, one set per run and one while none goes. */
     private final RunViews views;
     /** The thread {@link #owner} runs on, so a write made on it is not queued behind itself. */
     private volatile Thread ownerThread;
@@ -263,7 +263,7 @@ public final class OpenProject implements AutoCloseable {
         // too, land on the project's thread; a run, the history and the run properties are this project's.
         HostServices services = HostServices.forProject(config);
         this.companions = RunEntries.Companions.bound(services);
-        this.views = RunViews.bound(services, () -> { });
+        this.views = RunViews.bound(services, owner, () -> { });
         this.values =HostPluginValues.writing(config, state, services, new PluginEdits());
         HostPluginValues.installForwarding(config, state, services, this::written);
         this.runs = HostRuns.install(new PluginRuns(), execution::runningBotPid, new RunProperties());
@@ -371,7 +371,7 @@ public final class OpenProject implements AutoCloseable {
         return companions.runningTitle();
     }
 
-    /** The views of the run that goes, which the Remote Pilot asks what to show. */
+    /** The plugins' views, which the Remote Pilot asks what to show. */
     RunViews views() {
         return views;
     }
@@ -1247,7 +1247,7 @@ public final class OpenProject implements AutoCloseable {
         }
         control.shutdown();
         companions.ended();
-        views.ended();
+        views.close();
         HostPluginValues.clear();
         HostRuns.clear();
         HostHistory.clear();
