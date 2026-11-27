@@ -3,6 +3,9 @@
 
 package com.botmaker.core.server;
 
+import com.botmaker.core.CoreJson;
+import com.botmaker.core.pilot.PilotState;
+import com.botmaker.core.pilot.transport.TransportKind;
 import com.botmaker.core.assist.McpEndpoint;
 import com.botmaker.core.assist.McpTools;
 import com.botmaker.core.dashboard.DashboardAccess;
@@ -10,6 +13,7 @@ import com.botmaker.core.dashboard.DashboardEvents;
 import com.botmaker.core.dashboard.DashboardFeed;
 import com.botmaker.core.dashboard.DashboardServlet;
 import com.botmaker.core.dashboard.Inside;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.modelcontextprotocol.json.jackson2.JacksonMcpJsonMapper;
 import io.modelcontextprotocol.server.McpServer;
@@ -61,6 +65,12 @@ public final class CoreServer implements AutoCloseable {
 
     public static final String INFO = "/core";
     public static final String QUIT = "/core/quit";
+    /**
+     * The Remote Pilot's state and acts for {@code botmaker core pilot}: {@code POST} {@code {"act": "status" | "start" |
+     * "stop" | "reset", "transport": "<id>"}}, answered with the {@code PilotState} as JSON, which holds the pairing
+     * link. Not an MCP tool, so no assistant reads it (2026-11-27).
+     */
+    public static final String PILOT = "/pilot";
     public static final String STUDIO = "/studio";
     /** The version a client is; a channel opens only for a client of the core's own version. */
     public static final String VERSION_HEADER = "X-BotMaker-Version";
@@ -79,9 +89,16 @@ public final class CoreServer implements AutoCloseable {
      * @param exit   ends the core; called once, off the server's threads
      * @param inside what the core is now, for the dashboard; null from a server with no core behind it (a test's)
      * @param feed   what the dashboard shows happened
+     * @param pilot  what {@link #PILOT} drives; {@link PilotPort#NONE} from a server with no core behind it
      */
     public record Hooks(Idle idle, BooleanSupplier busy, Consumer<Channel> opened, Runnable exit,
-                        Supplier<Inside> inside, DashboardFeed feed) {
+                        Supplier<Inside> inside, DashboardFeed feed, PilotPort pilot) {
+
+        /** With no pilot: a server whose core has none to show. */
+        public Hooks(Idle idle, BooleanSupplier busy, Consumer<Channel> opened, Runnable exit,
+                     Supplier<Inside> inside, DashboardFeed feed) {
+            this(idle, busy, opened, exit, inside, feed, PilotPort.NONE);
+        }
 
         /** With nothing inside to show, and a feed no one tells: a server with no core behind it. */
         public Hooks(Idle idle, BooleanSupplier busy, Consumer<Channel> opened, Runnable exit) {
@@ -132,6 +149,9 @@ public final class CoreServer implements AutoCloseable {
         context.addServlet(new ServletHolder(new StudioServlet()), STUDIO);
         context.addServlet(new ServletHolder(new StudioServlet()), STUDIO + "/*");
         context.addServlet(new ServletHolder(new DashboardKeyServlet()), DashboardAccess.KEY_PATH);
+        // Behind the bearer alone: the dashboard's cookie admits only the dashboard's own paths, so a page cannot ask
+        // for the pairing link this answers with.
+        context.addServlet(new ServletHolder(new PilotServlet()), PILOT);
         // The page first: a jar without it fails here, before the stream starts its ticks.
         DashboardServlet page = new DashboardServlet(dashboard);
         this.events = new DashboardEvents(hooks.feed(), hooks.inside());
@@ -260,7 +280,9 @@ public final class CoreServer implements AutoCloseable {
      * attached and the quit is not forced.
      */
     private Optional<String> keepsRunning(boolean force) {
-        if (hooks.busy().getAsBoolean()) return Optional.of("A bot runs in BotMaker's core: stop it first, then quit.");
+        if (hooks.busy().getAsBoolean()) {
+            return Optional.of("A bot runs or the Remote Pilot is on in BotMaker's core: stop it first, then quit.");
+        }
         int attached = clients();
         if (attached > 0 && !force) {
             return Optional.of("BotMaker Studio is attached to the core (" + attached + " window"
@@ -290,6 +312,44 @@ public final class CoreServer implements AutoCloseable {
         protected void doPost(HttpServletRequest request, HttpServletResponse response) throws IOException {
             response.setContentType("application/json");
             response.getOutputStream().write(JSON.writeValueAsBytes(Map.of("url", dashboardLink())));
+        }
+    }
+
+    /** Runs one act of the Remote Pilot ({@link #PILOT}); a start waits until it settled. */
+    private final class PilotServlet extends HttpServlet {
+        @Override
+        protected void doPost(HttpServletRequest request, HttpServletResponse response) throws IOException {
+            JsonNode body;
+            try {
+                body = JSON.readTree(request.getInputStream());
+            } catch (IOException unreadable) {
+                response.sendError(HttpServletResponse.SC_BAD_REQUEST, "The body is not JSON.");
+                return;
+            }
+            String act = body == null ? "" : body.path("act").asText("status");
+            try {
+                PilotState state = switch (act) {
+                    case "status" -> hooks.pilot().pilotState();
+                    case "start" -> hooks.pilot().startPilot(body.hasNonNull("transport")
+                            ? transportOf(body.path("transport").asText()) : null);
+                    case "stop" -> hooks.pilot().stopPilot();
+                    case "reset" -> hooks.pilot().resetPilot();
+                    default -> throw new IllegalArgumentException("Unknown act '" + act + "': status, start, stop or reset.");
+                };
+                response.setContentType("application/json");
+                response.getOutputStream().write(CoreJson.write(state).getBytes(StandardCharsets.UTF_8));
+            } catch (IllegalArgumentException refused) {
+                response.sendError(HttpServletResponse.SC_CONFLICT, refused.getMessage());
+            }
+        }
+
+        private static TransportKind transportOf(String id) {
+            TransportKind kind = TransportKind.fromId(id);
+            if (kind == TransportKind.UNKNOWN) {
+                throw new IllegalArgumentException("Unknown transport '" + id
+                        + "': tailnet, funnel, quick-tunnel or lan.");
+            }
+            return kind;
         }
     }
 

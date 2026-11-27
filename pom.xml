@@ -147,6 +147,13 @@
             <version>${jetty.version}</version>
         </dependency>
 
+        <!-- ZXing core: the Remote Pilot's pairing QR code as modules (pilot), so no client needs a QR library. -->
+        <dependency>
+            <groupId>com.google.zxing</groupId>
+            <artifactId>core</artifactId>
+            <version>3.5.3</version>
+        </dependency>
+
         <!-- JGit: the project's own history and its sharing (project/vcs, sharing), no system git. -->
         <dependency>
             <groupId>org.eclipse.jgit</groupId>

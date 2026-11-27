@@ -9,6 +9,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- `pilot.Pilot` and `pilot.transport` (2026-11-27): the Remote Pilot's tunnels, token and preferences in the core.
+  `Pilot` brings up the way the user picked (Tailscale, Tailscale Funnel, a Cloudflare quick tunnel, the local
+  network); a public way is only ever the user's explicit pick, never a fallback. The Funnel shutdown hook and its
+  marker are kept, and `PilotPreferences` keeps the token, the way and the Funnel owner in `pilot.properties` of
+  `UserDirs.config()` (owner-only). The core serves it over `Request.PilotWatch/Start/Stop/Reset/Disconnect`, answered
+  by `Reply.Pilot(PilotState)` to a watching channel, and `POST /pilot` (bearer only, never a dashboard cookie) with
+  `{"act": status|start|stop|reset, "transport": id}`. The pairing link and its QR (ZXing `core` 3.5.3, so no client
+  needs a QR library) are in `PilotState` but never in its `toString`; the pilot is not an MCP tool, so no assistant
+  reads the link. A running pilot keeps the core from quitting.
+
 - `pilot.RunViews` (2026-11-27): the core builds each plugin's `views(...)` view when a run starts, and one while no
   run goes, starts it with the project's services and drops it when the run starts or ends, so the Remote Pilot
   (moving into the core) can ask what the project shows and draw each telemetry frame. What a view shows is asked on

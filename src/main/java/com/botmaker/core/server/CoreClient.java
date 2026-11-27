@@ -10,6 +10,8 @@ import com.botmaker.core.edit.EditRequest;
 import com.botmaker.core.edit.EditResult;
 import com.botmaker.core.edit.HistoryStep;
 import com.botmaker.core.event.CoreEvent;
+import com.botmaker.core.pilot.PilotState;
+import com.botmaker.core.pilot.transport.TransportKind;
 import com.botmaker.core.plugin.PluginWrite;
 import com.botmaker.core.run.claims.SeveralAsk;
 import com.botmaker.core.run.trial.TrialAsk;
@@ -46,6 +48,8 @@ public final class CoreClient implements AutoCloseable {
     static final Duration OPEN_TIMEOUT = Duration.ofMinutes(10);
     /** How long any other ask may take before the core is treated as gone. */
     static final Duration ANSWER_TIMEOUT = Duration.ofMinutes(1);
+    /** A start of the pilot waits up to 90 s in the core for its tunnel. */
+    static final Duration PILOT_START_TIMEOUT = Duration.ofSeconds(100);
     /** How long a start of several runs may take: it compiles and builds the run's classpath before any starts. */
     static final Duration SEVERAL_TIMEOUT = Duration.ofMinutes(5);
     /** Reads {@link DashboardAccess#KEY_PATH}'s answer, plain JSON outside the protocol. */
@@ -56,6 +60,7 @@ public final class CoreClient implements AutoCloseable {
     /** What a start of several runs this client asked for was told to have started, until its answer is read. */
     private final Map<String, Optional<CoreEvent.RunsStarted>> several = new ConcurrentHashMap<>();
     private final CoreLauncher.Address at;
+    private volatile Consumer<PilotState> pilotWatcher;
     private volatile ChannelClient channel;
     private volatile boolean ended;
 
@@ -259,6 +264,34 @@ public final class CoreClient implements AutoCloseable {
         }
     }
 
+    /**
+     * Hears the Remote Pilot's state now and at each change, on the reader thread, until this client closes; one
+     * watcher per client. The state holds the pairing link: show it only to the user.
+     */
+    public EditResult watchPilot(Consumer<PilotState> watcher) throws IOException {
+        pilotWatcher = watcher;
+        return ask(new Request.PilotWatch(ids.incrementAndGet()), ANSWER_TIMEOUT);
+    }
+
+    /** Brings the pilot up over {@code transport} (the remembered way when null); answered once it settled. */
+    public EditResult startPilot(TransportKind transport) throws IOException {
+        return ask(new Request.PilotStart(ids.incrementAndGet(), transport), PILOT_START_TIMEOUT);
+    }
+
+    public EditResult stopPilot() throws IOException {
+        return ask(new Request.PilotStop(ids.incrementAndGet()), ANSWER_TIMEOUT);
+    }
+
+    /** Revokes the pilot's pairing token. */
+    public EditResult resetPilot() throws IOException {
+        return ask(new Request.PilotReset(ids.incrementAndGet()), ANSWER_TIMEOUT);
+    }
+
+    /** Disconnects the phone {@code phone} (its id in the pilot's state). */
+    public EditResult disconnectPhone(String phone) throws IOException {
+        return ask(new Request.PilotDisconnect(ids.incrementAndGet(), phone), ANSWER_TIMEOUT);
+    }
+
     public boolean isOpen() {
         return !ended && channel.isOpen();
     }
@@ -301,6 +334,10 @@ public final class CoreClient implements AutoCloseable {
                 told.accept(change.event());
             }
             case Reply.Call call -> called.accept(call);
+            case Reply.Pilot pilot -> {
+                Consumer<PilotState> watching = pilotWatcher;
+                if (watching != null) watching.accept(pilot.state());
+            }
         }
     }
 

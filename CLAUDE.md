@@ -125,7 +125,10 @@ per user.
   together (`History.together`, 2026-11-21) turns into a queue (`queued`); the queue goes whole as `Request.Together`
   and `performAll` makes it as one step or, at the first refusal, puts back every file `project.FileJournal` heard. A
   new way a write touches a file (a create, a delete) tells `FileJournal.heard` first, or a refused together leaves it.
-- `pilot` (2026-11-27, spec `2026-11-26-pilot-in-core-design.md`; nothing starts it yet) is the Remote Pilot:
+- `pilot` (2026-11-27, spec `2026-11-26-pilot-in-core-design.md`) is the Remote Pilot, started by `Pilot` (tunnels in
+  `pilot.transport`, token and way in `pilot.properties` of `UserDirs.config()`) on `Request.ForPilot`,
+  `Reply.Pilot` or `POST /pilot` (bearer only; `botmaker core pilot` reads the cli side by field name of `PilotState`;
+  never an MCP tool, so no assistant reads the link; a public way is never a fallback):
   `PilotServer` serves the phone's page and WebSocket (Jetty's own websocket jar, one stack with the rest of the core),
   `RunViews` holds what the plugins show (a set per run, one while idle) and asks it on the project's thread, never
   from the frame loop (a view reads the project's values), `PilotRoutes` turns that into a `PilotRoute`

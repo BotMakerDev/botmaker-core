@@ -23,6 +23,7 @@ import org.eclipse.jetty.websocket.api.Session;
 import org.eclipse.jetty.websocket.server.WebSocketUpgradeHandler;
 
 import java.awt.Rectangle;
+import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -32,7 +33,9 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.Comparator;
 import java.util.List;
+import java.util.UUID;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -128,11 +131,16 @@ public final class PilotServer implements AutoCloseable {
     private static final class Client {
         final SendQueue out;
         final AtomicBoolean interact = new AtomicBoolean(false);
+        /** What the computer names this connection by, to disconnect it; no secret and no use to the phone. */
+        final String id = UUID.randomUUID().toString().substring(0, 8);
+        final String address;
+        final long sinceMillis = System.currentTimeMillis();
         /** The last JPEG message queued for this client, so an unchanged picture is not sent again. */
         volatile byte[] lastFrame;
 
-        Client(SendQueue out) {
+        Client(SendQueue out, String address) {
             this.out = out;
+            this.address = address;
         }
 
         /** Whether this client said hello and named H.264 — false for every build that predates {@code hello}. */
@@ -169,6 +177,8 @@ public final class PilotServer implements AutoCloseable {
     static final int BAD_TOKEN = 1008;
 
     private static final String BAD_TOKEN_REASON = "pairing token rejected";
+
+    private static final String DISCONNECTED_REASON = "disconnected on the computer";
 
     /**
      * How many H.264 pictures may wait for one client. Dropping one costs a wait for the next keyframe, so a
@@ -210,6 +220,7 @@ public final class PilotServer implements AutoCloseable {
     private volatile Pushed pushed = new Pushed(PilotRoute.DESKTOP, null, null);
     /** Guards who is paired: a phone let in and a token revoked must not pass each other. */
     private final Object pairingLock = new Object();
+    private volatile Runnable phonesChanged = () -> { };
     private volatile String token;
     private volatile RunState runState = RunState.STOPPED;
     /** Guards {@link #runState}'s changes; not {@code this}, which {@link #close} holds while ticks finish. */
@@ -427,8 +438,9 @@ public final class PilotServer implements AutoCloseable {
     }
 
     private void drop(Session session) {
-        clients.remove(session);
+        boolean was = clients.remove(session) != null;
         input.releaseHeldBy(session);
+        if (was) phonesChanged.run();
     }
 
     /** One phone's socket, with the token it asked with. Public because Jetty calls it. */
@@ -444,7 +456,7 @@ public final class PilotServer implements AutoCloseable {
         @Override
         public void onWebSocketOpen(Session opened) {
             session = opened;
-            Client client = new Client(new SendQueue(linkTo(opened)));
+            Client client = new Client(new SendQueue(linkTo(opened)), addressOf(opened));
             synchronized (pairingLock) {
                 if (!authorized(provided)) {
                     opened.close(BAD_TOKEN, BAD_TOKEN_REASON, Callback.NOOP);
@@ -452,6 +464,7 @@ public final class PilotServer implements AutoCloseable {
                 }
                 clients.put(opened, client);
             }
+            phonesChanged.run();
             client.out.text(stateJson()); // let a fresh client render the current run state immediately
             client.out.text(PilotMessages.inputJson(PilotInputService.Kind.wireNames()));
             // …and the run's recent trace, so a phone that connects mid-run opens on context, not blank.
@@ -477,6 +490,10 @@ public final class PilotServer implements AutoCloseable {
         public void onWebSocketError(Throwable cause) {
             if (session != null) drop(session);
         }
+    }
+
+    private static String addressOf(Session session) {
+        return session.getRemoteSocketAddress() instanceof InetSocketAddress from ? from.getHostString() : "unknown";
     }
 
     private SendQueue.Link linkTo(Session session) {
@@ -539,7 +556,58 @@ public final class PilotServer implements AutoCloseable {
             }
         }
         input.releaseHeld();
+        phonesChanged.run();
         return token;
+    }
+
+    /** The token a phone pairs with now; null before the first start. */
+    String token() {
+        return token;
+    }
+
+    // --- Connected phones ---
+
+    /**
+     * One connected phone.
+     *
+     * @param id          what {@link #disconnect} takes
+     * @param address     where its connection comes from; this computer's own, behind a tunnel
+     * @param sinceMillis when it connected, in epoch milliseconds
+     * @param interact    whether it armed Interact, so its gestures reach the game
+     */
+    public record Connected(String id, String address, long sinceMillis, boolean interact) {}
+
+    /** The phones connected now, the longest first. */
+    public List<Connected> connected() {
+        return clients.values().stream()
+                .map(c -> new Connected(c.id, c.address, c.sinceMillis, c.interact.get()))
+                .sorted(Comparator.comparingLong(Connected::sinceMillis).thenComparing(Connected::id))
+                .toList();
+    }
+
+    /**
+     * Closes the connection of the phone {@code id} of {@link #connected}, with the code that makes a phone stop
+     * retrying. Its token still stands: it may pair again, and only {@link #resetToken} keeps it out.
+     */
+    public void disconnect(String id) {
+        for (Map.Entry<Session, Client> phone : clients.entrySet()) {
+            if (!phone.getValue().id.equals(id)) continue;
+            Session session = phone.getKey();
+            drop(session);
+            try {
+                session.close(BAD_TOKEN, DISCONNECTED_REASON, Callback.NOOP);
+            } catch (Exception ignored) {
+                // Already gone; dropping it was the part that mattered.
+            }
+        }
+    }
+
+    /**
+     * What to run when a phone connects, leaves or changes. Set before {@link #start}; it runs on the connection's
+     * own thread, so it must not wait for anything this server does.
+     */
+    void onPhonesChanged(Runnable heard) {
+        phonesChanged = heard;
     }
 
     // --- Inbound control commands ---
@@ -560,8 +628,9 @@ public final class PilotServer implements AutoCloseable {
             case RESUME -> { control.resume().ifPresent(why -> notice(client, why)); refreshPausedState(); }
             case INTERACT -> {
                 boolean on = node.path("on").asBoolean(false);
-                client.interact.set(on);
+                boolean was = client.interact.getAndSet(on);
                 if (!on) input.releaseHeldBy(session);
+                if (was != on) phonesChanged.run();
             }
             case INPUT -> handleInput(client, session, node);
             case HELLO -> handleHello(client, node);

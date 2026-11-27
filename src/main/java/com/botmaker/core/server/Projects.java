@@ -12,6 +12,10 @@ import com.botmaker.core.dashboard.DashboardFeed;
 import com.botmaker.core.dashboard.Inside;
 import com.botmaker.core.edit.EditResult;
 import com.botmaker.core.event.CoreEvent;
+import com.botmaker.core.pilot.Pilot;
+import com.botmaker.core.pilot.PilotPreferences;
+import com.botmaker.core.pilot.PilotState;
+import com.botmaker.core.pilot.transport.TransportKind;
 import com.botmaker.core.plugin.HomePlugins;
 import com.botmaker.core.plugin.HomeServices;
 import com.botmaker.core.plugin.HostFolders;
@@ -28,6 +32,7 @@ import io.modelcontextprotocol.json.jackson2.JacksonMcpJsonMapper;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Clock;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -36,9 +41,12 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.LongFunction;
 import java.util.function.Supplier;
@@ -55,13 +63,17 @@ import java.util.function.Supplier;
  * Studio), until a client opens it or asks for another; or its last client left asking to keep its run going, until
  * that run ends. Either way a client's open of another project closes it first, unless a bot runs.
  */
-public final class Projects implements AutoCloseable, CoreHome.Host {
+public final class Projects implements AutoCloseable, CoreHome.Host, PilotPort {
 
     private static final ObjectMapper LENIENT = new ObjectMapper();
     private static final McpJsonMapper JSON = new JacksonMcpJsonMapper(new ObjectMapper());
+    /** How long a start of the pilot is waited for: a tunnel may take a minute to answer. */
+    private static final Duration PILOT_START_WAIT = Duration.ofSeconds(90);
 
     private final OpenProject.Libraries libraries;
     private final ServedTools tools;
+    /** The Remote Pilot of the open project: it stops with the project. */
+    private final Pilot pilot;
     private final Map<Channel, OpenProject> attached = new ConcurrentHashMap<>();
     private final ExecutorService opener = Executors.newSingleThreadExecutor(work -> {
         Thread thread = new Thread(work, "core-open");
@@ -96,10 +108,15 @@ public final class Projects implements AutoCloseable, CoreHome.Host {
         this(libraries, new ServedTools());
     }
 
-    /** Projects whose open one's own tools, each client's, and the core's home and run tools, {@code tools} serves. */
     Projects(OpenProject.Libraries libraries, ServedTools tools) {
+        this(libraries, tools, new Pilot(PilotPreferences.inMemory()));
+    }
+
+    /** Projects whose open one's own tools, each client's, and the core's home and run tools, {@code tools} serves. */
+    Projects(OpenProject.Libraries libraries, ServedTools tools, Pilot pilot) {
         this.libraries = libraries;
         this.tools = tools;
+        this.pilot = pilot;
         tools.watch(event -> watch.feed().told(event, "mcp"));
         tools.fallback(CoreHome.served(JSON, this, log));
         tools.held(CoreHome.device(JSON));
@@ -131,10 +148,55 @@ public final class Projects implements AutoCloseable, CoreHome.Host {
         return open != null;
     }
 
-    /** Whether a bot runs, its compile included: what keeps the core up with no client ({@link CoreServer.Hooks#busy}). */
+    /**
+     * Whether a bot runs, its compile included, or the Remote Pilot is up: what keeps the core up with no client
+     * ({@link CoreServer.Hooks#busy}).
+     */
     public boolean busy() {
         OpenProject project = open;
-        return project != null && project.running();
+        return project != null && project.running() || pilot.busy();
+    }
+
+    /** The Remote Pilot, which {@code POST /pilot} and a channel's {@link Request.ForPilot} drive. */
+    public Pilot pilot() {
+        return pilot;
+    }
+
+    @Override
+    public PilotState pilotState() {
+        return pilot.state();
+    }
+
+    @Override
+    public PilotState stopPilot() {
+        pilot.stop();
+        return pilot.state();
+    }
+
+    @Override
+    public PilotState resetPilot() {
+        pilot.resetToken();
+        return pilot.state();
+    }
+
+    /**
+     * Brings the pilot up over {@code transport} (the remembered one when null) on the open project and waits until it
+     * settled.
+     *
+     * @throws IllegalArgumentException when no project is open
+     */
+    @Override
+    public PilotState startPilot(TransportKind transport) {
+        OpenProject project = inTurnAwaited(() -> open);
+        if (project == null) throw new IllegalArgumentException("No project is open: open_project opens one.");
+        try {
+            return pilot.start(transport, project.served()).get(PILOT_START_WAIT.toSeconds(), TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalArgumentException("Interrupted while the Remote Pilot started.");
+        } catch (ExecutionException | TimeoutException e) {
+            return pilot.state();
+        }
     }
 
     /** One run of the open project was asked for and has not ended: what the run log says is starting. */
@@ -174,6 +236,7 @@ public final class Projects implements AutoCloseable, CoreHome.Host {
                 tools.called(channel, called);
                 answer(channel, called.id(), new EditResult.Accepted(List.of()));
             }
+            case Request.ForPilot ask -> pilotAsk(channel, ask);
             case Request.Close ask -> inTurn(() -> {
                 OpenProject project = attached.get(channel);
                 if (project != null) project.drain();
@@ -192,6 +255,53 @@ public final class Projects implements AutoCloseable, CoreHome.Host {
                         answer(channel, request.id(), result);
                     });
                 }
+            }
+        }
+    }
+
+    /**
+     * A client's ask of the pilot. Never on the opener's thread, which a library resolve may hold for minutes; a start
+     * waits on a thread of its own. The state goes only to a channel that watches.
+     */
+    private void pilotAsk(Channel channel, Request.ForPilot ask) {
+        switch (ask) {
+            case Request.PilotWatch watching -> {
+                AutoCloseable stop = pilot.watch(state -> channel.send(CoreJson.write(new Reply.Pilot(state))));
+                channel.onClose(() -> {
+                    try {
+                        stop.close();
+                    } catch (Exception ignored) {
+                        // Nothing to release that the channel's end did not.
+                    }
+                });
+                answer(channel, watching.id(), new EditResult.Accepted(List.of()));
+            }
+            case Request.PilotStart start -> {
+                Thread starting = new Thread(() -> {
+                    try {
+                        PilotState state = startPilot(start.transport());
+                        answer(channel, start.id(), state.phase() == PilotState.Phase.ON
+                                ? new EditResult.Accepted(List.of())
+                                : new EditResult.Refused(state.problem() == null
+                                        ? "The Remote Pilot did not start." : state.problem()));
+                    } catch (IllegalArgumentException refused) {
+                        answer(channel, start.id(), new EditResult.Refused(refused.getMessage()));
+                    }
+                }, "pilot-start-ask");
+                starting.setDaemon(true);
+                starting.start();
+            }
+            case Request.PilotStop stop -> {
+                pilot.stop();
+                answer(channel, stop.id(), new EditResult.Accepted(List.of()));
+            }
+            case Request.PilotReset reset -> {
+                pilot.resetToken();
+                answer(channel, reset.id(), new EditResult.Accepted(List.of()));
+            }
+            case Request.PilotDisconnect gone -> {
+                pilot.disconnect(gone.phone());
+                answer(channel, gone.id(), new EditResult.Accepted(List.of()));
             }
         }
     }
@@ -366,6 +476,8 @@ public final class Projects implements AutoCloseable, CoreHome.Host {
         kept = false;
         tools.own(null);
         tools.plugins(List.of());
+        // The pilot shows this project: it stops first, so no phone drives a project being closed.
+        pilot.stop();
         if (project != null) closeQuietly(project);
         serveHome();
     }
@@ -626,6 +738,7 @@ public final class Projects implements AutoCloseable, CoreHome.Host {
             homeBound = false;
             PluginHost.unbind();
         }
+        pilot.close();
         log.close();
     }
 }

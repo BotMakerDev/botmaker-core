@@ -5,6 +5,7 @@ package com.botmaker.core.server;
 
 import com.botmaker.core.edit.EditResult;
 import com.botmaker.core.event.CoreEvent;
+import com.botmaker.core.pilot.PilotState;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
 
@@ -13,8 +14,19 @@ import com.fasterxml.jackson.annotation.JsonTypeInfo;
 @JsonSubTypes({
         @JsonSubTypes.Type(value = Reply.Answer.class, name = "answer"),
         @JsonSubTypes.Type(value = Reply.Told.class, name = "told"),
-        @JsonSubTypes.Type(value = Reply.Call.class, name = "call")})
+        @JsonSubTypes.Type(value = Reply.Call.class, name = "call"),
+        @JsonSubTypes.Type(value = Reply.Pilot.class, name = "pilot")})
 public sealed interface Reply {
+
+    /**
+     * The Remote Pilot's state, sent to a channel that sent {@link Request.PilotWatch}: first as it is, then at each
+     * change. It holds the pairing link, so no other path carries it.
+     */
+    record Pilot(PilotState state) implements Reply {
+        public Pilot {
+            if (state == null) throw new IllegalArgumentException("a pilot reply carries its state");
+        }
+    }
 
     /**
      * The core asks the client that registered {@code tool} ({@link Request.Tools}) to run it with {@code arguments}, an

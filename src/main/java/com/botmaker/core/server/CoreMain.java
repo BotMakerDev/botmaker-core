@@ -5,10 +5,13 @@ package com.botmaker.core.server;
 
 import com.botmaker.core.assist.McpConfig;
 import com.botmaker.core.config.AppVersion;
+import com.botmaker.core.pilot.Pilot;
+import com.botmaker.core.pilot.PilotPreferences;
 import com.botmaker.core.plugin.HostServices;
 import com.botmaker.core.run.SideRunner;
 import com.botmaker.core.run.claims.RegistryHolds;
 import com.botmaker.shared.config.CacheDirs;
+import com.botmaker.shared.tools.UserDirs;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -97,7 +100,11 @@ public final class CoreMain {
         Running[] self = new Running[1];
         CountDownLatch started = new CountDownLatch(1);
         ServedTools tools = new ServedTools();
-        Projects projects = new Projects(libraries, tools);
+        // The user's core keeps the pilot's token and way in the config folder; a test's core forgets them.
+        Pilot pilot = new Pilot(home ? PilotPreferences.in(UserDirs.config().resolve(PilotPreferences.NAME))
+                : PilotPreferences.inMemory());
+        Projects projects = new Projects(libraries, tools, pilot);
+        if (home) pilot.clearLeftover();
         CoreServer server;
         try {
             // A bot kept running, or started through the MCP, keeps the core up with no client (plan phase 11).
@@ -106,7 +113,7 @@ public final class CoreMain {
                         awaitQuietly(started);
                         self[0].close();
                         ended.run();
-                    }, projects::inside, projects.feed()));
+                    }, projects::inside, projects.feed(), projects));
         } catch (IOException e) {
             projects.close();
             throw e;

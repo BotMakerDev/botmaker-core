@@ -18,6 +18,7 @@ import com.botmaker.core.events.EventBus;
 import com.botmaker.core.events.FileEdit;
 import com.botmaker.core.index.TypeSummaryManager;
 import com.botmaker.core.parser.EditorOutput;
+import com.botmaker.core.pilot.Pilot;
 import com.botmaker.core.parser.refactor.FunctionRestore;
 import com.botmaker.core.plugin.DevReloads;
 import com.botmaker.core.plugin.HostHistory;
@@ -376,6 +377,11 @@ public final class OpenProject implements AutoCloseable {
         return views;
     }
 
+    /** What the Remote Pilot shows and drives of this project. */
+    Pilot.Served served() {
+        return new Pilot.Served(runs, views, config.resourcesRoot());
+    }
+
     List<String> companionsGoing() {
         return companions.going();
     }
@@ -581,6 +587,7 @@ public final class OpenProject implements AutoCloseable {
             case Request.Open open -> new EditResult.Refused("The project is open already.");
             case Request.Close close -> new EditResult.Refused("A close is the core's to handle.");
             case Request.Tools _, Request.Called _, Request.WatchCalls _ -> new EditResult.Refused("A client's tools are the core's to handle.");
+            case Request.ForPilot _ -> new EditResult.Refused("The Remote Pilot is the core's to handle.");
         };
     }
 

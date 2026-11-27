@@ -6,6 +6,7 @@ package com.botmaker.core.server;
 import com.botmaker.core.edit.Edit;
 import com.botmaker.core.edit.EditRequest;
 import com.botmaker.core.edit.HistoryStep;
+import com.botmaker.core.pilot.transport.TransportKind;
 import com.botmaker.core.plugin.PluginWrite;
 import com.botmaker.core.run.claims.SeveralAsk;
 import com.botmaker.core.run.trial.TrialAsk;
@@ -47,7 +48,12 @@ import java.util.Set;
         @JsonSubTypes.Type(value = Request.Answer.class, name = "answer"),
         @JsonSubTypes.Type(value = Request.Debugging.class, name = "debugging"),
         @JsonSubTypes.Type(value = Request.Close.class, name = "close"),
-        @JsonSubTypes.Type(value = Request.WatchCalls.class, name = "watchCalls")})
+        @JsonSubTypes.Type(value = Request.WatchCalls.class, name = "watchCalls"),
+        @JsonSubTypes.Type(value = Request.PilotWatch.class, name = "pilotWatch"),
+        @JsonSubTypes.Type(value = Request.PilotStart.class, name = "pilotStart"),
+        @JsonSubTypes.Type(value = Request.PilotStop.class, name = "pilotStop"),
+        @JsonSubTypes.Type(value = Request.PilotReset.class, name = "pilotReset"),
+        @JsonSubTypes.Type(value = Request.PilotDisconnect.class, name = "pilotDisconnect")})
 public sealed interface Request {
 
     /** Which ask this is; the answer carries it back. */
@@ -265,5 +271,39 @@ public sealed interface Request {
      * ends. Answered at once; needs no open project.
      */
     record WatchCalls(long id) implements Request {
+    }
+
+    /**
+     * What a client asks of the Remote Pilot, which the core runs (2026-11-27). Answered by the core itself, never by
+     * a project's thread, and the pilot's state reaches only a channel that sent {@link PilotWatch}: it carries the
+     * pairing token, so it goes through no event, no dashboard and no call log.
+     */
+    sealed interface ForPilot extends Request {
+    }
+
+    /** Tells this client the pilot's state now and at each change ({@link Reply.Pilot}), until its channel ends. */
+    record PilotWatch(long id) implements ForPilot {
+    }
+
+    /**
+     * Brings the pilot up over {@code transport}, or over the remembered one when null; needs an open project and is
+     * answered once the start settled, on or off with why.
+     */
+    record PilotStart(long id, TransportKind transport) implements ForPilot {
+    }
+
+    /** Takes the pilot down. */
+    record PilotStop(long id) implements ForPilot {
+    }
+
+    /** Revokes the pairing token: every phone has to scan again. */
+    record PilotReset(long id) implements ForPilot {
+    }
+
+    /** Disconnects the phone {@code phone} of the pilot's state; it may pair again. */
+    record PilotDisconnect(long id, String phone) implements ForPilot {
+        public PilotDisconnect {
+            if (phone == null || phone.isBlank()) throw new IllegalArgumentException("a disconnect names its phone");
+        }
     }
 }

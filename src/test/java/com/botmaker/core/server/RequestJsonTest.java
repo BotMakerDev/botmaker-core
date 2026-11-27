@@ -9,6 +9,10 @@ import com.botmaker.core.edit.EditRequest;
 import com.botmaker.core.edit.EditResult;
 import com.botmaker.core.edit.HistoryStep;
 import com.botmaker.core.event.CoreEvent;
+import com.botmaker.core.pilot.PilotServer;
+import com.botmaker.core.pilot.PilotState;
+import com.botmaker.core.pilot.transport.FunnelTransport;
+import com.botmaker.core.pilot.transport.TransportKind;
 import com.botmaker.core.plugin.PluginWrite;
 import com.botmaker.core.run.claims.SeveralAsk;
 import com.botmaker.core.run.trial.TrialAsk;
@@ -60,7 +64,13 @@ class RequestJsonTest {
                 new Request.Debugging(18, Request.Debugging.Step.CONTINUE),
                 new Request.Close(7, false),
                 new Request.Close(8, true),
-                new Request.WatchCalls(9));
+                new Request.WatchCalls(9),
+                new Request.PilotWatch(40),
+                new Request.PilotStart(41, null),
+                new Request.PilotStart(42, TransportKind.QUICK_TUNNEL),
+                new Request.PilotStop(43),
+                new Request.PilotReset(44),
+                new Request.PilotDisconnect(45, "ab12cd34"));
         for (Request request : requests) {
             assertEquals(request, CoreJson.read(CoreJson.write(request), Request.class));
         }
@@ -135,7 +145,15 @@ class RequestJsonTest {
                 new Reply.Answer(2, new EditResult.Accepted(List.of())),
                 new Reply.Told(new CoreEvent.Status("Saved.")),
                 new Reply.Call(3, Reply.Call.Kind.RUN, "ui", "{\"action\":\"look\"}"),
-                new Reply.Call(4, Reply.Call.Kind.ADMIT, "edit_code", "{}"));
+                new Reply.Call(4, Reply.Call.Kind.ADMIT, "edit_code", "{}"),
+                new Reply.Pilot(new PilotState(PilotState.Phase.ON, TransportKind.LAN, TransportKind.LAN,
+                        "http://10.0.0.5:4000", "http://10.0.0.5:4000/?token=t", List.of("10", "01"), null, null,
+                        new FunnelTransport.Diag(true, true, FunnelTransport.Issue.NONE),
+                        List.of(new PilotState.Option(TransportKind.LAN, true, null, null)),
+                        List.of(new PilotServer.Connected("ab12cd34", "10.0.0.9", 5L, true)),
+                        List.of(new PilotState.TailnetPhone("pixel", true, 0L)))),
+                new Reply.Pilot(new PilotState(PilotState.Phase.OFF, TransportKind.TAILNET, null, null, null, null,
+                        "Tailscale is off", "Turn it on", null, null, null, null)));
         for (Reply reply : replies) {
             assertEquals(reply, CoreJson.read(CoreJson.write(reply), Reply.class));
         }
