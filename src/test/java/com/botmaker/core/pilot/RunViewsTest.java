@@ -119,6 +119,51 @@ class RunViewsTest {
     }
 
     @Test
+    void aRunsViewIsToldWhichRunItIsForAndTheIdleOneNone() {
+        List<Object> told = new java.util.ArrayList<>();
+        RunView recording = new RunView() {
+            @Override
+            public Optional<ViewTarget> target() {
+                return Optional.empty();
+            }
+
+            @Override
+            public void start(StudioServices services, com.botmaker.plugin.api.run.ViewedRun run, Runnable changed) {
+                told.add(run);
+            }
+
+            @Override
+            public void start(StudioServices services, Runnable changed) {
+                told.add("none");
+            }
+        };
+        List<StudioPlugin> bound = List.of(new RecordingPlugin());
+        Recording.view = recording;
+        RunViews views = new RunViews(() -> bound, null, Runnable::run, () -> { });
+
+        views.views();
+        views.started(() -> new com.botmaker.plugin.api.run.ViewedRun("run-1", "Farm"));
+
+        assertEquals(List.of("none", new com.botmaker.plugin.api.run.ViewedRun("run-1", "Farm")), told);
+    }
+
+    public static final class RecordingPlugin extends DeclaredPlugin {
+        public RecordingPlugin() {
+            super(StudioPlugin.declare().views(Recording.class));
+        }
+    }
+
+    /** A holder that gives the view a test set. */
+    public static final class Recording implements RunViewHolder {
+        static volatile RunView view;
+
+        @Override
+        public RunView view() {
+            return view;
+        }
+    }
+
+    @Test
     void aClosedWindowGivesItsReasonAndNoTarget() {
         Shows.open = false;
         RunViews views = views();

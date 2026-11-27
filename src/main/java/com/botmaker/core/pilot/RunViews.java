@@ -8,6 +8,7 @@ import com.botmaker.plugin.api.StudioPlugin;
 import com.botmaker.plugin.api.StudioServices;
 import com.botmaker.plugin.api.run.RunView;
 import com.botmaker.plugin.api.run.ViewTarget;
+import com.botmaker.plugin.api.run.ViewedRun;
 import com.botmaker.shared.Diag;
 
 import java.util.ArrayList;
@@ -72,6 +73,14 @@ public final class RunViews {
 
     /** A run started: each plugin's view of it is built and started. Told again while it goes, it builds nothing more. */
     public void started() {
+        started(() -> null);
+    }
+
+    /**
+     * {@link #started()}, each view told which run it is for: {@code run} is asked once, when the views are built, and
+     * may answer {@code null} when the run is not named yet (the views then get the two-argument start).
+     */
+    public void started(Supplier<ViewedRun> run) {
         long mine;
         synchronized (this) {
             if (closed || running) return;
@@ -79,7 +88,7 @@ public final class RunViews {
             replace(List.of(), null);
             mine = sets;
         }
-        List<RunView> built = build(plugins.get());
+        List<RunView> built = build(plugins.get(), run.get());
         synchronized (this) {
             if (mine == sets) replace(built, null);
         }
@@ -110,7 +119,7 @@ public final class RunViews {
             if (closed || running || bound.equals(idleOf)) return current;
             seen = sets;
         }
-        List<RunView> built = build(bound);
+        List<RunView> built = build(bound, null);
         synchronized (this) {
             if (seen == sets) replace(built, List.copyOf(bound));
             return current;
@@ -190,12 +199,13 @@ public final class RunViews {
         return why.isEmpty() ? NOTHING : new Shown(Optional.empty(), why);
     }
 
-    private List<RunView> build(List<StudioPlugin> bound) {
+    private List<RunView> build(List<StudioPlugin> bound, ViewedRun run) {
         List<RunView> built = new ArrayList<>();
         for (StudioPlugin plugin : bound) {
             try {
                 for (RunView view : plugin.runViews()) {
-                    view.start(services, this::changed);
+                    if (run == null) view.start(services, this::changed);
+                    else view.start(services, run, this::changed);
                     built.add(view);
                 }
             } catch (RuntimeException | LinkageError e) {

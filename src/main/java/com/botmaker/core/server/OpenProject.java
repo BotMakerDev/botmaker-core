@@ -20,6 +20,7 @@ import com.botmaker.core.index.TypeSummaryManager;
 import com.botmaker.core.parser.EditorOutput;
 import com.botmaker.core.pilot.Pilot;
 import com.botmaker.core.pilot.PilotRuns;
+import com.botmaker.core.pilot.RegistryRuns;
 import com.botmaker.core.parser.refactor.FunctionRestore;
 import com.botmaker.core.plugin.DevReloads;
 import com.botmaker.core.plugin.HostHistory;
@@ -31,6 +32,7 @@ import com.botmaker.core.plugin.PluginWrite;
 import com.botmaker.core.plugin.WriteSteps;
 import com.botmaker.plugin.api.run.DevReload;
 import com.botmaker.plugin.api.run.RunEntry;
+import com.botmaker.plugin.api.run.ViewedRun;
 import com.botmaker.plugin.host.LoadedPlugin;
 import com.botmaker.plugin.host.PluginCoordinate;
 import com.botmaker.core.project.ProjectConfig;
@@ -76,7 +78,6 @@ import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -387,25 +388,15 @@ public final class OpenProject implements AutoCloseable {
 
     /** The live runs of this PC, the open project's own named as the run the pilot holds a view for. */
     private PilotRuns registryRuns() {
-        RunRegistry registry = RunRegistry.ofThisPc();
-        return new PilotRuns() {
-            @Override
-            public List<Listed> live() {
-                return registry.live().stream()
-                        .sorted(Comparator.comparingLong(RunRegistry.LiveRun::startedMillis)
-                                .thenComparing(RunRegistry.LiveRun::runId))
-                        .map(run -> new Listed(run.runId(), run.bot(), run.startedMillis()))
-                        .toList();
-            }
+        return new RegistryRuns(RunRegistry.ofThisPc(), execution::runningBotPid);
+    }
 
-            @Override
-            public Optional<String> viewed() {
-                OptionalLong pid = execution.runningBotPid();
-                if (pid.isEmpty()) return Optional.empty();
-                return registry.live().stream().filter(run -> run.pid() == pid.getAsLong())
-                        .map(RunRegistry.LiveRun::runId).findFirst();
-            }
-        };
+    /** The open project's run as the registry names it, for the views built when it starts; {@code null} until named. */
+    private ViewedRun viewedRun() {
+        OptionalLong pid = execution.runningBotPid();
+        if (pid.isEmpty()) return null;
+        return RunRegistry.ofThisPc().live().stream().filter(run -> run.pid() == pid.getAsLong())
+                .map(run -> new ViewedRun(run.runId(), run.bot())).findFirst().orElse(null);
     }
 
     List<String> companionsGoing() {
@@ -1200,7 +1191,7 @@ public final class OpenProject implements AutoCloseable {
             case CoreEvent.RunState run when run.phase() == CoreEvent.RunState.Phase.RUNNING -> {
                 runs.ran(true);
                 companions.started();
-                views.started();
+                views.started(this::viewedRun);
             }
             case CoreEvent.RunState run when run.phase() == CoreEvent.RunState.Phase.ENDED -> {
                 runs.ran(false);

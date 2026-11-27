@@ -281,6 +281,41 @@ class PilotServerTest {
         ws.abort();
     }
 
+    /** A run the pilot holds no view for is stopped, paused and resumed by its id, and only while the phone is shown it. */
+    @Test
+    void aRunWithNoViewCanBePausedResumedAndStoppedByItsId() throws Exception {
+        List<String> signalled = new ArrayList<>();
+        java.util.Set<String> paused = java.util.concurrent.ConcurrentHashMap.newKeySet();
+        PilotRuns listing = new PilotRuns() {
+            @Override public List<Listed> live() { return List.of(new Listed("run-x", "Bot x", 1_000L)); }
+            @Override public Optional<String> viewed() { return Optional.empty(); }
+            @Override public java.util.Set<String> paused() { return paused; }
+            @Override public Optional<String> pause(String id) { signalled.add("pause " + id); paused.add(id); return Optional.empty(); }
+            @Override public Optional<String> resume(String id) { signalled.add("resume " + id); paused.remove(id); return Optional.empty(); }
+            @Override public Optional<String> stop(String id) { signalled.add("stop " + id); return Optional.of("denied"); }
+        };
+        PilotServer.Endpoint ep = start(listing);
+        BlockingQueue<String> heard = new LinkedBlockingQueue<>();
+        WebSocket ws = connect(ep, heard);
+        next(heard, "runs", "run-x");
+
+        // A phone shown no run (the idle views) cannot signal a run it is not shown.
+        ws.sendText("{\"cmd\":\"pause\",\"run\":\"run-x\"}", true).get(5, TimeUnit.SECONDS);
+        assertContains("no view", next(heard, "notice"));
+        assertEquals(List.of(), signalled);
+
+        ws.sendText("{\"cmd\":\"select\",\"run\":\"run-x\"}", true).get(5, TimeUnit.SECONDS);
+        next(heard, "runs", "\"selected\":\"run-x\"");
+        ws.sendText("{\"cmd\":\"pause\",\"run\":\"run-x\"}", true).get(5, TimeUnit.SECONDS);
+        next(heard, "runs", "\"state\":\"paused\"");
+        ws.sendText("{\"cmd\":\"resume\"}", true).get(5, TimeUnit.SECONDS);
+        next(heard, "runs", "\"state\":\"running\"");
+        ws.sendText("{\"cmd\":\"stop\",\"run\":\"run-x\"}", true).get(5, TimeUnit.SECONDS);
+        assertContains("denied", next(heard, "notice"));
+        assertEquals(List.of("pause run-x", "resume run-x", "stop run-x"), signalled);
+        ws.abort();
+    }
+
     private static void assertContains(String part, String message) {
         assertNotNull(message, "nothing heard, waiting for " + part);
         assertTrue(message.contains(part), message);

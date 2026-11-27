@@ -9,6 +9,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- A phone can stop, pause and resume a run the open project does not hold (2026-11-27, pilot in core phase 4b): a
+  signal to the pid the run registry gives for its id (Unix; the id must be listed, the open project's run and the
+  core itself are refused), and the list says which runs the pilot paused. A run's views are told which run they are
+  for (`RunView.start(services, ViewedRun, changed)`). Still no picture or input for a run of another process.
 - The pilot lists the PC's live runs (2026-11-27, pilot in core phase 4a): a `runs` message from the run registry
   (each run by the core's run id, live runs only) and a `select` command, kept per socket; a `runId` on `state`,
   `video`, `trace` and `notice`; a command's `run` must name the run its phone is shown. The open project's run has

@@ -38,6 +38,8 @@ import java.util.List;
 import java.util.UUID;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
@@ -651,6 +653,11 @@ public final class PilotServer implements AutoCloseable {
             select(client, session, named);
             return;
         }
+        String other = otherRunOf(client, cmd, named);
+        if (other != null) {
+            controlOther(client, cmd, other);
+            return;
+        }
         if (cmd != PilotCommand.HELLO && !mayControl(client, cmd, named)) {
             notice(client, NO_VIEW_NOTICE);
             return;
@@ -672,7 +679,29 @@ public final class PilotServer implements AutoCloseable {
         }
     }
 
-    private static final String NO_VIEW_NOTICE = "There is no view of this run on the computer yet, so it cannot "
+    /**
+     * The listed run a stop, pause or resume is for when the pilot holds no view of it, else {@code null}: the run the
+     * phone is shown (the command may name it, never another).
+     */
+    private String otherRunOf(Client client, PilotCommand cmd, String named) {
+        if (cmd != PilotCommand.STOP && cmd != PilotCommand.PAUSE && cmd != PilotCommand.RESUME) return null;
+        Snapshot now = snapshot;
+        String shown = effective(client, now);
+        if (shown == null || sees(shown, now) || !listed(now, shown)) return null;
+        return named == null || named.equals(shown) ? shown : null;
+    }
+
+    private void controlOther(Client client, PilotCommand cmd, String id) {
+        Optional<String> why = switch (cmd) {
+            case STOP -> listing.stop(id);
+            case PAUSE -> listing.pause(id);
+            default -> listing.resume(id);
+        };
+        why.ifPresent(text -> notice(client, text));
+        refreshRuns();
+    }
+
+    private static final String NO_VIEW_NOTICE ="There is no view of this run on the computer yet, so it cannot "
             + "be controlled from here.";
 
     private static final String GONE_NOTICE = "That run is not running any more.";
@@ -859,7 +888,8 @@ public final class PilotServer implements AutoCloseable {
             return PilotMessages.stateJson(runState, input.supportsBackgroundInput(pushed.route()), emptyReason,
                     now.viewed());
         }
-        return PilotMessages.stateJson(RunState.RUNNING, false, NO_VIEW_REASON, shown);
+        RunState other = shown != null && now.paused().contains(shown) ? RunState.PAUSED : RunState.RUNNING;
+        return PilotMessages.stateJson(other, false, NO_VIEW_REASON, shown);
     }
 
     // --- The runs a phone lists and picks from ---
@@ -867,9 +897,16 @@ public final class PilotServer implements AutoCloseable {
     private static final String NO_VIEW_REASON = "no view of this run yet";
 
     /** The live runs and the one the pilot holds a view for, as of the last {@link #refreshRuns}. */
-    private record Snapshot(List<PilotRuns.Listed> live, String viewed, String viewedState) {}
+    private record Snapshot(List<PilotRuns.Listed> live, String viewed, String viewedState, Set<String> paused) {
 
-    private volatile Snapshot snapshot = new Snapshot(List.of(), null, RunState.STOPPED.id());
+        /** What a listed run is doing: the viewed run's state, else paused when the list paused it, else running. */
+        String stateOf(String id) {
+            if (id.equals(viewed)) return viewedState;
+            return paused.contains(id) ? RunState.PAUSED.id() : RunState.RUNNING.id();
+        }
+    }
+
+    private volatile Snapshot snapshot = new Snapshot(List.of(), null, RunState.STOPPED.id(), Set.of());
     private final Object runsLock = new Object();
     /** When the registry was last read, by {@link System#nanoTime}. Frame thread only. */
     private long runsReadAt = System.nanoTime();
@@ -914,7 +951,7 @@ public final class PilotServer implements AutoCloseable {
             List<PilotRuns.Listed> live = List.copyOf(listing.live());
             String viewed = listing.viewed().filter(id -> live.stream().anyMatch(run -> run.id().equals(id)))
                     .orElse(null);
-            Snapshot read = new Snapshot(live, viewed, runState.id());
+            Snapshot read = new Snapshot(live, viewed, runState.id(), Set.copyOf(listing.paused()));
             if (read.equals(snapshot)) return;
             snapshot = read;
             clients.values().forEach(this::tell);
@@ -933,8 +970,7 @@ public final class PilotServer implements AutoCloseable {
             boolean saw = client.sawView;
             client.sawView = seesNow;
             client.out.text(PilotMessages.runsJson(shown, now.live().stream()
-                    .map(run -> new PilotMessages.Listed(run.id(), run.bot(),
-                            run.id().equals(now.viewed()) ? now.viewedState() : RunState.RUNNING.id(),
+                    .map(run -> new PilotMessages.Listed(run.id(), run.bot(), now.stateOf(run.id()),
                             run.startedMillis()))
                     .toList()));
             client.out.text(stateJson(client));
