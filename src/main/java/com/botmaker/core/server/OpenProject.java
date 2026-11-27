@@ -654,7 +654,8 @@ public final class OpenProject implements AutoCloseable {
             return new EditResult.Refused("The start of several runs was interrupted.");
         }
         List<CoreEvent.RunsStarted.Started> runs = outcome.listed().stream()
-                .map(row -> new CoreEvent.RunsStarted.Started(row.row() + 1, row.runId(), row.picks())).toList();
+                .map(row -> new CoreEvent.RunsStarted.Started(row.row() + 1, row.runId(), row.picks(), row.notes()))
+                .toList();
         tell(new CoreEvent.RunsStarted(several.token(), outcome.words(), runs, outcome.warnings(), outcome.offers(),
                 outcome.how() == SeveralAsk.How.COUNT));
         return new EditResult.Accepted(List.of());

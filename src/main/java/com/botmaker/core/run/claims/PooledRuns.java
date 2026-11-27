@@ -47,11 +47,14 @@ public final class PooledRuns {
      * @param row   its row's index
      * @param runId its id in the live runs
      * @param picks what it was dealt, by each pool's parameter
+     * @param notes what the pools' owners said about its row ({@link Dealer.Row#notes})
      */
-    public record Started(int row, String runId, Process process, Map<String, List<String>> picks) {
+    public record Started(int row, String runId, Process process, Map<String, List<String>> picks,
+                          List<String> notes) {
 
         public Started {
             picks = Map.copyOf(picks);
+            notes = List.copyOf(notes);
         }
     }
 
@@ -113,9 +116,10 @@ public final class PooledRuns {
         /** The rows to tell: each run started, or for a count each row that could, with no run id. */
         public List<Listed> listed() {
             if (how == SeveralAsk.How.COUNT) {
-                return dealing.rows().stream().map(row -> new Listed(row.index(), "", row.picks())).toList();
+                return dealing.rows().stream().map(row -> new Listed(row.index(), "", row.picks(), row.notes()))
+                        .toList();
             }
-            return started.stream().map(run -> new Listed(run.row(), run.runId(), run.picks())).toList();
+            return started.stream().map(run -> new Listed(run.row(), run.runId(), run.picks(), run.notes())).toList();
         }
     }
 
@@ -125,8 +129,9 @@ public final class PooledRuns {
      * @param row   its index
      * @param runId the run's id; empty for a count's row, which started nothing
      * @param picks what it was dealt, by each pool's parameter
+     * @param notes what the pools' owners said about it, shown with ⚠
      */
-    public record Listed(int row, String runId, Map<String, List<String>> picks) {
+    public record Listed(int row, String runId, Map<String, List<String>> picks, List<String> notes) {
     }
 
     /**
@@ -208,7 +213,8 @@ public final class PooledRuns {
                 // Given to the run's own process: freed when it ends, even when this core has gone.
                 registry.locked(locked -> locked.moveTo(one.runId(), process.toHandle()));
                 process.onExit().thenRun(() -> registry.release(one.runId()));
-                started.add(new Started(one.row().index(), one.runId(), process, one.row().picks()));
+                started.add(new Started(one.row().index(), one.runId(), process, one.row().picks(),
+                        one.row().notes()));
             }
         } finally {
             // What threw left the rest the core's own, held as long as it lives: freed now.

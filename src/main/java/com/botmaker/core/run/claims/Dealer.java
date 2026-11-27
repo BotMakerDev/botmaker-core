@@ -50,6 +50,21 @@ public final class Dealer {
         List<String> left(List<String> free, Map<String, List<String>> picks);
     }
 
+    /** What a pool's owner says about a row dealt one of its elements: words shown on the row, never a choice. */
+    @FunctionalInterface
+    public interface Noting {
+
+        /** No row is noted. */
+        Noting NONE = (element, picks) -> Optional.empty();
+
+        /**
+         * The words for a row dealt {@code element}, if any. Asked once for each element a dealt row holds.
+         *
+         * @param picks the row before this pool, by each pool's {@link Source#parameter}
+         */
+        Optional<String> note(String element, Map<String, List<String>> picks);
+    }
+
     /**
      * One pool as the dealing reads it, a bot's or a plugin's.
      *
@@ -65,10 +80,11 @@ public final class Dealer {
      *                  plugin's {@code PluginPool.sharing} answered (2026-11-27)
      * @param claims    by element, the keys a run dealt it holds alone: no live run holds or claims one, and no two
      *                  rows of a dealing take one; what a plugin's {@code PluginPool.claiming} answered (2026-11-27)
+     * @param noting    what a dealt row is told about its element: a plugin's {@code PluginPool.noting} (2026-11-27)
      */
     public record Source(Hold.Kind kind, String owner, String parameter, String name, List<String> elements, int take,
                          int each, boolean rotates, Narrowing narrowing, Map<String, Integer> shares,
-                         Map<String, List<String>> claims) {
+                         Map<String, List<String>> claims, Noting noting) {
 
         public Source {
             Objects.requireNonNull(kind, "kind");
@@ -76,6 +92,7 @@ public final class Dealer {
             Objects.requireNonNull(parameter, "parameter");
             Objects.requireNonNull(name, "name");
             Objects.requireNonNull(narrowing, "narrowing");
+            Objects.requireNonNull(noting, "noting");
             elements = List.copyOf(new LinkedHashSet<>(elements));
             if (take < 0) throw new IllegalArgumentException("take " + take + " < 0");
             if (each < 1) throw new IllegalArgumentException("each " + each + " < 1");
@@ -93,45 +110,54 @@ public final class Dealer {
         /** A bot's own pool: one element a run, held by one run, sticky. */
         public static Source bot(String bot, String parameter, String name, List<String> elements) {
             return new Source(Hold.Kind.BOT, bot, parameter, name, elements, 0, 1, false, Narrowing.NONE, Map.of(),
-                    Map.of());
+                    Map.of(), Noting.NONE);
         }
 
         /** A plugin's pool, held for every bot on this PC. */
         public static Source plugin(String coordinate, String parameter, String name, List<String> elements) {
             return new Source(Hold.Kind.PLUGIN, coordinate, parameter, name, elements, 0, 1, false, Narrowing.NONE,
-                    Map.of(), Map.of());
+                    Map.of(), Map.of(), Noting.NONE);
         }
 
         /** This pool, each run taking {@code k} elements. */
         public Source taking(int k) {
-            return new Source(kind, owner, parameter, name, elements, k, each, rotates, narrowing, shares, claims);
+            return new Source(kind, owner, parameter, name, elements, k, each, rotates, narrowing, shares, claims,
+                    noting);
         }
 
         /** This pool, {@code n} live runs sharing an element. */
         public Source sharedBy(int n) {
-            return new Source(kind, owner, parameter, name, elements, take, n, rotates, narrowing, shares, claims);
+            return new Source(kind, owner, parameter, name, elements, take, n, rotates, narrowing, shares, claims,
+                    noting);
         }
 
         /** This pool, {@code byElement} live runs sharing each element it names, the others as {@link #each}. */
         public Source sharedBy(Map<String, Integer> byElement) {
             return new Source(kind, owner, parameter, name, elements, take, each, rotates, narrowing, byElement,
-                    claims);
+                    claims, noting);
         }
 
         /** This pool, a run dealt an element {@code byElement} names holding those keys alone beside it. */
         public Source claiming(Map<String, List<String>> byElement) {
             return new Source(kind, owner, parameter, name, elements, take, each, rotates, narrowing, shares,
-                    byElement);
+                    byElement, noting);
         }
 
         /** This pool, its least recently used element dealt first. */
         public Source rotating() {
-            return new Source(kind, owner, parameter, name, elements, take, each, true, narrowing, shares, claims);
+            return new Source(kind, owner, parameter, name, elements, take, each, true, narrowing, shares, claims,
+                    noting);
         }
 
         /** This pool, its free elements narrowed by the row's earlier picks. */
         public Source narrowedBy(Narrowing by) {
-            return new Source(kind, owner, parameter, name, elements, take, each, rotates, by, shares, claims);
+            return new Source(kind, owner, parameter, name, elements, take, each, rotates, by, shares, claims, noting);
+        }
+
+        /** This pool, a dealt row told what {@code by} says about its element. */
+        public Source noting(Noting by) {
+            return new Source(kind, owner, parameter, name, elements, take, each, rotates, narrowing, shares, claims,
+                    by);
         }
 
         /** The keys a run dealt {@code element} holds alone; none for most. */
@@ -161,13 +187,20 @@ public final class Dealer {
      * @param index which of the runs asked for it is, from 0: what its pins and its last picks are kept under
      * @param picks each pool's pick by its {@link Source#parameter}, in the pools' order: one element, or as many
      *              as the pool takes
+     * @param notes what the pools' owners say about the row, shown on it with ⚠ ({@link Source#noting}), each once
      */
-    public record Row(int index, Map<String, List<String>> picks) {
+    public record Row(int index, Map<String, List<String>> picks, List<String> notes) {
 
         public Row {
             Map<String, List<String>> copy = new LinkedHashMap<>();
             picks.forEach((parameter, pick) -> copy.put(parameter, List.copyOf(pick)));
             picks = Collections.unmodifiableMap(copy);
+            notes = List.copyOf(new LinkedHashSet<>(notes));
+        }
+
+        /** A row with no note. */
+        public Row(int index, Map<String, List<String>> picks) {
+            this(index, picks, List.of());
         }
 
         /** What the registry holds for this row, over the {@code pools} it was dealt from. */
@@ -314,7 +347,7 @@ public final class Dealer {
     /**
      * Deals {@code request}.
      *
-     * @throws Failed when a pool's narrowing throws
+     * @throws Failed when a pool's narrowing or noting throws
      */
     public static Dealing deal(Request request) {
         return new Table(request).deal();
@@ -391,7 +424,32 @@ public final class Dealer {
         private void take(List<Row> rows, int index, Map<String, List<String>> picks) {
             picks.forEach((pool, pick) -> pick.forEach(element -> count(taken, pool, element, 1)));
             keysTaken.addAll(new Row(index, picks).claims(pools));
-            rows.add(new Row(index, picks));
+            rows.add(new Row(index, picks, notesOf(picks)));
+        }
+
+        /** What each pool's owner says about the row {@code picks} dealt, each pool asked with the picks before it. */
+        private List<String> notesOf(Map<String, List<String>> picks) {
+            List<String> notes = new ArrayList<>();
+            Map<String, List<String>> before = new LinkedHashMap<>();
+            for (Source pool : pools) {
+                List<String> pick = picks.getOrDefault(pool.parameter(), List.of());
+                if (pool.noting() != Noting.NONE) {
+                    Map<String, List<String>> seen = Collections.unmodifiableMap(new LinkedHashMap<>(before));
+                    for (String element : pick) {
+                        Optional<String> note;
+                        try {
+                            note = pool.noting().note(element, seen);
+                        } catch (Failed failed) {
+                            throw failed;
+                        } catch (RuntimeException | LinkageError e) {
+                            throw new Failed(pool.owner(), "failed while noting " + pool.name(), e);
+                        }
+                        if (note != null) note.filter(words -> !words.isBlank()).ifPresent(notes::add);
+                    }
+                }
+                if (!pick.isEmpty()) before.put(pool.parameter(), pick);
+            }
+            return notes;
         }
 
         /** The keys the elements of {@code pick} in the pool filling {@code parameter} hold alone; none for no pool. */

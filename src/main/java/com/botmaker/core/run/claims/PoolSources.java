@@ -255,8 +255,13 @@ public final class PoolSources {
             List<T> left = pool.left(given, picksOf(picks, typed), services);
             return free.stream().filter(element -> left.contains(values.get(element))).toList();
         };
+        // What the plugin says about a row dealt an element (PluginPool.noting), shown on it with ⚠.
+        Dealer.Noting noting = (element, picks) -> {
+            T candidate = values.get(element);
+            return candidate == null ? Optional.empty() : pool.noteOn(candidate, picksOf(picks, typed), services);
+        };
         return Dealer.Source.plugin(coordinate, parameter.id(), method, List.copyOf(values.keySet()))
-                .narrowedBy(narrowing).sharedBy(shares).claiming(claims);
+                .narrowedBy(narrowing).sharedBy(shares).claiming(claims).noting(noting);
     }
 
     /** The row's picks as a plugin reads them: its own parameters' and other plugins', each its typed value. */

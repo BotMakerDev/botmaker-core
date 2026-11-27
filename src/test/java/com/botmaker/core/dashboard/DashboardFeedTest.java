@@ -91,7 +91,8 @@ class DashboardFeedTest {
                 List.of(new CoreEvent.ToolCallEnded.Part(CoreEvent.ToolCallEnded.Part.Kind.IMAGE, image, 640, 480)),
                 10, 0), "mcp");
         feed.told(new CoreEvent.RunsStarted("asked", "words",
-                List.of(new CoreEvent.RunsStarted.Started(0, "run-1", Map.of("account", List.of("secret@example")))),
+                List.of(new CoreEvent.RunsStarted.Started(0, "run-1", Map.of("account", List.of("secret@example")),
+                        List.of("plays at secret@example's place"))),
                 List.of(), List.of(), false), "project");
         List<DashboardFeed.Seen> kept = feed.kept();
         String call = CoreJson.write(new Reply.Told(((DashboardFeed.Told) kept.get(0)).event()));

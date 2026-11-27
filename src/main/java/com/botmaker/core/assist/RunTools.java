@@ -208,6 +208,7 @@ final class RunTools {
             String picks = String.join(", ", run.picks().entrySet().stream()
                     .map(pick -> pick.getKey() + " = " + String.join(" + ", pick.getValue())).toList());
             if (!picks.isEmpty()) out.append(": ").append(picks);
+            out.append(CoreEvent.RunsStarted.Started.marked(run.notes()));
         }
         if (!started.warnings().isEmpty()) {
             out.append("\nWarnings: ").append(String.join("; ", started.warnings()));

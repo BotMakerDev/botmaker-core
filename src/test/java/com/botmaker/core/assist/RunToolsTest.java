@@ -36,13 +36,15 @@ class RunToolsTest {
 
     private static final CoreEvent.RunsStarted SEVEN_OF_ELEVEN = new CoreEvent.RunsStarted("t-1",
             "7 of 11 can run: 4 instances missing",
-            List.of(new CoreEvent.RunsStarted.Started(1, "r-1", Map.of("Sdk#instance", List.of("Instance.named(\"ld-1\")"))),
-                    new CoreEvent.RunsStarted.Started(2, "r-2", Map.of())),
+            List.of(new CoreEvent.RunsStarted.Started(1, "r-1", Map.of("Sdk#instance", List.of("Instance.named(\"ld-1\")")),
+                            List.of("ld-1 last read other@example.com")),
+                    new CoreEvent.RunsStarted.Started(2, "r-2", Map.of(), List.of())),
             List.of("accounts() could not be read"), List.of("Create 4 instances"), false);
 
     private static final CoreEvent.RunsStarted COUNTED = new CoreEvent.RunsStarted("t-2",
             "1 of 2 can run: 1 instance missing",
-            List.of(new CoreEvent.RunsStarted.Started(1, "", Map.of("Sdk#instance", List.of("Instance.named(\"ld-1\")")))),
+            List.of(new CoreEvent.RunsStarted.Started(1, "", Map.of("Sdk#instance", List.of("Instance.named(\"ld-1\")")),
+                    List.of())),
             List.of(), List.of("Create 1 instance"), true);
 
     private static RunTools.Run runs(Integer runs) {
@@ -97,7 +99,8 @@ class RunToolsTest {
         String answer = RunTools.run(bot, idleLog(), runs(11));
         assertEquals(SeveralAsk.of(11), bot.asked);
         assertTrue(answer.startsWith("7 of 11 can run: 4 instances missing."), answer);
-        assertTrue(answer.contains("- run 1, id r-1: Sdk#instance = Instance.named(\"ld-1\")"), answer);
+        assertTrue(answer.contains("- run 1, id r-1: Sdk#instance = Instance.named(\"ld-1\")"
+                + " ⚠ ld-1 last read other@example.com"), answer);
         assertTrue(answer.contains("- run 2, id r-2\n"), answer);
         assertTrue(answer.contains("Warnings: accounts() could not be read"), answer);
         assertTrue(answer.contains("nothing here runs them): Create 4 instances"), answer);

@@ -412,6 +412,42 @@ class DealerTest {
     }
 
     @Test
+    void aDealtRowCarriesWhatThePluginNotesAboutItsPickGivenTheEarlierPicks() {
+        PluginPool<Boolean> setups = PluginPool.fills(SETUP).from(services -> List.of(true, false));
+        // A pause that disagrees with its row's setup is dealt anyway, and said.
+        PluginPool<Boolean> pauses = PluginPool.fills(PAUSE).from(services -> List.of(false, true))
+                .noting((pause, picks, services) -> picks.of(SETUP).filter(setup -> !setup.equals(pause))
+                        .map(setup -> "pause " + pause + " while setup " + setup).orElse(null));
+        PoolSources.Read read = PoolSources.of(List.of(new PoolSources.Declared(SDK, List.of(setups, pauses))),
+                id -> Optional.of(target(id.equals(SETUP.id()) ? "doSetup" : "pause")), ValueGrammar.empty(), null,
+                "farm", List.of());
+
+        Dealing dealing = Dealer.deal(Request.of(read.pools(), 2, List.of()));
+        assertEquals(List.of("true", "false"), picked(dealing, SETUP.id()));
+        assertEquals(List.of("false", "true"), picked(dealing, PAUSE.id()));
+        assertEquals(List.of(List.of("pause false while setup true"), List.of("pause true while setup false")),
+                dealing.rows().stream().map(Row::notes).toList());
+
+        Dealing quiet = Dealer.deal(Request.of(read.pools().subList(0, 1), 1, List.of()));
+        assertEquals(List.of(), quiet.rows().getFirst().notes(), "a pool with no noting notes nothing");
+    }
+
+    @Test
+    void aNotingThatThrowsFailsTheDealingWithThePluginNamed() {
+        PluginPool<Boolean> setups = PluginPool.fills(SETUP).from(services -> List.of(true))
+                .noting((setup, picks, services) -> {
+                    throw new IllegalStateException("no book");
+                });
+        PoolSources.Read read = PoolSources.of(List.of(new PoolSources.Declared(SDK, List.of(setups))),
+                id -> Optional.of(target("doSetup")), ValueGrammar.empty(), null, "farm", List.of());
+
+        Dealer.Failed failed = assertThrows(Dealer.Failed.class,
+                () -> Dealer.deal(Request.of(read.pools(), 1, List.of())));
+        assertEquals(SDK, failed.owner());
+        assertEquals("com.example:sdk failed while noting doSetup: no book", failed.getMessage());
+    }
+
+    @Test
     void aBotPoolFillingTheMethodAPluginsPoolFillsIsRefused() {
         PluginPool<Boolean> setups = PluginPool.fills(SETUP).from(services -> List.of(true, false));
         PoolSources.Target account = new PoolSources.Target("com.bot.params.bot.Farm", "account",

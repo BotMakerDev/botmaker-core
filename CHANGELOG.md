@@ -9,6 +9,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- A dealt row carries what a plugin's pool notes about it (`PluginPool.noting`, 2026-11-27): `Dealer.Row.notes`, each
+  pool asked with the picks before it, carried by `CoreEvent.RunsStarted.Started.notes` and shown by `run_bot {runs}`
+  after the row's picks with ⚠. A noting that throws fails the dealing with the plugin named.
+
 - A phone sees and drives the runs this core starts beside the open bot (2026-11-27, pilot in core phase 4b-2): each
   such run (the Google sign-in per emulator) gets its own views, told the run's properties (`ViewedRun.properties`),
   and the pilot serves it from a stage of its own (picture, H.264, input), so two phones on two runs share no

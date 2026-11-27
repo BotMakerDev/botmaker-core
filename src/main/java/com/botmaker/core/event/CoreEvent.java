@@ -217,11 +217,18 @@ public sealed interface CoreEvent {
          * @param row   its row, from 1
          * @param runId its id in the live runs; empty for a count, which starts none
          * @param picks what it was dealt, by each pool's parameter
+         * @param notes what the pools' owners said about its row, which the Runs window shows with ⚠
          */
-        public record Started(int row, String runId, Map<String, List<String>> picks) {
+        public record Started(int row, String runId, Map<String, List<String>> picks, List<String> notes) {
             public Started {
                 runId = runId == null ? "" : runId;
                 picks = picks == null ? Map.of() : Map.copyOf(picks);
+                notes = notes == null ? List.of() : List.copyOf(notes);
+            }
+
+            /** How a row's notes read after it, the Runs window's and {@code run_bot}'s: {@code " ⚠ a; b"}, or "". */
+            public static String marked(List<String> notes) {
+                return notes.isEmpty() ? "" : " ⚠ " + String.join("; ", notes);
             }
         }
     }

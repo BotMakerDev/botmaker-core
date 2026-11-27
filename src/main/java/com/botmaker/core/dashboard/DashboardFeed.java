@@ -179,7 +179,8 @@ public final class DashboardFeed {
             }
             case CoreEvent.RunsStarted started -> new CoreEvent.RunsStarted(started.asked(), started.words(),
                     started.runs().stream()
-                            .map(run -> new CoreEvent.RunsStarted.Started(run.row(), run.runId(), Map.of()))
+                            .map(run -> new CoreEvent.RunsStarted.Started(run.row(), run.runId(), Map.of(),
+                                    List.of()))
                             .toList(),
                     started.warnings(), started.offers(), started.counted());
             default -> event;
