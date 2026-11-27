@@ -305,6 +305,76 @@ class PilotServerTest {
         ws.abort();
     }
 
+    /** A listing of one side run, "run-s" of the instance "Pixel 5", with the views its stage is built from. */
+    private PilotServer.Endpoint startWithPicturedSideRun(AtomicInteger grabs) {
+        List<StudioPlugin> bound = List.of(new RunViewsTest.Plugin());
+        RunViews sideViews = new RunViews(() -> bound, null, Runnable::run, () -> { });
+        PilotRuns listing = new PilotRuns() {
+            @Override public List<Listed> live() {
+                return List.of(new Listed("run-s", "Sign in", "Pixel 5", 1_000L));
+            }
+            @Override public Optional<String> viewed() { return Optional.empty(); }
+            @Override public Optional<RunViews> viewsOf(String id) {
+                return "run-s".equals(id) ? Optional.of(sideViews) : Optional.empty();
+            }
+        };
+        TargetCapture picture = new TargetCapture(null) {
+            @Override Resolved resolve(PilotRoute route) {
+                grabs.incrementAndGet();
+                return new Resolved(route, new Capture(new java.awt.image.BufferedImage(320, 200,
+                        java.awt.image.BufferedImage.TYPE_INT_RGB), 0, 0, 320, 200));
+            }
+        };
+        List<StudioPlugin> idleBound = List.of(new RunViewsTest.Plugin());
+        RunViews views = new RunViews(() -> idleBound, null, Runnable::run, () -> { });
+        server = new PilotServer(runs, views, new PilotRoutes(() -> null, views::shown, serial -> null),
+                new TargetCapture(null), new PilotControlService(runs), PairingStore.inMemory(), listing,
+                (run, shown) -> new PilotStage(run, shown, PilotRoutes.sideOf(shown), picture,
+                        new PilotVideo(160, 24)));
+        return server.start("127.0.0.1");
+    }
+
+    @Test
+    void theRunsListNamesTheInstanceOfEachRun() throws Exception {
+        PilotServer.Endpoint ep = startWithPicturedSideRun(new AtomicInteger());
+        BlockingQueue<String> heard = new LinkedBlockingQueue<>();
+        WebSocket ws = connect(ep, heard);
+        assertContains("\"instance\":\"Pixel 5\"", next(heard, "runs", "run-s"));
+        ws.abort();
+    }
+
+    @Test
+    void aPhoneWithItsOverviewOpenIsSentAThumbnailOfARunNoPhoneIsShown() throws Exception {
+        AtomicInteger grabs = new AtomicInteger();
+        PilotServer.Endpoint ep = startWithPicturedSideRun(grabs);
+        BlockingQueue<String> heard = new LinkedBlockingQueue<>();
+        WebSocket ws = connect(ep, heard);
+        next(heard, "runs", "run-s");
+
+        ws.sendText("{\"cmd\":\"overview\",\"on\":true}", true).get(5, TimeUnit.SECONDS);
+        String thumb = next(heard, "thumb", "run-s");
+        assertContains("\"jpeg\":\"/9j/", thumb);   // a JPEG, base64
+        assertTrue(grabs.get() > 0);
+        ws.abort();
+    }
+
+    @Test
+    void aPhoneThatNeverOpenedItsOverviewIsSentNoThumbnailAndNothingIsGrabbed() throws Exception {
+        AtomicInteger grabs = new AtomicInteger();
+        PilotServer.Endpoint ep = startWithPicturedSideRun(grabs);
+        BlockingQueue<String> heard = new LinkedBlockingQueue<>();
+        WebSocket ws = connect(ep, heard);
+        next(heard, "runs", "run-s");
+
+        long until = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(2500);
+        while (System.nanoTime() < until) {
+            String message = heard.poll(200, TimeUnit.MILLISECONDS);
+            assertTrue(message == null || !message.contains("\"type\":\"thumb\""), message);
+        }
+        assertEquals(0, grabs.get());
+        ws.abort();
+    }
+
     /** A run the pilot holds no view for is stopped, paused and resumed by its id, and only while the phone is shown it. */
     @Test
     void aRunWithNoViewCanBePausedResumedAndStoppedByItsId() throws Exception {

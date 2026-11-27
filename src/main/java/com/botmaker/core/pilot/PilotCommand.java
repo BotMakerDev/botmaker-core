@@ -40,7 +40,13 @@ public enum PilotCommand {
      * or no {@code run} for the default. A phone that never selects is shown the run the open project holds, else the
      * first listed.
      */
-    SELECT("select");
+    SELECT("select"),
+    /**
+     * The client opening or closing its overview: {@code {"cmd":"overview","on":true}}. While on, it is sent a
+     * {@code thumb} of every listed run that has a picture, at most one a second each. A phone that never sends it is
+     * sent none.
+     */
+    OVERVIEW("overview");
 
     private final String token;
 

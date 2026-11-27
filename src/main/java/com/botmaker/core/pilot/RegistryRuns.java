@@ -72,8 +72,28 @@ public final class RegistryRuns implements PilotRuns {
         ownRuns.retainAll(ids);
         return live.stream()
                 .sorted(Comparator.comparingLong(LiveRun::startedMillis).thenComparing(LiveRun::runId))
-                .map(run -> new Listed(run.runId(), run.bot(), run.startedMillis()))
+                .map(run -> new Listed(run.runId(), run.bot(), instanceOf(run), run.startedMillis()))
                 .toList();
+    }
+
+    private static final int INSTANCE_MAX = 24;
+
+    /**
+     * The name a tile gives the run: the first element it holds, when that is a short plain word or quoted string, else
+     * "" (the phone shows the start time). An element is written as the grammar spells it, so Java is not shown.
+     */
+    static String instanceOf(LiveRun run) {
+        for (RunRegistry.Hold hold : run.holds()) {
+            String element = hold.element().strip();
+            if (element.length() >= 2 && element.startsWith("\"") && element.endsWith("\"")) {
+                element = element.substring(1, element.length() - 1);
+            }
+            if (!element.isEmpty() && element.length() <= INSTANCE_MAX && element.chars()
+                    .allMatch(c -> Character.isLetterOrDigit(c) || " -_.:".indexOf(c) >= 0)) {
+                return element;
+            }
+        }
+        return "";
     }
 
     @Override

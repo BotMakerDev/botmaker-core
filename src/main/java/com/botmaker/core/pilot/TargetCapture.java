@@ -34,7 +34,7 @@ import java.util.function.LongSupplier;
  * Window targets use shared JNA {@code captureWindow} (no focus, prompt-free on X11/XWayland); screen targets
  * fall back to AWT {@link Robot} (limited on Wayland).
  */
-final class TargetCapture {
+class TargetCapture {   // not final: a test stands in for the grab
 
     /**
      * A captured frame plus the absolute surface origin/size its pixel (0,0) maps to.

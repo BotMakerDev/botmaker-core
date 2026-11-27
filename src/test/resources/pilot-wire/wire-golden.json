@@ -143,9 +143,14 @@
     "type": "runs",
     "selected": "20261127-101500-a1b2",
     "runs": [
-      { "id": "20261127-101500-a1b2", "bot": "Farmer", "state": "paused", "startedMillis": 1700000000000 },
-      { "id": "20261127-101730-c3d4", "bot": "Fisher", "state": "running", "startedMillis": 1700000150000 }
+      { "id": "20261127-101500-a1b2", "bot": "Farmer", "instance": "Pixel 5", "state": "paused", "startedMillis": 1700000000000 },
+      { "id": "20261127-101730-c3d4", "bot": "Fisher", "instance": "", "state": "running", "startedMillis": 1700000150000 }
     ]
+  },
+  "thumb": {
+    "type": "thumb",
+    "runId": "20261127-101500-a1b2",
+    "jpeg": "/9j/4AAQ"
   },
   "runs.none": {
     "type": "runs",

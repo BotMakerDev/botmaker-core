@@ -8,6 +8,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import java.util.Base64;
 import java.util.List;
 
 /**
@@ -75,8 +76,17 @@ final class PilotMessages {
      */
     record Runs(String type, String selected, List<Listed> runs) {}
 
-    /** One run of the list: the core's id (opaque), what it plays, its state, and when it started. */
-    record Listed(String id, String bot, String state, long startedMillis) {}
+    /**
+     * One run of the list: the core's id (opaque), what it plays, which instance of it ("" when there is no name to
+     * give), its state, and when it started.
+     */
+    record Listed(String id, String bot, String instance, String state, long startedMillis) {}
+
+    /**
+     * A small picture of one run, sent only to a phone that turned the overview on: {@code jpeg} is base64, about
+     * 160 px wide. A text message, so the binary framing the released phones know is untouched.
+     */
+    record Thumb(String type, String runId, String jpeg) {}
 
     record Ping(String type) {}
 
@@ -109,6 +119,11 @@ final class PilotMessages {
      */
     static String runsJson(String selected, List<Listed> runs) {
         return write(new Runs("runs", selected, runs));
+    }
+
+    /** The {@code thumb} message of the run {@code runId}; {@code jpeg} is the picture's bytes. */
+    static String thumbJson(String runId, byte[] jpeg) {
+        return write(new Thumb("thumb", runId, Base64.getEncoder().encodeToString(jpeg)));
     }
 
     /**

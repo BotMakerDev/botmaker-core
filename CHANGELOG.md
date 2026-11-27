@@ -9,6 +9,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- **The pilot's overview wire** (2026-11-27, pilot in core phase 6a): a `runs` entry names its `instance` (the first
+  short element the run holds, else `""`); a phone's command `overview {on}` makes the core send, on a thread of its own
+  and at most once a second per run, a `thumb {runId, jpeg}` (base64, about 160 px wide) of every listed run that has a
+  picture. The frame loop never grabs for it, and a phone that never sends `overview` is sent none. The golden wire
+  file gained `thumb` and the `instance` key.
 - **`PilotQr.rows` is public** (2026-11-27, pilot in core phase 5b): Studio's pilot window draws the phone app's
   download QR from it, as it draws the pairing one from `PilotState.qr`.
 - **Background mode in the pilot's protocol** (2026-11-27, pilot in core phase 5a): `PilotState.background` says

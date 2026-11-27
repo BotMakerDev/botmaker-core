@@ -58,6 +58,22 @@ final class SendQueue {
     }
 
     /**
+     * Queues a text message unless {@code limit} texts are already waiting, so a message that can be missed (a
+     * thumbnail) never grows the queue towards the overflow that ends the connection.
+     *
+     * @return false when it was refused
+     */
+    boolean textUnlessBusy(String text, int limit) {
+        synchronized (this) {
+            if (dead || texts >= limit) return false;
+            texts++;
+            waiting.add(text);
+        }
+        pump();
+        return true;
+    }
+
+    /**
      * Queues a binary message unless {@code limit} are already waiting.
      *
      * @return false when it was refused: the phone is that far behind, or gone

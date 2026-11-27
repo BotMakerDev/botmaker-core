@@ -34,9 +34,16 @@ public interface PilotRuns {
      *
      * @param id            the core's run id, opaque to the phone
      * @param bot           what the run plays, for the picker's label
+     * @param instance      which instance of the bot it plays ("Pixel 5", "emu-1"), "" when it has no name to give
      * @param startedMillis when its process started, epoch milliseconds, 0 when unknown
      */
-    record Listed(String id, String bot, long startedMillis) {}
+    record Listed(String id, String bot, String instance, long startedMillis) {
+
+        /** A run with no instance name. */
+        public Listed(String id, String bot, long startedMillis) {
+            this(id, bot, "", startedMillis);
+        }
+    }
 
     /** The live runs, the longest running first, so "the first run" is the same on every call. */
     List<Listed> live();

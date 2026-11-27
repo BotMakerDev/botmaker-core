@@ -12,6 +12,7 @@ import com.botmaker.session.video.VideoPacket;
 import com.botmaker.shared.Diag;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import javax.imageio.ImageIO;
 import org.eclipse.jetty.server.Request;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.ServerConnector;
@@ -22,6 +23,9 @@ import org.eclipse.jetty.websocket.api.Session;
 import org.eclipse.jetty.websocket.server.WebSocketUpgradeHandler;
 
 import java.awt.Rectangle;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
@@ -152,6 +156,8 @@ public final class PilotServer implements AutoCloseable {
         volatile String selected;
         /** The stage this phone was last told it is shown ({@code null}: none), so a change is announced once. */
         volatile PilotStage stage;
+        /** Whether this phone has its overview open, and so is sent a thumbnail of every listed run. */
+        volatile boolean overview;
         /** Whether the phone has been told its first list and state, so the frame loop never races that first tell. */
         volatile boolean told;
         /** The connection, so a change of view can release what this phone holds. */
@@ -405,6 +411,19 @@ public final class PilotServer implements AutoCloseable {
      * an emulator connection after they were closed, with nothing left to close it.
      */
     private void stopFrameLoop() {
+        ScheduledExecutorService thumbs = thumbExec;
+        thumbExec = null;
+        if (thumbs != null) {
+            // Awaited before any stage is closed: a grab still going would reopen what close() just let go.
+            thumbs.shutdownNow();
+            try {
+                if (!thumbs.awaitTermination(5, TimeUnit.SECONDS)) {
+                    Diag.error("[Pilot] the thumbnail thread did not stop within 5 s");
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
         if (frameExec == null) return;
         frameExec.shutdownNow();
         try {
@@ -646,6 +665,10 @@ public final class PilotServer implements AutoCloseable {
             select(client, session, named);
             return;
         }
+        if (cmd == PilotCommand.OVERVIEW) {
+            client.overview = node.path("on").asBoolean(false);
+            return;
+        }
         String other = otherRunOf(client, cmd, named);
         if (other != null) {
             controlOther(client, cmd, other);
@@ -668,7 +691,7 @@ public final class PilotServer implements AutoCloseable {
             }
             case INPUT -> handleInput(client, session, node);
             case HELLO -> handleHello(client, node);
-            case SELECT -> { }   // answered above
+            case SELECT, OVERVIEW -> { }   // answered above
         }
     }
 
@@ -965,7 +988,8 @@ public final class PilotServer implements AutoCloseable {
     private void followStages() {
         side.values().removeIf(stage -> {
             boolean gone = listing.viewsOf(stage.run).filter(shownViews -> shownViews == stage.views).isEmpty()
-                    || viewers(stage).isEmpty();
+                    || viewers(stage).isEmpty() && !overviewOpen();
+            gone &= !stage.thumbing.get();   // a thumbnail's grab in flight: closed the next tick
             if (gone) stage.close();
             return gone;
         });
@@ -1009,8 +1033,8 @@ public final class PilotServer implements AutoCloseable {
             client.stage = stage;
             client.told = true;
             client.out.text(PilotMessages.runsJson(shown, now.live().stream()
-                    .map(run -> new PilotMessages.Listed(run.id(), run.bot(), now.stateOf(run.id()),
-                            run.startedMillis()))
+                    .map(run -> new PilotMessages.Listed(run.id(), run.bot(), run.instance(),
+                            now.stateOf(run.id()), run.startedMillis()))
                     .toList()));
             client.out.text(stateJson(client));
             if (stage == was) return;
@@ -1215,6 +1239,94 @@ public final class PilotServer implements AutoCloseable {
             return t;
         });
         frameExec.schedule(this::tick, 300, TimeUnit.MILLISECONDS);
+        thumbExec = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "pilot-thumbs");
+            t.setDaemon(true);
+            return t;
+        });
+        // Fixed delay, never a fixed rate: a round that runs long is followed by one a second after it ends, so
+        // thumbnails are skipped when late rather than queued behind each other.
+        thumbExec.scheduleWithFixedDelay(this::thumbs, THUMB_SECONDS, THUMB_SECONDS, TimeUnit.SECONDS);
+    }
+
+    private static final int THUMB_SECONDS = 1;
+    /** How wide a thumbnail is, and how hard it is compressed: a tile is a glance, not a picture to read. */
+    private static final int THUMB_EDGE = 160;
+    private static final float THUMB_QUALITY = 0.5f;
+    /** A thumbnail is dropped for a phone with this many texts waiting; it would only be older when it arrived. */
+    private static final int THUMB_BACKLOG = 2;
+    /** The frame loop's last picture is good for a thumbnail this long; older, the thumbnail grabs its own. */
+    private static final long LAST_IMAGE_NANOS = TimeUnit.SECONDS.toNanos(2);
+    private volatile ScheduledExecutorService thumbExec;
+
+    private boolean overviewOpen() {
+        return clients.values().stream().anyMatch(c -> c.overview);
+    }
+
+    /**
+     * Sends every phone with its overview open a small picture of each listed run that has one. Runs on its own thread,
+     * off the frame loop: a run a phone is shown is drawn from the frame the loop already grabbed; any other is grabbed
+     * here, from a stage no phone is shown, so the frame loop never waits on it.
+     */
+    private void thumbs() {
+        try {
+            List<Client> watching = clients.values().stream().filter(c -> c.overview).toList();
+            if (watching.isEmpty()) return;
+            Snapshot now = snapshot;
+            for (PilotRuns.Listed run : now.live()) {
+                try {
+                    byte[] jpeg = thumbOf(run.id(), now);
+                    if (jpeg == null) continue;
+                    String message = PilotMessages.thumbJson(run.id(), jpeg);
+                    for (Client client : watching) {
+                        if (client.overview) client.out.textUnlessBusy(message, THUMB_BACKLOG);
+                    }
+                } catch (RuntimeException ex) {
+                    Diag.error("[Pilot] thumbnail of run " + run.id() + " failed: " + ex);
+                }
+            }
+        } catch (Throwable ex) {
+            Diag.error("[Pilot] thumbnails failed: " + ex);
+        }
+    }
+
+    private byte[] thumbOf(String runId, Snapshot now) {
+        PilotStage stage = sees(runId, now) ? main : side.get(runId);
+        if (stage == null) {
+            // Built here only for the overview: followStages keeps it while one is open, and closes it after.
+            stage = side.computeIfAbsent(runId, id -> listing.viewsOf(id)
+                    .map(shownViews -> sideStage.apply(id, shownViews)).orElse(null));
+        }
+        if (stage == null) return null;
+        BufferedImage img;
+        if (!viewers(stage).isEmpty()) {
+            // A phone is shown this run: its frame loop owns the surface, so the thumbnail is made from the last picture
+            // it grabbed, or there is none (an H.264 or session picture never leaves the encoder as pixels).
+            img = System.nanoTime() - stage.lastImageAt > LAST_IMAGE_NANOS ? null : stage.lastImage;
+        } else {
+            img = grabFor(stage, runId);
+        }
+        return img == null ? null : Preview.jpeg(img, THUMB_EDGE, THUMB_QUALITY);
+    }
+
+    /** One grab of a stage no phone is shown, held off {@link #followStages}' closing it while it goes. */
+    private BufferedImage grabFor(PilotStage stage, String runId) {
+        stage.thumbing.set(true);
+        try {
+            if (stage != main && side.get(runId) != stage) return null;   // closed meanwhile
+            TargetCapture.Resolved resolved = stage.capture.resolve(stage.routes.current());
+            if (resolved == null) return null;
+            if (resolved.cap().img() != null) return resolved.cap().img();
+            if (resolved.jpeg() == null) return null;
+            try {
+                // A background session's frame comes already encoded.
+                return ImageIO.read(new ByteArrayInputStream(resolved.jpeg()));
+            } catch (IOException e) {
+                return null;
+            }
+        } finally {
+            stage.thumbing.set(false);
+        }
     }
 
     /**
@@ -1275,11 +1387,14 @@ public final class PilotServer implements AutoCloseable {
         // decoded a PNG only to re-encode it.
         byte[] jpeg = resolved == null ? null : resolved.bytes();
         if (jpeg == null) {
+            stage.lastImage = null;   // a missing surface shows nothing, thumbnail included
             forgetSurface(stage, asked);
             reportEmpty(stage, asked);
             return;
         }
         TargetCapture.Capture cap = resolved.cap();
+        stage.lastImage = cap.img();
+        stage.lastImageAt = System.nanoTime();
         clearEmptyReport(stage);
         logSurface(stage, resolved.route(), cap.sx(), cap.sy(), cap.sw(), cap.sh());
 

@@ -52,7 +52,7 @@ class TelemetryWireContractTest {
      * The corpus, byte for byte. Update this together with {@code GOLDEN_SHA256} in the pilot repo's
      * {@code wire.test.ts} — and with the copy of the file itself, which must stay byte-identical.
      */
-    private static final String GOLDEN_SHA256 = "76bf3c288899fd5c84f3a3504f132ced6ad53b5adc847c811545a331690e7cf6";
+    private static final String GOLDEN_SHA256 = "082991fdd1cedc38faeb75d6ab14c17656e1f16e5fe6226264da5b91e66daeac";
 
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final JsonNode CORPUS = corpus();
@@ -103,9 +103,15 @@ class TelemetryWireContractTest {
     @Test
     void theRunsMessageListsEveryLiveRunAndTheOneThisPhoneIsShown() {
         assertWire("runs.list", PilotMessages.runsJson("20261127-101500-a1b2", List.of(
-                new PilotMessages.Listed("20261127-101500-a1b2", "Farmer", "paused", 1_700_000_000_000L),
-                new PilotMessages.Listed("20261127-101730-c3d4", "Fisher", "running", 1_700_000_150_000L))));
+                new PilotMessages.Listed("20261127-101500-a1b2", "Farmer", "Pixel 5", "paused", 1_700_000_000_000L),
+                new PilotMessages.Listed("20261127-101730-c3d4", "Fisher", "", "running", 1_700_000_150_000L))));
         assertWire("runs.none", PilotMessages.runsJson(null, List.of()));
+    }
+
+    @Test
+    void aThumbnailNamesItsRunAndCarriesItsPictureAsBase64() {
+        assertWire("thumb", PilotMessages.thumbJson("20261127-101500-a1b2", new byte[] {(byte) 0xFF, (byte) 0xD8,
+                (byte) 0xFF, (byte) 0xE0, 0x00, 0x10}));
     }
 
     @Test

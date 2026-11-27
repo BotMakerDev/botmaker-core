@@ -6,6 +6,9 @@ package com.botmaker.core.pilot;
 import com.botmaker.session.Preview;
 import com.botmaker.shared.capture.GenericWindow;
 
+import java.awt.image.BufferedImage;
+import java.util.concurrent.atomic.AtomicBoolean;
+
 /**
  * What the pilot streams and drives for one run: the views that say what it shows, the route they resolve to, the
  * picture grabbed from it, its H.264 encode, and the input a phone replays on it (pilot in core phase 4b-2). Every
@@ -47,6 +50,11 @@ final class PilotStage implements AutoCloseable {
     int emptyFrames;
     /** The sentence sent with the {@code state} message while frames are missing, or {@code null} when they aren't. */
     volatile String emptyReason;
+    /** The last picture the frame loop grabbed and when ({@link System#nanoTime}), so a thumbnail needs no second grab. */
+    volatile BufferedImage lastImage;
+    volatile long lastImageAt;
+    /** Whether the thumbnail thread is grabbing this stage's surface, so the frame loop does not close it under it. */
+    final AtomicBoolean thumbing = new AtomicBoolean();
     /** The last surface logged, so a log line is printed on change instead of 24 times a second. */
     String loggedSurface;
 
