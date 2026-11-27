@@ -44,6 +44,15 @@ public interface PilotRuns {
     /** The run the pilot holds a view for, when it is among {@link #live}. */
     Optional<String> viewed();
 
+    /**
+     * What the plugins show of the live run {@code id}, when it is not the one {@link #viewed} (that one has the
+     * pilot's own views): a run started beside the open bot by this core. Empty for a run of another process, which has
+     * no picture and no input here.
+     */
+    default Optional<RunViews> viewsOf(String id) {
+        return Optional.empty();
+    }
+
     /** The listed runs this list paused itself (by {@link #pause}); a run it did not pause is not named. */
     default Set<String> paused() {
         return Set.of();

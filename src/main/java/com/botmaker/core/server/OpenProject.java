@@ -48,6 +48,7 @@ import com.botmaker.core.run.CodeExecutionService;
 import com.botmaker.core.run.DebuggingService;
 import com.botmaker.core.run.RunCheck;
 import com.botmaker.core.pilot.RunViews;
+import com.botmaker.core.pilot.SideViews;
 import com.botmaker.core.run.RunEntries;
 import com.botmaker.core.run.RunTelemetry;
 import com.botmaker.core.run.claims.PooledRuns;
@@ -269,6 +270,8 @@ public final class OpenProject implements AutoCloseable {
         HostServices services = HostServices.forProject(config);
         this.companions = RunEntries.Companions.bound(services);
         this.views = RunViews.bound(services, owner, () -> { });
+        // The runs this core starts beside the bot are shown with this project's services, on its thread.
+        SideViews.ofThisCore().serve(services, owner);
         this.values =HostPluginValues.writing(config, state, services, new PluginEdits());
         HostPluginValues.installForwarding(config, state, services, this::written);
         this.runs = HostRuns.install(new PluginRuns(), execution::runningBotPid, new RunProperties());
@@ -388,7 +391,7 @@ public final class OpenProject implements AutoCloseable {
 
     /** The live runs of this PC, the open project's own named as the run the pilot holds a view for. */
     private PilotRuns registryRuns() {
-        return new RegistryRuns(RunRegistry.ofThisPc(), execution::runningBotPid);
+        return new RegistryRuns(RunRegistry.ofThisPc(), execution::runningBotPid, SideViews.ofThisCore()::of);
     }
 
     /** The open project's run as the registry names it, for the views built when it starts; {@code null} until named. */
@@ -1272,6 +1275,7 @@ public final class OpenProject implements AutoCloseable {
         control.shutdown();
         companions.ended();
         views.close();
+        SideViews.ofThisCore().serve(null, null);
         HostPluginValues.clear();
         HostRuns.clear();
         HostHistory.clear();

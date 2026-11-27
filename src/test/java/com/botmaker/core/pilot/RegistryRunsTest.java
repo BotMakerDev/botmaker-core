@@ -37,6 +37,20 @@ class RegistryRunsTest {
     }
 
     @Test
+    void aSideRunHasViewsButTheOpenProjectsRunHasNoneOfThisPath() {
+        RunRegistry registry = new RunRegistry(dir, RunRegistry.Alive.PROCESSES);
+        registry.hold(LiveRun.ofThisProcess("run-1", "Farm", List.of()));
+        RunViews views = new RunViews(List::of, null, Runnable::run, () -> { });
+        RegistryRuns runs = new RegistryRuns(registry, () -> OptionalLong.of(ProcessHandle.current().pid()),
+                id -> java.util.Optional.of(views));
+
+        assertTrue(runs.viewsOf("run-2").isPresent());
+        assertTrue(runs.viewsOf(null).isEmpty());
+        assertEquals("run-1", runs.viewed().orElseThrow());
+        assertTrue(runs.viewsOf("run-1").isEmpty());
+    }
+
+    @Test
     void anUnlistedRunAndAnOpenProjectsRunAreRefused() {
         RunRegistry registry = new RunRegistry(dir, RunRegistry.Alive.PROCESSES);
         registry.hold(LiveRun.ofThisProcess("run-1", "Farm", List.of()));

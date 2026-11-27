@@ -8,6 +8,7 @@ import com.botmaker.core.config.AppVersion;
 import com.botmaker.core.pilot.Pilot;
 import com.botmaker.core.pilot.PilotPreferences;
 import com.botmaker.core.plugin.HostServices;
+import com.botmaker.core.pilot.SideViews;
 import com.botmaker.core.run.SideRunner;
 import com.botmaker.core.run.claims.RegistryHolds;
 import com.botmaker.shared.config.CacheDirs;
@@ -34,7 +35,7 @@ public final class CoreMain {
             if (DIR.equals(args[i])) dir = Path.of(args[++i]);
         }
         CountDownLatch ended = new CountDownLatch(1);
-        HostServices.serveSideRuns(new SideRunner());
+        HostServices.serveSideRuns(new SideRunner(SideViews.ofThisCore()));
         HostServices.serveLiveRuns(RegistryHolds.ofThisPc());
         Running core = serveOnMcpPort(dir, ended::countDown);
         Runtime.getRuntime().addShutdownHook(new Thread(core::close, "core-shutdown"));

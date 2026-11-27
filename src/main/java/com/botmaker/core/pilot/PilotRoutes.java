@@ -90,6 +90,11 @@ public final class PilotRoutes implements AutoCloseable {
                 PilotRoutes::openAdbSurface);
     }
 
+    /** The routes of a run started beside the open bot: what its views show, never a background session. */
+    static PilotRoutes sideOf(RunViews views) {
+        return new PilotRoutes(() -> null, views::shown, PilotRoutes::openAdbSurface);
+    }
+
     /** The route to stream and drive right now. Cheap enough for a frame: two reads plus, at most, a scan. */
     public synchronized PilotRoute current() {
         DesktopSession live = safeSession();

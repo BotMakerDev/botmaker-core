@@ -9,6 +9,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- A phone sees and drives the runs this core starts beside the open bot (2026-11-27, pilot in core phase 4b-2): each
+  such run (the Google sign-in per emulator) gets its own views, told the run's properties (`ViewedRun.properties`),
+  and the pilot serves it from a stage of its own (picture, H.264, input), so two phones on two runs share no
+  picture, encoder or held button. A side run has no overlay, trace, telemetry or background session, and its views
+  exist only while a project is open to lend services.
 - A phone can stop, pause and resume a run the open project does not hold (2026-11-27, pilot in core phase 4b): a
   signal to the pid the run registry gives for its id (Unix; the id must be listed, the open project's run and the
   core itself are refused), and the list says which runs the pilot paused. A run's views are told which run they are

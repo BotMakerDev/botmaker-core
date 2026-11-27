@@ -10,7 +10,6 @@ import com.botmaker.session.DesktopSession;
 import com.botmaker.session.Preview;
 import com.botmaker.session.video.VideoPacket;
 import com.botmaker.shared.Diag;
-import com.botmaker.shared.capture.GenericWindow;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.eclipse.jetty.server.Request;
@@ -38,6 +37,7 @@ import java.util.List;
 import java.util.UUID;
 import java.util.Locale;
 import java.util.Map;
+import java.util.function.BiFunction;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -117,20 +117,19 @@ public final class PilotServer implements AutoCloseable {
 
     /** The open project's bot, as the host exposes it: start, stop, and what it reports while it runs. */
     private final Runs runs;
-    /** What the run shows, and what it draws over the picture. */
+    /** What the open project's run shows, and what it draws over the picture. */
     private final RunViews views;
     /** The subscriptions taken on {@link #runs}, closed with the server so a rebound pilot is not fed twice. */
     private final List<AutoCloseable> subscriptions = new ArrayList<>();
-    /** Decides which surface is streamed and driven ({@code :0} / {@code :N} / an emulator) and owns its connection. */
-    private final PilotRoutes routes;
-    private final TargetCapture capture;
-    /** The at-most-one H.264 encode of the current session route; see {@link #followVideo}. */
-    private final PilotVideo video = new PilotVideo(Preview.MAX_EDGE, FRAME_FPS);
-    /** Whether clients have been told a stream is running, so start/stop are each announced exactly once. */
-    private boolean videoAnnounced;
+    /**
+     * The open project's stage: its views, the surface they resolve to ({@code :0} / {@code :N} / an emulator), its
+     * picture, its at-most-one H.264 encode (see {@link #followVideo}) and the input replayed on it.
+     */
+    private final PilotStage main;
+    /** The stages of the runs this core started beside the open bot, by run id, built while a phone is shown one. */
+    private final Map<String, PilotStage> side = new ConcurrentHashMap<>();
     private final PilotControlService control;
     private final PairingStore pairing;
-    private final PilotInputService input = new PilotInputService();
     private final ObjectMapper json = new ObjectMapper();
     /** The registry's live runs, which a phone lists and picks from. */
     private final PilotRuns listing;
@@ -151,8 +150,10 @@ public final class PilotServer implements AutoCloseable {
         volatile byte[] lastFrame;
         /** The run this phone picked, or null for the default; it is only honoured while that run is listed. */
         volatile String selected;
-        /** Whether this phone was last shown the run the pilot holds a view for, so a change is announced once. */
-        volatile boolean sawView;
+        /** The stage this phone was last told it is shown ({@code null}: none), so a change is announced once. */
+        volatile PilotStage stage;
+        /** Whether the phone has been told its first list and state, so the frame loop never races that first tell. */
+        volatile boolean told;
         /** The connection, so a change of view can release what this phone holds. */
         volatile Session session;
 
@@ -221,21 +222,6 @@ public final class PilotServer implements AutoCloseable {
     private Server server;
     private ServerConnector connector;
     private ScheduledExecutorService frameExec;
-    /**
-     * What the most recently pushed frame showed: the route that produced it, the window when it was one window on
-     * {@code :0} (a tap raises it first), and its rect, the only region Interact gestures may land in ({@code null}
-     * while no frame stands). A gesture belongs to the frame the user touched, not to whatever the route resolver
-     * would answer by the time it arrives, so it reads all three at once.
-     */
-    private record Pushed(PilotRoute route, GenericWindow window, PilotInputService.Bounds bounds) {
-
-        /** The same route with no frame to touch. */
-        Pushed withoutFrame() {
-            return new Pushed(route, null, null);
-        }
-    }
-
-    private volatile Pushed pushed = new Pushed(PilotRoute.DESKTOP, null, null);
     /** Guards who is paired: a phone let in and a token revoked must not pass each other. */
     private final Object pairingLock = new Object();
     private volatile Runnable phonesChanged = () -> { };
@@ -247,13 +233,8 @@ public final class PilotServer implements AutoCloseable {
     private int ticksSincePauseCheck;
     /** When the last heartbeat went, by {@link System#nanoTime}. Frame thread only. */
     private long pingedAt = System.nanoTime();
-    /**
-     * How many ticks in a row produced no frame, touched only from the single {@code pilot-frame} thread;
-     * {@link #emptyReason} is volatile because {@link #stateJson(Client)} is also called from the WS threads.
-     */
-    private int emptyFrames;
-    /** The sentence sent with the {@code state} message while frames are missing, or {@code null} when they aren't. */
-    private volatile String emptyReason;
+    /** Builds the stage of a run this core started beside the open bot, from the views that run has. */
+    private final BiFunction<String, RunViews, PilotStage> sideStage;
 
     PilotServer(Runs runs, RunViews views, PilotRoutes routes, TargetCapture capture, PilotControlService control,
                 PairingStore pairing) {
@@ -262,13 +243,19 @@ public final class PilotServer implements AutoCloseable {
 
     PilotServer(Runs runs, RunViews views, PilotRoutes routes, TargetCapture capture, PilotControlService control,
                 PairingStore pairing, PilotRuns listing) {
+        this(runs, views, routes, capture, control, pairing, listing, (run, shown) -> PilotStage.side(run, shown,
+                FRAME_FPS));
+    }
+
+    PilotServer(Runs runs, RunViews views, PilotRoutes routes, TargetCapture capture, PilotControlService control,
+                PairingStore pairing, PilotRuns listing, BiFunction<String, RunViews, PilotStage> sideStage) {
         this.listing = listing == null ? PilotRuns.NONE : listing;
         this.runs = runs == null ? Runs.NONE : runs;
         this.views = views;
-        this.routes = routes;
-        this.capture = capture;
+        this.main = new PilotStage(null, views, routes, capture, new PilotVideo(Preview.MAX_EDGE, FRAME_FPS));
         this.control = control;
         this.pairing = pairing;
+        this.sideStage = sideStage;
     }
 
     /**
@@ -433,11 +420,10 @@ public final class PilotServer implements AutoCloseable {
     @Override
     public synchronized void close() {
         stopFrameLoop();
-        video.close(); // the ffmpeg is reaped with its session anyway, but not until the session goes
-        input.close();  // never hand the desktop back with a mouse button still down
-        routes.close(); // drop any held emulator connection with the loop that was using it
+        main.close();
+        side.values().forEach(PilotStage::close);
+        side.clear();
         clients.clear();
-        pushed = pushed.withoutFrame();
         for (AutoCloseable subscription : subscriptions) {
             try {
                 subscription.close();
@@ -464,7 +450,7 @@ public final class PilotServer implements AutoCloseable {
 
     private void drop(Session session) {
         boolean was = clients.remove(session) != null;
-        input.releaseHeldBy(session);
+        releaseHeldBy(session);
         if (was) phonesChanged.run();
     }
 
@@ -582,9 +568,16 @@ public final class PilotServer implements AutoCloseable {
                 }
             }
         }
-        input.releaseHeld();
+        main.input.releaseHeld();
+        side.values().forEach(stage -> stage.input.releaseHeld());
         phonesChanged.run();
         return token;
+    }
+
+    /** Lets go of what {@code session} holds, on whichever stage it was driving. */
+    private void releaseHeldBy(Session session) {
+        main.input.releaseHeldBy(session);
+        side.values().forEach(stage -> stage.input.releaseHeldBy(session));
     }
 
     /** The token a phone pairs with now; null before the first start. */
@@ -670,7 +663,7 @@ public final class PilotServer implements AutoCloseable {
             case INTERACT -> {
                 boolean on = node.path("on").asBoolean(false);
                 boolean was = client.interact.getAndSet(on);
-                if (!on) input.releaseHeldBy(session);
+                if (!on) releaseHeldBy(session);
                 if (was != on) phonesChanged.run();
             }
             case INPUT -> handleInput(client, session, node);
@@ -716,6 +709,8 @@ public final class PilotServer implements AutoCloseable {
         if (cmd == PilotCommand.START && named == null && now.viewed() == null) return true;
         String shown = effective(client, now);
         if (named != null && !named.equals(shown)) return false;   // a command names the run the phone is shown
+        // Arming Interact and a gesture act on whichever stage the phone is shown, a side run's included.
+        if (cmd == PilotCommand.INTERACT || cmd == PilotCommand.INPUT) return stageOf(client, now, true) != null;
         return sees(shown, now);
     }
 
@@ -765,8 +760,9 @@ public final class PilotServer implements AutoCloseable {
         }
         // A client that joins a running stream is told about it now rather than at the next route change,
         // which on a stable session would be never.
-        if (video.live() && client.sawView) {
-            sendVideoStart(client);
+        PilotStage shown = client.stage;
+        if (shown != null && shown.video.live()) {
+            sendVideoStart(client, shown);
         }
     }
 
@@ -785,7 +781,10 @@ public final class PilotServer implements AutoCloseable {
             Diag.warn("Pilot", "Ignoring input of unknown kind \"" + named + "\"");
             return;
         }
-        Pushed seen = pushed;
+        PilotStage stage = client.stage;   // the stage the phone was shown the frame it touches by
+        if (stage == null) return;
+        PilotInputService input = stage.input;
+        PilotStage.Pushed seen = stage.pushed;
         if (kind == PilotInputService.Kind.KEY || kind == PilotInputService.Kind.TEXT) {
             PilotInputService.Typed typed = input.type(seen.route(), kind, node.path("key").asText(""),
                     node.path("text").asText(""), seen.window(), seen.bounds());
@@ -817,7 +816,7 @@ public final class PilotServer implements AutoCloseable {
 
     /** The host announces no pause, so it is asked about once a second while somebody watches. */
     private void followHostPause() {
-        if (viewers().isEmpty() || ++ticksSincePauseCheck < FRAME_FPS) return;
+        if (clients.isEmpty() || ++ticksSincePauseCheck < FRAME_FPS) return;
         ticksSincePauseCheck = 0;
         refreshPausedState();
     }
@@ -837,8 +836,8 @@ public final class PilotServer implements AutoCloseable {
      * that draws nothing, or that none can read, is dropped.
      */
     private void onTelemetryFrame(byte[] frame) {
-        if (frame == null || frame.length == 0 || viewers().isEmpty()) return;
-        views.overlay(frame).ifPresent(this::broadcastToViewers);
+        if (frame == null || frame.length == 0 || viewers(main).isEmpty()) return;
+        views.overlay(frame).ifPresent(message -> broadcastToViewers(main, message));
     }
 
     /**
@@ -852,7 +851,7 @@ public final class PilotServer implements AutoCloseable {
             traceBacklog.addLast(message);
             if (traceBacklog.size() > TRACE_BACKLOG) traceBacklog.removeFirst();
         }
-        broadcastToViewers(message);
+        broadcastToViewers(main, message);
     }
 
     /** What a phone connecting now is sent after the run state, oldest first. */
@@ -881,15 +880,23 @@ public final class PilotServer implements AutoCloseable {
         for (Client client : clients.values()) client.out.text(stateJson(client));
     }
 
+    /** Each phone is sent the state of the stage it is shown ({@code stage}'s phones only). */
+    private void broadcastState(PilotStage stage) {
+        for (Client client : viewers(stage)) client.out.text(stateJson(client));
+    }
+
     private String stateJson(Client client) {
         Snapshot now = snapshot;
         String shown = effective(client, now);
-        if (sees(shown, now)) {
-            return PilotMessages.stateJson(runState, input.supportsBackgroundInput(pushed.route()), emptyReason,
-                    now.viewed());
+        PilotStage stage = stageOf(client, now, false);
+        if (stage == main) {
+            return PilotMessages.stateJson(runState, main.input.supportsBackgroundInput(main.pushed.route()),
+                    main.emptyReason, now.viewed());
         }
         RunState other = shown != null && now.paused().contains(shown) ? RunState.PAUSED : RunState.RUNNING;
-        return PilotMessages.stateJson(other, false, NO_VIEW_REASON, shown);
+        if (stage == null) return PilotMessages.stateJson(other, false, NO_VIEW_REASON, shown);
+        return PilotMessages.stateJson(other, stage.input.supportsBackgroundInput(stage.pushed.route()),
+                stage.emptyReason, shown);
     }
 
     // --- The runs a phone lists and picks from ---
@@ -931,10 +938,41 @@ public final class PilotServer implements AutoCloseable {
         return shown == null ? in.viewed() == null : shown.equals(in.viewed());
     }
 
-    /** The phones shown the run the pilot holds a view for: they are sent its picture, trace and overlay. */
-    private List<Client> viewers() {
+    /** The phones shown {@code stage}: they are sent its picture, and the main stage's trace and overlay. */
+    private List<Client> viewers(PilotStage stage) {
         Snapshot now = snapshot;
-        return clients.values().stream().filter(c -> sees(effective(c, now), now)).toList();
+        return clients.values().stream().filter(c -> stageOf(c, now, false) == stage).toList();
+    }
+
+    /**
+     * The stage {@code client} is shown: the main one for the run the pilot holds a view for (or its idle views), else
+     * the stage of a run this core started beside it, built when {@code create} and the run has views; {@code null}
+     * for a run with none (a run of another process).
+     */
+    private PilotStage stageOf(Client client, Snapshot in, boolean create) {
+        String shown = effective(client, in);
+        if (sees(shown, in)) return main;
+        if (shown == null) return null;
+        if (!create) return side.get(shown);
+        return side.computeIfAbsent(shown, id -> listing.viewsOf(id).map(shownViews -> sideStage.apply(id, shownViews))
+                .orElse(null));
+    }
+
+    /**
+     * Keeps the stages in step with the runs: one whose run ended or has no phone left is closed, and a phone whose
+     * stage came to be (a side run's views are built just after its process) or went is told.
+     */
+    private void followStages() {
+        side.values().removeIf(stage -> {
+            boolean gone = listing.viewsOf(stage.run).filter(shownViews -> shownViews == stage.views).isEmpty()
+                    || viewers(stage).isEmpty();
+            if (gone) stage.close();
+            return gone;
+        });
+        Snapshot now = snapshot;
+        for (Client client : clients.values()) {
+            if (client.told && stageOf(client, now, true) != client.stage) tell(client);
+        }
     }
 
     /** Reads the registry once a second while the loop runs; it is files and a liveness check each time. */
@@ -966,29 +1004,33 @@ public final class PilotServer implements AutoCloseable {
         synchronized (runsLock) {
             Snapshot now = snapshot;
             String shown = effective(client, now);
-            boolean seesNow = sees(shown, now);
-            boolean saw = client.sawView;
-            client.sawView = seesNow;
+            PilotStage stage = stageOf(client, now, true);
+            PilotStage was = client.stage;
+            client.stage = stage;
+            client.told = true;
             client.out.text(PilotMessages.runsJson(shown, now.live().stream()
                     .map(run -> new PilotMessages.Listed(run.id(), run.bot(), now.stateOf(run.id()),
                             run.startedMillis()))
                     .toList()));
             client.out.text(stateJson(client));
-            if (seesNow == saw) return;
+            if (stage == was) return;
             client.lastFrame = null;
             client.decoding.set(false);
-            if (seesNow) {
-                for (String line : traceBacklog()) client.out.text(line);
-                if (client.h264 && video.live()) sendVideoStart(client);
-            } else {
-                // Leaving the run: Interact is disarmed and what the phone holds is let go, so nothing it armed
+            if (was != null) {
+                // Leaving a run: Interact is disarmed and what the phone holds is let go, so nothing it armed
                 // drives the next run it is shown.
                 Session session = client.session;
                 if (client.interact.getAndSet(false) && session != null) {
-                    input.releaseHeldBy(session);
+                    releaseHeldBy(session);
                     phonesChanged.run();
                 }
-                if (client.h264 && video.live()) client.out.text(PilotMessages.videoStoppedJson(now.viewed()));
+                if (client.h264 && was.video.live()) {
+                    client.out.text(PilotMessages.videoStoppedJson(was == main ? now.viewed() : was.run));
+                }
+            }
+            if (stage != null) {
+                if (stage == main) for (String line : traceBacklog()) client.out.text(line);
+                if (client.h264 && stage.video.live()) sendVideoStart(client, stage);
             }
         }
     }
@@ -1009,8 +1051,8 @@ public final class PilotServer implements AutoCloseable {
      * {@link DesktopSession#x11Capturable()}); an emulator route is a device that stopped answering ADB. Said once,
      * and again only when the sentence changes during the same outage.
      */
-    private void reportEmpty(PilotRoute route) {
-        if (++emptyFrames < EMPTY_FRAMES_BEFORE_SAYING_SO) return;
+    private void reportEmpty(PilotStage stage, PilotRoute route) {
+        if (++stage.emptyFrames < EMPTY_FRAMES_BEFORE_SAYING_SO) return;
         String why = switch (route) {
             case PilotRoute.Missing(String missing) -> missing;
             case PilotRoute.Session ignored ->
@@ -1020,14 +1062,14 @@ public final class PilotServer implements AutoCloseable {
                     "The emulator stopped answering over ADB — check that the instance is still running.";
             case PilotRoute.Screen(var shown) -> TargetCapture.whyNothing(shown);
         };
-        if (why.equals(emptyReason)) return;
-        emptyReason = why;
+        if (why.equals(stage.emptyReason)) return;
+        stage.emptyReason = why;
         // Forget what was last logged, so the frames coming back is a line too and not just their stopping.
-        loggedSurface = null;
-        Diag.log("[Pilot] no frame for " + emptyFrames + " ticks on " + route);
+        stage.loggedSurface = null;
+        Diag.log("[Pilot] no frame for " + stage.emptyFrames + " ticks on " + route);
         // A phone may blank its picture on the reason, so the frame that comes back is sent even if unchanged.
-        clients.values().forEach(c -> c.lastFrame = null);
-        broadcastState();
+        viewers(stage).forEach(c -> c.lastFrame = null);
+        broadcastState(stage);
     }
 
     /**
@@ -1036,16 +1078,13 @@ public final class PilotServer implements AutoCloseable {
      * until a frame arrives. The same session or emulator that merely missed a grab keeps it, since its rect is its
      * own.
      */
-    private void forgetSurface(PilotRoute asked) {
-        Pushed last = pushed;
+    private void forgetSurface(PilotStage stage, PilotRoute asked) {
+        PilotStage.Pushed last = stage.pushed;
         if (last.bounds() == null) return;
         if (!(last.route() instanceof PilotRoute.Screen) && last.route().equals(asked)) return;
-        pushed = last.withoutFrame();
-        input.releaseHeld();
+        stage.pushed = last.withoutFrame();
+        stage.input.releaseHeld();
     }
-
-    /** The last surface logged, so {@link #logSurface} can print on change instead of 24 times a second. */
-    private String loggedSurface;
 
     /**
      * Say what is being streamed, and from where, <b>whenever that changes</b>.
@@ -1056,24 +1095,24 @@ public final class PilotServer implements AutoCloseable {
      * anywhere would have shown. One line per change costs nothing on a stable session and names the surface
      * the next report is about.
      */
-    private void logSurface(PilotRoute route, int sx, int sy, int sw, int sh) {
+    private void logSurface(PilotStage stage, PilotRoute route, int sx, int sy, int sw, int sh) {
         String line = switch (route) {
             case PilotRoute.Session ignored -> "session";
             case PilotRoute.Emulator ignored -> "emulator";
             case PilotRoute.Screen ignored -> "screen";
             case PilotRoute.Missing ignored -> "nothing";
         } + " " + sw + "x" + sh + "+" + sx + "+" + sy;
-        if (line.equals(loggedSurface)) return;
-        loggedSurface = line;
-        Diag.log("[Pilot] streaming " + line);
+        if (line.equals(stage.loggedSurface)) return;
+        stage.loggedSurface = line;
+        Diag.log("[Pilot] streaming " + (stage.run == null ? "" : "run " + stage.run + ": ") + line);
     }
 
     /** A frame arrived — by either path. Retract the warning, or the client explains a problem it no longer has. */
-    private void clearEmptyReport() {
-        emptyFrames = 0;
-        if (emptyReason != null) {
-            emptyReason = null;
-            broadcastState();
+    private void clearEmptyReport(PilotStage stage) {
+        stage.emptyFrames = 0;
+        if (stage.emptyReason != null) {
+            stage.emptyReason = null;
+            broadcastState(stage);
         }
     }
 
@@ -1081,8 +1120,8 @@ public final class PilotServer implements AutoCloseable {
         for (Client client : clients.values()) client.out.text(text);
     }
 
-    private void broadcastToViewers(String text) {
-        for (Client client : viewers()) client.out.text(text);
+    private void broadcastToViewers(PilotStage stage, String text) {
+        for (Client client : viewers(stage)) client.out.text(text);
     }
 
     // --- H.264 (the fast path, when both ends can take it) ---
@@ -1097,47 +1136,52 @@ public final class PilotServer implements AutoCloseable {
      * screen, which this must not hand a GPU encoder) have nothing for it to read. Both keep the JPEG path,
      * which is what they had.
      */
-    private boolean followVideo(PilotRoute asked) {
-        DesktopSession wanted = asked instanceof PilotRoute.Session(DesktopSession s) && anyClientWantsVideo()
+    private boolean followVideo(PilotStage stage, PilotRoute asked) {
+        DesktopSession wanted = asked instanceof PilotRoute.Session(DesktopSession s) && anyClientWantsVideo(stage)
                 ? s : null;
-        boolean live = video.follow(wanted, this::onVideoPacket);
-        if (live != videoAnnounced) {
-            videoAnnounced = live;
-            announceVideo(live);
+        boolean live = stage.video.follow(wanted, packet -> onVideoPacket(stage, packet));
+        if (live != stage.videoAnnounced) {
+            stage.videoAnnounced = live;
+            announceVideo(stage, live);
         }
         if (!live) return false;
 
         // The video is the frame source now, so it owes the same two facts the JPEG path publishes: an Interact
         // gesture is clamped to the surface the client was shown and replayed on the route that produced it.
-        Rectangle surface = video.rect();
-        pushed = new Pushed(asked, null,
+        Rectangle surface = stage.video.rect();
+        stage.pushed = new PilotStage.Pushed(asked, null,
                 new PilotInputService.Bounds(surface.x, surface.y, surface.width, surface.height));
-        clearEmptyReport();
-        logSurface(asked, surface.x, surface.y, surface.width, surface.height);
-        return viewers().stream().allMatch(c -> c.h264);
+        clearEmptyReport(stage);
+        logSurface(stage, asked, surface.x, surface.y, surface.width, surface.height);
+        return viewers(stage).stream().allMatch(c -> c.h264);
     }
 
-    private boolean anyClientWantsVideo() {
-        return viewers().stream().anyMatch(c -> c.h264);
+    private boolean anyClientWantsVideo(PilotStage stage) {
+        return viewers(stage).stream().anyMatch(c -> c.h264);
     }
 
-    /** Tells the H.264 clients that a stream started (with its codec and rect) or ended. */
-    private void announceVideo(boolean started) {
-        for (Client client : viewers()) {
+    /** The run id a stage's messages carry: the open project's viewed run for the main stage, else its own. */
+    private String runIdOf(PilotStage stage) {
+        return stage == main ? snapshot.viewed() : stage.run;
+    }
+
+    /** Tells the H.264 clients of {@code stage} that a stream started (with its codec and rect) or ended. */
+    private void announceVideo(PilotStage stage, boolean started) {
+        for (Client client : viewers(stage)) {
             if (!client.h264) continue;
             client.decoding.set(false);
             client.lastFrame = null;
             if (started) {
-                sendVideoStart(client);
+                sendVideoStart(client, stage);
             } else {
-                client.out.text(PilotMessages.videoStoppedJson(snapshot.viewed()));
+                client.out.text(PilotMessages.videoStoppedJson(runIdOf(stage)));
             }
         }
     }
 
-    private void sendVideoStart(Client client) {
-        Rectangle r = video.rect();
-        client.out.text(PilotMessages.videoJson(video.codec(), r.x, r.y, r.width, r.height, snapshot.viewed()));
+    private void sendVideoStart(Client client, PilotStage stage) {
+        Rectangle r = stage.video.rect();
+        client.out.text(PilotMessages.videoJson(stage.video.codec(), r.x, r.y, r.width, r.height, runIdOf(stage)));
     }
 
     /**
@@ -1146,8 +1190,8 @@ public final class PilotServer implements AutoCloseable {
      * waiting for a keyframe, because a decoder handed a picture whose reference never arrived produces garbage
      * indefinitely rather than one bad frame.
      */
-    private void onVideoPacket(VideoPacket packet) {
-        List<Client> viewing = viewers();
+    private void onVideoPacket(PilotStage stage, VideoPacket packet) {
+        List<Client> viewing = viewers(stage);
         if (viewing.isEmpty()) return;
         byte[] payload = new byte[1 + packet.annexB().length];
         payload[0] = packet.keyframe() ? BINARY_H264_KEY : BINARY_H264;
@@ -1188,11 +1232,20 @@ public final class PilotServer implements AutoCloseable {
     private void tick() {
         long started = System.nanoTime();
         try {
-            input.releaseStale();
+            main.input.releaseStale();
+            side.values().forEach(stage -> stage.input.releaseStale());
             followHostPause();
             heartbeat();
             followRuns();
-            pushFrame();
+            followStages();
+            pushFrame(main);
+            for (PilotStage stage : List.copyOf(side.values())) {
+                try {
+                    pushFrame(stage);
+                } catch (RuntimeException ex) {
+                    Diag.error("[Pilot] frame of run " + stage.run + " failed: " + ex);
+                }
+            }
         } catch (Throwable ex) {
             // A frame that threw must not silently end the loop — that is a pilot that goes dark forever.
             Diag.error("[Pilot] frame failed: " + ex);
@@ -1208,27 +1261,27 @@ public final class PilotServer implements AutoCloseable {
         }
     }
 
-    private void pushFrame() {
-        List<Client> viewing = viewers();
+    private void pushFrame(PilotStage stage) {
+        List<Client> viewing = viewers(stage);
         if (viewing.isEmpty()) {
-            followVideo(null);   // nobody to encode for; let the ffmpeg go rather than heat a GPU for no one
-            pushed = pushed.withoutFrame(); // the next phone was shown nothing yet, so it may touch nothing yet
+            followVideo(stage, null);   // nobody to encode for; let the ffmpeg go rather than heat a GPU for no one
+            stage.pushed = stage.pushed.withoutFrame(); // the next phone was shown nothing yet, so it may touch nothing yet
             return;
         }
-        PilotRoute asked = routes.current();
-        if (followVideo(asked)) return;   // every client is on video; there is no JPEG left to grab one for
-        TargetCapture.Resolved resolved = capture.resolve(asked);
+        PilotRoute asked = stage.routes.current();
+        if (followVideo(stage, asked)) return;   // every client is on video; there is no JPEG left to grab one for
+        TargetCapture.Resolved resolved = stage.capture.resolve(asked);
         // Already-encoded on the session route: the agent that holds :N produced these bytes, so nothing here
         // decoded a PNG only to re-encode it.
         byte[] jpeg = resolved == null ? null : resolved.bytes();
         if (jpeg == null) {
-            forgetSurface(asked);
-            reportEmpty(asked);
+            forgetSurface(stage, asked);
+            reportEmpty(stage, asked);
             return;
         }
         TargetCapture.Capture cap = resolved.cap();
-        clearEmptyReport();
-        logSurface(resolved.route(), cap.sx(), cap.sy(), cap.sw(), cap.sh());
+        clearEmptyReport(stage);
+        logSurface(stage, resolved.route(), cap.sx(), cap.sy(), cap.sw(), cap.sh());
 
         // Interact gestures are replayed on the route that produced this frame and clamped to what the client
         // was actually shown, so both must be published from here — the one place that knows what went over the
@@ -1237,10 +1290,10 @@ public final class PilotServer implements AutoCloseable {
         // told it was touching a surface it had not been shown. A route change also changes whether input is
         // background-safe, which the client renders as a warning, so tell it rather than leaving a stale one up.
         PilotRoute route = resolved.route();
-        boolean routeChanged = !pushed.route().getClass().equals(route.getClass());
-        pushed = new Pushed(route, cap.window(),
+        boolean routeChanged = !stage.pushed.route().getClass().equals(route.getClass());
+        stage.pushed = new PilotStage.Pushed(route, cap.window(),
                 new PilotInputService.Bounds(cap.sx(), cap.sy(), cap.sw(), cap.sh()));
-        if (routeChanged) broadcastState();
+        if (routeChanged) broadcastState(stage);
 
         byte[] payload = new byte[16 + jpeg.length];
         ByteBuffer.wrap(payload)
@@ -1250,7 +1303,7 @@ public final class PilotServer implements AutoCloseable {
         for (Client client : viewing) {
             // A client being fed H.264 must not also be fed JPEG: it would draw the two interleaved, at two
             // different latencies, which looks exactly like a stutter in the video.
-            if (client.h264 && video.live()) continue;
+            if (client.h264 && stage.video.live()) continue;
             if (Arrays.equals(payload, client.lastFrame)) continue;
             // One frame at a time: a client still flushing the previous one skips this one — keeps the
             // real-time feel on a slow link.

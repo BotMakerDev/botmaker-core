@@ -17,6 +17,7 @@ import java.util.OptionalLong;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
@@ -41,10 +42,25 @@ public final class RegistryRuns implements PilotRuns {
     /** Runs the open project held, which only its own commands act on. */
     private final Set<String> ownRuns = ConcurrentHashMap.newKeySet();
 
+    /** What the plugins show of a run this core started beside the open bot, by the run's id. */
+    private final Function<String, Optional<RunViews>> sideViews;
+
     /** Over {@code registry}; {@code viewedPid} is the pid of the bot the open project runs, when it does. */
     public RegistryRuns(RunRegistry registry, Supplier<OptionalLong> viewedPid) {
+        this(registry, viewedPid, id -> Optional.empty());
+    }
+
+    /** As above; {@code sideViews} gives the views of a run this core started beside the open bot. */
+    public RegistryRuns(RunRegistry registry, Supplier<OptionalLong> viewedPid,
+                        Function<String, Optional<RunViews>> sideViews) {
         this.registry = registry;
         this.viewedPid = viewedPid;
+        this.sideViews = sideViews;
+    }
+
+    @Override
+    public Optional<RunViews> viewsOf(String id) {
+        return id == null || ownRuns.contains(id) ? Optional.empty() : sideViews.apply(id);
     }
 
     @Override

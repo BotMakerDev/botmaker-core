@@ -281,6 +281,30 @@ class PilotServerTest {
         ws.abort();
     }
 
+    /** A run this core started beside the bot has views of its own: its phone is told that run's state, not "no view". */
+    @Test
+    void aSideRunsPhoneIsServedByTheRunsOwnStage() throws Exception {
+        List<StudioPlugin> bound = List.of(new RunViewsTest.Plugin());
+        RunViews sideViews = new RunViews(() -> bound, null, Runnable::run, () -> { });
+        PilotRuns listing = new PilotRuns() {
+            @Override public List<Listed> live() { return List.of(new Listed("run-s", "Sign in", 1_000L)); }
+            @Override public Optional<String> viewed() { return Optional.empty(); }
+            @Override public Optional<RunViews> viewsOf(String id) {
+                return "run-s".equals(id) ? Optional.of(sideViews) : Optional.empty();
+            }
+        };
+        PilotServer.Endpoint ep = start(listing);
+        BlockingQueue<String> heard = new LinkedBlockingQueue<>();
+        WebSocket ws = connect(ep, heard);
+        next(heard, "runs", "run-s");
+
+        ws.sendText("{\"cmd\":\"select\",\"run\":\"run-s\"}", true).get(5, TimeUnit.SECONDS);
+        // The stage's own frame loop finds nothing to show and says why, which "no view of this run yet" never would.
+        String state = next(heard, "state", "The game window is closed.");
+        assertContains("\"runId\":\"run-s\"", state);
+        ws.abort();
+    }
+
     /** A run the pilot holds no view for is stopped, paused and resumed by its id, and only while the phone is shown it. */
     @Test
     void aRunWithNoViewCanBePausedResumedAndStoppedByItsId() throws Exception {

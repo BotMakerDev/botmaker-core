@@ -31,6 +31,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Set;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
@@ -54,7 +55,35 @@ public final class SideRunner implements SideRuns {
     /** Where a fit copies a parameter file before it changes it, as the open bot's run does. */
     private static final String VALUES_BACKUPS = ".botmaker/values-removed";
 
+    /** Told of each run started, once its process exists, so the Remote Pilot can show it. */
+    public interface Told {
+
+        /** Nobody is told. */
+        Told NOBODY = (runId, bot, properties, ended) -> { };
+
+        /**
+         * A run started.
+         *
+         * @param runId      the run's id in the live runs
+         * @param bot        what the registry lists it as
+         * @param properties the run properties it was started with, never its environment
+         * @param ended      completes when its process ends
+         */
+        void started(String runId, String bot, Map<String, String> properties, CompletionStage<?> ended);
+    }
+
     private static final Set<Process> LIVE = ConcurrentHashMap.newKeySet();
+
+    private final Told told;
+
+    public SideRunner() {
+        this(Told.NOBODY);
+    }
+
+    /** A runner that tells {@code told} of each run it starts. */
+    public SideRunner(Told told) {
+        this.told = told;
+    }
 
     static {
         Runtime.getRuntime().addShutdownHook(new Thread(() -> LIVE.forEach(Process::destroyForcibly),
@@ -97,6 +126,8 @@ public final class SideRunner implements SideRuns {
         });
         Process process = started(builder, held);
         held.ifPresent(run -> run.movedTo(process.toHandle()));
+        held.ifPresent(run -> told.started(run.runId(), SeveralRuns.bot(dir),
+                properties == null ? Map.of() : properties, process.onExit()));
         LIVE.add(process);
         process.onExit().thenRun(() -> {
             LIVE.remove(process);
