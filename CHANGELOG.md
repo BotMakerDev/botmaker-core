@@ -9,6 +9,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- The phone page (2026-11-27, pilot in core phase 2c): a committed build of BotPilot's web client under
+  `com/botmaker/core/pilot/web`, moved from the SDK, so a browser opening the pairing link gets the page. Its pin to a
+  pilot release's `web.zip` is owed: the core has no pinned-asset step yet.
 - `pilot.Pilot` and `pilot.transport` (2026-11-27): the Remote Pilot's tunnels, token and preferences in the core.
   `Pilot` brings up the way the user picked (Tailscale, Tailscale Funnel, a Cloudflare quick tunnel, the local
   network); a public way is only ever the user's explicit pick, never a fallback. The Funnel shutdown hook and its
