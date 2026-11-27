@@ -19,6 +19,7 @@ import com.botmaker.core.events.FileEdit;
 import com.botmaker.core.index.TypeSummaryManager;
 import com.botmaker.core.parser.EditorOutput;
 import com.botmaker.core.pilot.Pilot;
+import com.botmaker.core.pilot.PilotBackground;
 import com.botmaker.core.pilot.PilotRuns;
 import com.botmaker.core.pilot.RegistryRuns;
 import com.botmaker.core.parser.refactor.FunctionRestore;
@@ -382,6 +383,11 @@ public final class OpenProject implements AutoCloseable {
     /** The plugins' views, which the Remote Pilot asks what to show. */
     RunViews views() {
         return views;
+    }
+
+    /** This project's Background mode; {@code changed} is called when what a client shows of it differs. */
+    PilotBackground background(Runnable changed) {
+        return new PilotBackground(views, config.resourcesRoot(), changed);
     }
 
     /** What the Remote Pilot shows and drives of this project. */

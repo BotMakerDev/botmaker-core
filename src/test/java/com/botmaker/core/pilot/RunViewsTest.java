@@ -7,6 +7,7 @@ import com.botmaker.plugin.api.DeclaredPlugin;
 import com.botmaker.plugin.api.RunViewHolder;
 import com.botmaker.plugin.api.StudioPlugin;
 import com.botmaker.plugin.api.StudioServices;
+import com.botmaker.plugin.api.run.BackgroundLaunch;
 import com.botmaker.plugin.api.run.RunView;
 import com.botmaker.plugin.api.run.ViewTarget;
 import org.junit.jupiter.api.BeforeEach;
@@ -52,6 +53,11 @@ class RunViewsTest {
                 }
 
                 @Override
+                public Optional<BackgroundLaunch> background() {
+                    return Optional.of(new BackgroundLaunch("exe:game", "xephyr"));
+                }
+
+                @Override
                 public void start(StudioServices services, Runnable told) {
                     changed = told;
                 }
@@ -81,6 +87,12 @@ class RunViewsTest {
 
         assertEquals(GAME, views.shown().target());
         assertSame(views.views().getFirst(), views.views().getFirst());
+    }
+
+    @Test
+    void theViewsSayWhatTheyWouldStartInAPrivateDisplay() {
+        assertEquals(Optional.of(new BackgroundLaunch("exe:game", "xephyr")), views().background());
+        assertTrue(new RunViews(List::of, null, Runnable::run, () -> { }).background().isEmpty());
     }
 
     @Test

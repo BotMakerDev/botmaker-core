@@ -16,6 +16,7 @@ import java.util.EnumMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -79,6 +80,7 @@ public final class Pilot implements AutoCloseable {
     /** Who waits for the start under way to end. */
     private final List<CompletableFuture<PilotState>> waiting = new ArrayList<>();
     private boolean closed;
+    private volatile PilotBackground background;
 
     public Pilot(PilotPreferences preferences) {
         this(preferences, new Outside(
@@ -103,10 +105,38 @@ public final class Pilot implements AutoCloseable {
             now = base;
             on = server;
         }
-        if (on == null || now.phase() != PilotState.Phase.ON) return now;
+        PilotBackground modes = background;
+        PilotState.Background mode = modes == null ? PilotState.Background.NONE : modes.status();
+        if (on == null || now.phase() != PilotState.Phase.ON) return now.with(mode);
         String url = now.baseUrl() + "/?token=" + on.token();
         return new PilotState(now.phase(), now.asked(), now.kind(), now.baseUrl(), url, PilotQr.rows(url),
-                now.problem(), now.fix(), now.funnel(), now.options(), on.connected(), now.tailnet());
+                now.problem(), now.fix(), now.funnel(), now.options(), on.connected(), now.tailnet(), mode);
+    }
+
+    /**
+     * Background mode of the open project, which {@link #state()} tells; {@code null} when no project is open. The
+     * mode calls {@link #refresh()} when what it shows differs.
+     */
+    public void background(PilotBackground background) {
+        this.background = background;
+        changed();
+    }
+
+    /** Starts the open project's Background mode; the reason when it cannot, empty when it is under way. */
+    public Optional<String> startBackground() {
+        PilotBackground modes = background;
+        return modes == null ? Optional.of("No project is open: open_project opens one.") : modes.start();
+    }
+
+    /** Stops Background mode. */
+    public void stopBackground() {
+        PilotBackground modes = background;
+        if (modes != null) modes.stop();
+    }
+
+    /** Tells the watchers the state again, after something outside the pilot changed what it shows. */
+    public void refresh() {
+        changed();
     }
 
     /** Whether the pilot is on or coming up, and so must keep the core running. */

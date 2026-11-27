@@ -6,6 +6,7 @@ package com.botmaker.core.pilot;
 import com.botmaker.core.plugin.PluginHost;
 import com.botmaker.plugin.api.StudioPlugin;
 import com.botmaker.plugin.api.StudioServices;
+import com.botmaker.plugin.api.run.BackgroundLaunch;
 import com.botmaker.plugin.api.run.RunView;
 import com.botmaker.plugin.api.run.ViewTarget;
 import com.botmaker.plugin.api.run.ViewedRun;
@@ -51,6 +52,7 @@ public final class RunViews {
     /** Moves whenever the answer may have, so one computed across a change is not kept. */
     private long generation;
     private Shown shown = NOTHING;
+    private Optional<BackgroundLaunch> background = Optional.empty();
     private long shownAt;
     private boolean stale = true;
     private boolean asking;
@@ -153,6 +155,17 @@ public final class RunViews {
         }
     }
 
+    /**
+     * What the first view that has one would have started in a private display, as last asked: an answer that is due
+     * is asked for on {@code asks}, and the last one given meanwhile, as {@link #shown()}.
+     */
+    public Optional<BackgroundLaunch> background() {
+        shown();
+        synchronized (this) {
+            return background;
+        }
+    }
+
     /** The message the phone draws for one telemetry frame: the first view that can read it gives it. */
     public Optional<String> overlay(byte[] frame) {
         for (RunView view : views()) {
@@ -175,9 +188,12 @@ public final class RunViews {
                 at = generation;
             }
             Shown answer = ask(asked);
+            Optional<BackgroundLaunch> wished = asked.stream().map(view -> safe(view::background))
+                    .flatMap(Optional::stream).findFirst();
             synchronized (this) {
                 if (at == generation) {
                     shown = answer;
+                    background = wished;
                     shownAt = System.nanoTime();
                     stale = false;
                 }

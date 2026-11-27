@@ -287,6 +287,19 @@ public final class CoreClient implements AutoCloseable {
         return ask(new Request.PilotReset(ids.incrementAndGet()), ANSWER_TIMEOUT);
     }
 
+    /**
+     * Starts the open bot's game in a private display for the pilot; refused with why not, accepted when it is under
+     * way, and the outcome follows in the pilot's state ({@link PilotState#background()}).
+     */
+    public EditResult startBackground() throws IOException {
+        return ask(new Request.PilotBackgroundStart(ids.incrementAndGet()), ANSWER_TIMEOUT);
+    }
+
+    /** Takes the private display down. */
+    public EditResult stopBackground() throws IOException {
+        return ask(new Request.PilotBackgroundStop(ids.incrementAndGet()), ANSWER_TIMEOUT);
+    }
+
     /** Disconnects the phone {@code phone} (its id in the pilot's state). */
     public EditResult disconnectPhone(String phone) throws IOException {
         return ask(new Request.PilotDisconnect(ids.incrementAndGet(), phone), ANSWER_TIMEOUT);

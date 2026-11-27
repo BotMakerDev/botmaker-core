@@ -53,7 +53,9 @@ import java.util.Set;
         @JsonSubTypes.Type(value = Request.PilotStart.class, name = "pilotStart"),
         @JsonSubTypes.Type(value = Request.PilotStop.class, name = "pilotStop"),
         @JsonSubTypes.Type(value = Request.PilotReset.class, name = "pilotReset"),
-        @JsonSubTypes.Type(value = Request.PilotDisconnect.class, name = "pilotDisconnect")})
+        @JsonSubTypes.Type(value = Request.PilotDisconnect.class, name = "pilotDisconnect"),
+        @JsonSubTypes.Type(value = Request.PilotBackgroundStart.class, name = "pilotBackgroundStart"),
+        @JsonSubTypes.Type(value = Request.PilotBackgroundStop.class, name = "pilotBackgroundStop")})
 public sealed interface Request {
 
     /** Which ask this is; the answer carries it back. */
@@ -298,6 +300,18 @@ public sealed interface Request {
 
     /** Revokes the pairing token: every phone has to scan again. */
     record PilotReset(long id) implements ForPilot {
+    }
+
+    /**
+     * Starts the open bot's game in a private display, which the pilot then shows and drives (Background mode).
+     * Answered at once, accepted when the start is under way or refused with why not; the outcome follows in the
+     * pilot's state.
+     */
+    record PilotBackgroundStart(long id) implements ForPilot {
+    }
+
+    /** Takes the private display down, returning the pilot to the real desktop. */
+    record PilotBackgroundStop(long id) implements ForPilot {
     }
 
     /** Disconnects the phone {@code phone} of the pilot's state; it may pair again. */

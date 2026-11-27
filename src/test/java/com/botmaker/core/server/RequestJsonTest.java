@@ -70,7 +70,9 @@ class RequestJsonTest {
                 new Request.PilotStart(42, TransportKind.QUICK_TUNNEL),
                 new Request.PilotStop(43),
                 new Request.PilotReset(44),
-                new Request.PilotDisconnect(45, "ab12cd34"));
+                new Request.PilotDisconnect(45, "ab12cd34"),
+                new Request.PilotBackgroundStart(46),
+                new Request.PilotBackgroundStop(47));
         for (Request request : requests) {
             assertEquals(request, CoreJson.read(CoreJson.write(request), Request.class));
         }

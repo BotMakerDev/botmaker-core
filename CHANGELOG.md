@@ -9,6 +9,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- **Background mode in the pilot's protocol** (2026-11-27, pilot in core phase 5a): `PilotState.background` says
+  whether the open bot offers a private display (`offered`), whether one is up (`running`, `display`, `game`, `size`)
+  and the outcome of the last start or stop; `Request.PilotBackgroundStart`/`PilotBackgroundStop` (and
+  `CoreClient.startBackground`/`stopBackground`) bring it up in the project's `BackgroundLauncher`, which the pilot's
+  routes already read, and take it down with the project.
 - A dealt row carries what a plugin's pool notes about it (`PluginPool.noting`, 2026-11-27): `Dealer.Row.notes`, each
   pool asked with the picks before it, carried by `CoreEvent.RunsStarted.Started.notes` and shown by `run_bot {runs}`
   after the row's picks with ⚠. A noting that throws fails the dealing with the plugin named.

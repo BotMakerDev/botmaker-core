@@ -299,6 +299,16 @@ public final class Projects implements AutoCloseable, CoreHome.Host, PilotPort {
                 pilot.resetToken();
                 answer(channel, reset.id(), new EditResult.Accepted(List.of()));
             }
+            case Request.PilotBackgroundStart start -> {
+                // The launcher's own thread does the bring-up; this only checks and hands it over.
+                Optional<String> refused = pilot.startBackground();
+                answer(channel, start.id(), refused.<EditResult>map(EditResult.Refused::new)
+                        .orElseGet(() -> new EditResult.Accepted(List.of())));
+            }
+            case Request.PilotBackgroundStop stop -> {
+                pilot.stopBackground();
+                answer(channel, stop.id(), new EditResult.Accepted(List.of()));
+            }
             case Request.PilotDisconnect gone -> {
                 pilot.disconnect(gone.phone());
                 answer(channel, gone.id(), new EditResult.Accepted(List.of()));
@@ -410,6 +420,7 @@ public final class Projects implements AutoCloseable, CoreHome.Host, PilotPort {
         open = project;
         held = false;
         kept = false;
+        pilot.background(project.background(pilot::refresh));
         project.watch(event -> {
             watch.feed().told(event, "project");
             heard(project, event);
@@ -478,6 +489,8 @@ public final class Projects implements AutoCloseable, CoreHome.Host, PilotPort {
         tools.plugins(List.of());
         // The pilot shows this project: it stops first, so no phone drives a project being closed.
         pilot.stop();
+        pilot.stopBackground();
+        pilot.background(null);
         if (project != null) closeQuietly(project);
         serveHome();
     }
