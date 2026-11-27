@@ -34,7 +34,13 @@ public enum PilotCommand {
      * JPEG frames it has always been served, which is why the H.264 stream needed no change to the JPEG
      * framing and no version number anywhere.
      */
-    HELLO("hello");
+    HELLO("hello"),
+    /**
+     * The client picking, for itself alone, which of the listed runs it is shown: {@code {"cmd":"select","run":id}},
+     * or no {@code run} for the default. A phone that never selects is shown the run the open project holds, else the
+     * first listed.
+     */
+    SELECT("select");
 
     private final String token;
 

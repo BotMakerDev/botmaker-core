@@ -19,6 +19,7 @@ import java.time.Instant;
 import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Set;
@@ -51,7 +52,7 @@ class TelemetryWireContractTest {
      * The corpus, byte for byte. Update this together with {@code GOLDEN_SHA256} in the pilot repo's
      * {@code wire.test.ts} — and with the copy of the file itself, which must stay byte-identical.
      */
-    private static final String GOLDEN_SHA256 = "0b751c506853a217a49ac73b19cefc89f1293f728943f67325c3cfcc4750874c";
+    private static final String GOLDEN_SHA256 = "76bf3c288899fd5c84f3a3504f132ced6ad53b5adc847c811545a331690e7cf6";
 
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final JsonNode CORPUS = corpus();
@@ -90,6 +91,27 @@ class TelemetryWireContractTest {
         // above and this one are separate corpus entries rather than one shape with a nullable field.
         assertWire("state.stopped.reason", PilotMessages.stateJson(RunState.STOPPED, true,
                 "The background session is not showing any pixels on its X display."));
+    }
+
+    @Test
+    void aStateNamesItsRunWhenOneIsListedAndSaysWhenThereIsNoViewOfIt() {
+        assertWire("state.running.run", PilotMessages.stateJson(RunState.RUNNING, true, null, "20261127-101500-a1b2"));
+        assertWire("state.noview.run", PilotMessages.stateJson(RunState.RUNNING, false, "no view of this run yet",
+                "20261127-101730-c3d4"));
+    }
+
+    @Test
+    void theRunsMessageListsEveryLiveRunAndTheOneThisPhoneIsShown() {
+        assertWire("runs.list", PilotMessages.runsJson("20261127-101500-a1b2", List.of(
+                new PilotMessages.Listed("20261127-101500-a1b2", "Farmer", "paused", 1_700_000_000_000L),
+                new PilotMessages.Listed("20261127-101730-c3d4", "Fisher", "running", 1_700_000_150_000L))));
+        assertWire("runs.none", PilotMessages.runsJson(null, List.of()));
+    }
+
+    @Test
+    void aVideoStreamNamesItsRun() {
+        assertWire("video.started.run", PilotMessages.videoJson("avc1.42E01E", 0, 0, 1920, 1080,
+                "20261127-101500-a1b2"));
     }
 
     @Test

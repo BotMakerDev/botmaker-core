@@ -50,18 +50,33 @@ final class PilotMessages {
 
     // --- The messages ---
 
+    /**
+     * {@code runId} is the core's id of the run this message is about. It is omitted when the phone is shown the
+     * open project with no run listed, which is every message the released app has ever been sent.
+     */
     record State(String type, String run, boolean backgroundInput,
-                 @JsonInclude(JsonInclude.Include.NON_NULL) String reason) {}
+                 @JsonInclude(JsonInclude.Include.NON_NULL) String reason,
+                 @JsonInclude(JsonInclude.Include.NON_NULL) String runId) {}
 
-    record Video(String type, String codec, int sx, int sy, int sw, int sh) {}
+    record Video(String type, String codec, int sx, int sy, int sw, int sh,
+                 @JsonInclude(JsonInclude.Include.NON_NULL) String runId) {}
 
-    record VideoStopped(String type, String codec) {}
+    record VideoStopped(String type, String codec, @JsonInclude(JsonInclude.Include.NON_NULL) String runId) {}
 
-    record Trace(String type, Line line) {}
+    record Trace(String type, Line line, @JsonInclude(JsonInclude.Include.NON_NULL) String runId) {}
 
     record Input(String type, List<String> kinds) {}
 
-    record Notice(String type, String text) {}
+    record Notice(String type, String text, @JsonInclude(JsonInclude.Include.NON_NULL) String runId) {}
+
+    /**
+     * The live runs this phone may pick from and the one it is shown. A phone's pick is its own, so each socket is
+     * sent its own {@code selected}, {@code null} when there is no run to show.
+     */
+    record Runs(String type, String selected, List<Listed> runs) {}
+
+    /** One run of the list: the core's id (opaque), what it plays, its state, and when it started. */
+    record Listed(String id, String bot, String state, long startedMillis) {}
 
     record Ping(String type) {}
 
@@ -80,7 +95,20 @@ final class PilotMessages {
      * something instead of nothing.
      */
     static String stateJson(RunState run, boolean backgroundInput, String reason) {
-        return write(new State("state", run.id(), backgroundInput, reason));
+        return stateJson(run, backgroundInput, reason, null);
+    }
+
+    /** The {@code state} message of the run {@code runId}, or of the open project's idle views when it is null. */
+    static String stateJson(RunState run, boolean backgroundInput, String reason, String runId) {
+        return write(new State("state", run.id(), backgroundInput, reason, runId));
+    }
+
+    /**
+     * The {@code runs} message: every live run of this PC and which one this phone is shown. Sent on connect, and
+     * again when the list or the phone's pick changes.
+     */
+    static String runsJson(String selected, List<Listed> runs) {
+        return write(new Runs("runs", selected, runs));
     }
 
     /**
@@ -92,7 +120,11 @@ final class PilotMessages {
      * one encoder on one display, so the rect changes only when the stream does.
      */
     static String videoJson(String codec, int sx, int sy, int sw, int sh) {
-        return write(new Video("video", codec, sx, sy, sw, sh));
+        return videoJson(codec, sx, sy, sw, sh, null);
+    }
+
+    static String videoJson(String codec, int sx, int sy, int sw, int sh, String runId) {
+        return write(new Video("video", codec, sx, sy, sw, sh, runId));
     }
 
     /**
@@ -101,7 +133,11 @@ final class PilotMessages {
      * can end (route change, encoder death, last H.264 client leaving) and not only on a tidy shutdown.
      */
     static String videoStoppedJson() {
-        return write(new VideoStopped("video", null));
+        return videoStoppedJson(null);
+    }
+
+    static String videoStoppedJson(String runId) {
+        return write(new VideoStopped("video", null, runId));
     }
 
     /**
@@ -115,7 +151,11 @@ final class PilotMessages {
 
     /** The {@code notice} message: one sentence the phone shows briefly, such as why a key was not sent. */
     static String noticeJson(String text) {
-        return write(new Notice("notice", text));
+        return noticeJson(text, null);
+    }
+
+    static String noticeJson(String text, String runId) {
+        return write(new Notice("notice", text, runId));
     }
 
     /**
@@ -128,8 +168,12 @@ final class PilotMessages {
 
     /** The log drawer's message. The source line, the writer and the region stay on the host. */
     static String traceJson(TraceLine line) {
+        return traceJson(line, null);
+    }
+
+    static String traceJson(TraceLine line, String runId) {
         return write(new Trace("trace", new Line(line.at().toEpochMilli(), line.level().id(), line.source(),
-                line.text(), line.count())));
+                line.text(), line.count()), runId));
     }
 
     private static String write(Object message) {

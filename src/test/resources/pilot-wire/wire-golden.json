@@ -126,6 +126,41 @@
     "backgroundInput": true,
     "reason": "The background session is not showing any pixels on its X display."
   },
+  "state.running.run": {
+    "type": "state",
+    "run": "running",
+    "backgroundInput": true,
+    "runId": "20261127-101500-a1b2"
+  },
+  "state.noview.run": {
+    "type": "state",
+    "run": "running",
+    "backgroundInput": false,
+    "reason": "no view of this run yet",
+    "runId": "20261127-101730-c3d4"
+  },
+  "runs.list": {
+    "type": "runs",
+    "selected": "20261127-101500-a1b2",
+    "runs": [
+      { "id": "20261127-101500-a1b2", "bot": "Farmer", "state": "paused", "startedMillis": 1700000000000 },
+      { "id": "20261127-101730-c3d4", "bot": "Fisher", "state": "running", "startedMillis": 1700000150000 }
+    ]
+  },
+  "runs.none": {
+    "type": "runs",
+    "selected": null,
+    "runs": []
+  },
+  "video.started.run": {
+    "type": "video",
+    "codec": "avc1.42E01E",
+    "sx": 0,
+    "sy": 0,
+    "sw": 1920,
+    "sh": 1080,
+    "runId": "20261127-101500-a1b2"
+  },
   "video.started": {
     "type": "video",
     "codec": "avc1.42E01E",

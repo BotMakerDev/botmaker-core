@@ -74,6 +74,14 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *       ({@code {"cmd":"hello","accept":["h264"]}} — see {@link #handleHello}).</li>
  * </ul>
  *
+ * <p><b>Several runs, one view.</b> The phone is sent {@code {"type":"runs","selected":id,"runs":[{id,bot,state,
+ * startedMillis}]}}, the live runs of this PC by the core's run id, and picks its own with
+ * {@code {"cmd":"select","run":id}} (kept per socket; none: the run the open project holds, else the first). The
+ * pilot holds a view for the open project's run alone: a phone on another run is told it is running and why nothing
+ * shows, is sent no picture, trace or overlay, and its commands are refused. Every message about a run names it
+ * ({@code runId}); a command's {@code run} must be the one it is shown. A phone that never lists or selects (the
+ * released app) is shown the open project exactly as before.
+ *
  * <p><b>Two frame formats, and only one of them is negotiated.</b> JPEG is what every client gets and what
  * every client got before there was anything to negotiate; H.264 is offered only to a client that asks for it
  * by name, only on a session route, and only while an encoder is actually producing. Every step of that can
@@ -122,6 +130,8 @@ public final class PilotServer implements AutoCloseable {
     private final PairingStore pairing;
     private final PilotInputService input = new PilotInputService();
     private final ObjectMapper json = new ObjectMapper();
+    /** The registry's live runs, which a phone lists and picks from. */
+    private final PilotRuns listing;
 
     /**
      * Per-connection state: its outgoing {@link SendQueue}, and whether this client has armed Interact. Both are
@@ -137,6 +147,12 @@ public final class PilotServer implements AutoCloseable {
         final long sinceMillis = System.currentTimeMillis();
         /** The last JPEG message queued for this client, so an unchanged picture is not sent again. */
         volatile byte[] lastFrame;
+        /** The run this phone picked, or null for the default; it is only honoured while that run is listed. */
+        volatile String selected;
+        /** Whether this phone was last shown the run the pilot holds a view for, so a change is announced once. */
+        volatile boolean sawView;
+        /** The connection, so a change of view can release what this phone holds. */
+        volatile Session session;
 
         Client(SendQueue out, String address) {
             this.out = out;
@@ -231,7 +247,7 @@ public final class PilotServer implements AutoCloseable {
     private long pingedAt = System.nanoTime();
     /**
      * How many ticks in a row produced no frame, touched only from the single {@code pilot-frame} thread;
-     * {@link #emptyReason} is volatile because {@link #stateJson()} is also called from the WS threads.
+     * {@link #emptyReason} is volatile because {@link #stateJson(Client)} is also called from the WS threads.
      */
     private int emptyFrames;
     /** The sentence sent with the {@code state} message while frames are missing, or {@code null} when they aren't. */
@@ -239,6 +255,12 @@ public final class PilotServer implements AutoCloseable {
 
     PilotServer(Runs runs, RunViews views, PilotRoutes routes, TargetCapture capture, PilotControlService control,
                 PairingStore pairing) {
+        this(runs, views, routes, capture, control, pairing, PilotRuns.NONE);
+    }
+
+    PilotServer(Runs runs, RunViews views, PilotRoutes routes, TargetCapture capture, PilotControlService control,
+                PairingStore pairing, PilotRuns listing) {
+        this.listing = listing == null ? PilotRuns.NONE : listing;
         this.runs = runs == null ? Runs.NONE : runs;
         this.views = views;
         this.routes = routes;
@@ -251,9 +273,10 @@ public final class PilotServer implements AutoCloseable {
      * The pilot of an open project: {@code runs} its bot, {@code views} what its plugins show of a run, and the
      * background session the one held in this process for {@code resourcesRoot}.
      */
-    public static PilotServer forProject(Runs runs, RunViews views, Path resourcesRoot, PairingStore pairing) {
+    public static PilotServer forProject(Runs runs, RunViews views, Path resourcesRoot, PilotRuns listing,
+                                         PairingStore pairing) {
         return new PilotServer(runs, views, PilotRoutes.of(resourcesRoot, views), TargetCapture.of(resourcesRoot),
-                new PilotControlService(runs), pairing);
+                new PilotControlService(runs), pairing, listing);
     }
 
     /**
@@ -457,6 +480,7 @@ public final class PilotServer implements AutoCloseable {
         public void onWebSocketOpen(Session opened) {
             session = opened;
             Client client = new Client(new SendQueue(linkTo(opened)), addressOf(opened));
+            client.session = opened;
             synchronized (pairingLock) {
                 if (!authorized(provided)) {
                     opened.close(BAD_TOKEN, BAD_TOKEN_REASON, Callback.NOOP);
@@ -465,10 +489,11 @@ public final class PilotServer implements AutoCloseable {
                 clients.put(opened, client);
             }
             phonesChanged.run();
-            client.out.text(stateJson()); // let a fresh client render the current run state immediately
             client.out.text(PilotMessages.inputJson(PilotInputService.Kind.wireNames()));
-            // …and the run's recent trace, so a phone that connects mid-run opens on context, not blank.
-            for (String line : traceBacklog()) client.out.text(line);
+            // The runs, the run state to render at once, and the run's recent trace, so a phone that connects
+            // mid-run opens on context, not blank.
+            refreshRuns();
+            tell(client);
         }
 
         @Override
@@ -621,6 +646,15 @@ public final class PilotServer implements AutoCloseable {
         }
         PilotCommand cmd = PilotCommand.from(node.path("cmd").asText(null)).orElse(null);
         if (cmd == null) return;   // an older or newer phone build; ignore, never drop the connection
+        String named = node.hasNonNull("run") ? node.path("run").asText() : null;
+        if (cmd == PilotCommand.SELECT) {
+            select(client, session, named);
+            return;
+        }
+        if (cmd != PilotCommand.HELLO && !mayControl(client, cmd, named)) {
+            notice(client, NO_VIEW_NOTICE);
+            return;
+        }
         switch (cmd) {
             case START -> runs.start();
             case STOP -> runs.stop();
@@ -634,6 +668,45 @@ public final class PilotServer implements AutoCloseable {
             }
             case INPUT -> handleInput(client, session, node);
             case HELLO -> handleHello(client, node);
+            case SELECT -> { }   // answered above
+        }
+    }
+
+    private static final String NO_VIEW_NOTICE = "There is no view of this run on the computer yet, so it cannot "
+            + "be controlled from here.";
+
+    private static final String GONE_NOTICE = "That run is not running any more.";
+
+    /**
+     * Whether a command may act: only on the run the pilot holds a view for, named by the command's {@code run} or,
+     * when it names none (the released app), the one this phone is shown. Starting a run names none and starts the
+     * open project's bot, so it is also allowed while that bot is not among the runs.
+     */
+    private boolean mayControl(Client client, PilotCommand cmd, String named) {
+        Snapshot now = snapshot;
+        if (cmd == PilotCommand.START && named == null && now.viewed() == null) return true;
+        String shown = effective(client, now);
+        if (named != null && !named.equals(shown)) return false;   // a command names the run the phone is shown
+        return sees(shown, now);
+    }
+
+    /**
+     * This phone picks, for itself, which run it is shown ({@code null}: the default). A run not listed is refused,
+     * and the phone is told the list again, since a pick of a run that just ended means its list is stale.
+     */
+    private void select(Client client, Session session, String wanted) {
+        String pick = wanted == null || wanted.isBlank() ? null : wanted;
+        if (pick != null && !listed(snapshot, pick)) {
+            refreshRuns();
+            if (!listed(snapshot, pick)) {
+                notice(client, GONE_NOTICE);
+                tell(client);
+                return;
+            }
+        }
+        synchronized (runsLock) {
+            client.selected = pick;
+            tell(client);
         }
     }
 
@@ -663,7 +736,7 @@ public final class PilotServer implements AutoCloseable {
         }
         // A client that joins a running stream is told about it now rather than at the next route change,
         // which on a stable session would be never.
-        if (video.live()) {
+        if (video.live() && client.sawView) {
             sendVideoStart(client);
         }
     }
@@ -715,7 +788,7 @@ public final class PilotServer implements AutoCloseable {
 
     /** The host announces no pause, so it is asked about once a second while somebody watches. */
     private void followHostPause() {
-        if (clients.isEmpty() || ++ticksSincePauseCheck < FRAME_FPS) return;
+        if (viewers().isEmpty() || ++ticksSincePauseCheck < FRAME_FPS) return;
         ticksSincePauseCheck = 0;
         refreshPausedState();
     }
@@ -735,8 +808,8 @@ public final class PilotServer implements AutoCloseable {
      * that draws nothing, or that none can read, is dropped.
      */
     private void onTelemetryFrame(byte[] frame) {
-        if (frame == null || frame.length == 0 || clients.isEmpty()) return;
-        views.overlay(frame).ifPresent(this::broadcastText);
+        if (frame == null || frame.length == 0 || viewers().isEmpty()) return;
+        views.overlay(frame).ifPresent(this::broadcastToViewers);
     }
 
     /**
@@ -745,12 +818,12 @@ public final class PilotServer implements AutoCloseable {
      */
     private void onTrace(TraceLine line) {
         if (line == null) return;
-        String message = PilotMessages.traceJson(line);
+        String message = PilotMessages.traceJson(line, snapshot.viewed());
         synchronized (traceBacklog) {
             traceBacklog.addLast(message);
             if (traceBacklog.size() > TRACE_BACKLOG) traceBacklog.removeFirst();
         }
-        broadcastText(message);
+        broadcastToViewers(message);
     }
 
     /** What a phone connecting now is sent after the run state, oldest first. */
@@ -769,12 +842,119 @@ public final class PilotServer implements AutoCloseable {
     private void setRunState(RunState state) {
         synchronized (runStateLock) {
             runState = state;
-            broadcastText(stateJson());
+            broadcastState();
+        }
+        refreshRuns(); // a run that started or ended changes which run the open project holds
+    }
+
+    /** Each phone is sent the state of the run it is shown. */
+    private void broadcastState() {
+        for (Client client : clients.values()) client.out.text(stateJson(client));
+    }
+
+    private String stateJson(Client client) {
+        Snapshot now = snapshot;
+        String shown = effective(client, now);
+        if (sees(shown, now)) {
+            return PilotMessages.stateJson(runState, input.supportsBackgroundInput(pushed.route()), emptyReason,
+                    now.viewed());
+        }
+        return PilotMessages.stateJson(RunState.RUNNING, false, NO_VIEW_REASON, shown);
+    }
+
+    // --- The runs a phone lists and picks from ---
+
+    private static final String NO_VIEW_REASON = "no view of this run yet";
+
+    /** The live runs and the one the pilot holds a view for, as of the last {@link #refreshRuns}. */
+    private record Snapshot(List<PilotRuns.Listed> live, String viewed, String viewedState) {}
+
+    private volatile Snapshot snapshot = new Snapshot(List.of(), null, RunState.STOPPED.id());
+    private final Object runsLock = new Object();
+    /** When the registry was last read, by {@link System#nanoTime}. Frame thread only. */
+    private long runsReadAt = System.nanoTime();
+    private static final int RUNS_SECONDS = 1;
+
+    private static boolean listed(Snapshot in, String id) {
+        return in.live().stream().anyMatch(run -> run.id().equals(id));
+    }
+
+    /**
+     * The run {@code client} is shown: its pick while that run is listed, else the run the open project holds, else
+     * none (the open project's idle views, as the released app has always seen them).
+     */
+    private static String effective(Client client, Snapshot in) {
+        String picked = client.selected;
+        if (picked != null && listed(in, picked)) return picked;
+        return in.viewed() != null && listed(in, in.viewed()) ? in.viewed() : null;
+    }
+
+    /** Whether the run {@code shown} is the one the pilot holds a view for ({@code null}: the idle views). */
+    private static boolean sees(String shown, Snapshot in) {
+        return shown == null ? in.viewed() == null : shown.equals(in.viewed());
+    }
+
+    /** The phones shown the run the pilot holds a view for: they are sent its picture, trace and overlay. */
+    private List<Client> viewers() {
+        Snapshot now = snapshot;
+        return clients.values().stream().filter(c -> sees(effective(c, now), now)).toList();
+    }
+
+    /** Reads the registry once a second while the loop runs; it is files and a liveness check each time. */
+    private void followRuns() {
+        long now = System.nanoTime();
+        if (clients.isEmpty() || now - runsReadAt < TimeUnit.SECONDS.toNanos(RUNS_SECONDS)) return;
+        runsReadAt = now;
+        refreshRuns();
+    }
+
+    /** Reads the registry, and tells every phone whose list or shown run changed. */
+    private void refreshRuns() {
+        synchronized (runsLock) {
+            List<PilotRuns.Listed> live = List.copyOf(listing.live());
+            String viewed = listing.viewed().filter(id -> live.stream().anyMatch(run -> run.id().equals(id)))
+                    .orElse(null);
+            Snapshot read = new Snapshot(live, viewed, runState.id());
+            if (read.equals(snapshot)) return;
+            snapshot = read;
+            clients.values().forEach(this::tell);
         }
     }
 
-    private String stateJson() {
-        return PilotMessages.stateJson(runState, input.supportsBackgroundInput(pushed.route()), emptyReason);
+    /**
+     * Tells {@code client} the list, the run it is shown and that run's state; and, when it has just come to be shown
+     * the open project's run, its trace so far and the stream; when it has just left it, that the stream ended.
+     */
+    private void tell(Client client) {
+        synchronized (runsLock) {
+            Snapshot now = snapshot;
+            String shown = effective(client, now);
+            boolean seesNow = sees(shown, now);
+            boolean saw = client.sawView;
+            client.sawView = seesNow;
+            client.out.text(PilotMessages.runsJson(shown, now.live().stream()
+                    .map(run -> new PilotMessages.Listed(run.id(), run.bot(),
+                            run.id().equals(now.viewed()) ? now.viewedState() : RunState.RUNNING.id(),
+                            run.startedMillis()))
+                    .toList()));
+            client.out.text(stateJson(client));
+            if (seesNow == saw) return;
+            client.lastFrame = null;
+            client.decoding.set(false);
+            if (seesNow) {
+                for (String line : traceBacklog()) client.out.text(line);
+                if (client.h264 && video.live()) sendVideoStart(client);
+            } else {
+                // Leaving the run: Interact is disarmed and what the phone holds is let go, so nothing it armed
+                // drives the next run it is shown.
+                Session session = client.session;
+                if (client.interact.getAndSet(false) && session != null) {
+                    input.releaseHeldBy(session);
+                    phonesChanged.run();
+                }
+                if (client.h264 && video.live()) client.out.text(PilotMessages.videoStoppedJson(now.viewed()));
+            }
+        }
     }
 
     /**
@@ -811,7 +991,7 @@ public final class PilotServer implements AutoCloseable {
         Diag.log("[Pilot] no frame for " + emptyFrames + " ticks on " + route);
         // A phone may blank its picture on the reason, so the frame that comes back is sent even if unchanged.
         clients.values().forEach(c -> c.lastFrame = null);
-        broadcastText(stateJson());
+        broadcastState();
     }
 
     /**
@@ -857,12 +1037,16 @@ public final class PilotServer implements AutoCloseable {
         emptyFrames = 0;
         if (emptyReason != null) {
             emptyReason = null;
-            broadcastText(stateJson());
+            broadcastState();
         }
     }
 
     private void broadcastText(String text) {
         for (Client client : clients.values()) client.out.text(text);
+    }
+
+    private void broadcastToViewers(String text) {
+        for (Client client : viewers()) client.out.text(text);
     }
 
     // --- H.264 (the fast path, when both ends can take it) ---
@@ -894,30 +1078,30 @@ public final class PilotServer implements AutoCloseable {
                 new PilotInputService.Bounds(surface.x, surface.y, surface.width, surface.height));
         clearEmptyReport();
         logSurface(asked, surface.x, surface.y, surface.width, surface.height);
-        return clients.values().stream().allMatch(c -> c.h264);
+        return viewers().stream().allMatch(c -> c.h264);
     }
 
     private boolean anyClientWantsVideo() {
-        return clients.values().stream().anyMatch(c -> c.h264);
+        return viewers().stream().anyMatch(c -> c.h264);
     }
 
     /** Tells the H.264 clients that a stream started (with its codec and rect) or ended. */
     private void announceVideo(boolean started) {
-        for (Client client : clients.values()) {
+        for (Client client : viewers()) {
             if (!client.h264) continue;
             client.decoding.set(false);
             client.lastFrame = null;
             if (started) {
                 sendVideoStart(client);
             } else {
-                client.out.text(PilotMessages.videoStoppedJson());
+                client.out.text(PilotMessages.videoStoppedJson(snapshot.viewed()));
             }
         }
     }
 
     private void sendVideoStart(Client client) {
         Rectangle r = video.rect();
-        client.out.text(PilotMessages.videoJson(video.codec(), r.x, r.y, r.width, r.height));
+        client.out.text(PilotMessages.videoJson(video.codec(), r.x, r.y, r.width, r.height, snapshot.viewed()));
     }
 
     /**
@@ -927,12 +1111,13 @@ public final class PilotServer implements AutoCloseable {
      * indefinitely rather than one bad frame.
      */
     private void onVideoPacket(VideoPacket packet) {
-        if (clients.isEmpty()) return;
+        List<Client> viewing = viewers();
+        if (viewing.isEmpty()) return;
         byte[] payload = new byte[1 + packet.annexB().length];
         payload[0] = packet.keyframe() ? BINARY_H264_KEY : BINARY_H264;
         System.arraycopy(packet.annexB(), 0, payload, 1, packet.annexB().length);
 
-        for (Client client : clients.values()) {
+        for (Client client : viewing) {
             if (!client.h264) continue;
             // A client that has not been given a decodable entry point yet waits for the next keyframe; the
             // encoder's GOP is what bounds that wait.
@@ -970,6 +1155,7 @@ public final class PilotServer implements AutoCloseable {
             input.releaseStale();
             followHostPause();
             heartbeat();
+            followRuns();
             pushFrame();
         } catch (Throwable ex) {
             // A frame that threw must not silently end the loop — that is a pilot that goes dark forever.
@@ -987,7 +1173,8 @@ public final class PilotServer implements AutoCloseable {
     }
 
     private void pushFrame() {
-        if (clients.isEmpty()) {
+        List<Client> viewing = viewers();
+        if (viewing.isEmpty()) {
             followVideo(null);   // nobody to encode for; let the ffmpeg go rather than heat a GPU for no one
             pushed = pushed.withoutFrame(); // the next phone was shown nothing yet, so it may touch nothing yet
             return;
@@ -1017,14 +1204,14 @@ public final class PilotServer implements AutoCloseable {
         boolean routeChanged = !pushed.route().getClass().equals(route.getClass());
         pushed = new Pushed(route, cap.window(),
                 new PilotInputService.Bounds(cap.sx(), cap.sy(), cap.sw(), cap.sh()));
-        if (routeChanged) broadcastText(stateJson());
+        if (routeChanged) broadcastState();
 
         byte[] payload = new byte[16 + jpeg.length];
         ByteBuffer.wrap(payload)
                 .putInt(cap.sx()).putInt(cap.sy()).putInt(cap.sw()).putInt(cap.sh())
                 .put(jpeg);
 
-        for (Client client : clients.values()) {
+        for (Client client : viewing) {
             // A client being fed H.264 must not also be fed JPEG: it would draw the two interleaved, at two
             // different latencies, which looks exactly like a stutter in the video.
             if (client.h264 && video.live()) continue;

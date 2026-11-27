@@ -42,7 +42,13 @@ import java.util.function.Supplier;
 public final class Pilot implements AutoCloseable {
 
     /** The open project the pilot shows and drives. */
-    public record Served(Runs runs, RunViews views, Path resourcesRoot) {}
+    public record Served(Runs runs, RunViews views, Path resourcesRoot, PilotRuns runList) {
+
+        /** A project that lists no registry runs. */
+        public Served(Runs runs, RunViews views, Path resourcesRoot) {
+            this(runs, views, resourcesRoot, PilotRuns.NONE);
+        }
+    }
 
     /** What reaches outside this process, so a test brings the pilot up with none of it. */
     record Outside(Function<TransportKind, PilotTransport> transports,
@@ -77,7 +83,8 @@ public final class Pilot implements AutoCloseable {
     public Pilot(PilotPreferences preferences) {
         this(preferences, new Outside(
                 kind -> PilotTransport.of(kind, preferences),
-                served -> PilotServer.forProject(served.runs(), served.views(), served.resourcesRoot(), preferences),
+                served -> PilotServer.forProject(served.runs(), served.views(), served.resourcesRoot(), served.runList(),
+                        preferences),
                 TailnetPhones::probe,
                 () -> FunnelTransport.clearLeftover(preferences)));
     }

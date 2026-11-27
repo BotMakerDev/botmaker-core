@@ -78,11 +78,65 @@ class PilotServerTest {
     }
 
     private PilotServer.Endpoint start() {
+        return start(PilotRuns.NONE);
+    }
+
+    private PilotServer.Endpoint start(PilotRuns listing) {
         List<StudioPlugin> bound = List.of(new RunViewsTest.Plugin());
         RunViews views = new RunViews(() -> bound, null, Runnable::run, () -> { });
         server = new PilotServer(runs, views, new PilotRoutes(() -> null, views::shown, serial -> null),
-                new TargetCapture(null), new PilotControlService(runs), PairingStore.inMemory());
+                new TargetCapture(null), new PilotControlService(runs), PairingStore.inMemory(), listing);
         return server.start("127.0.0.1");
+    }
+
+    /** Two live runs, the first of which the open project holds. */
+    private static PilotRuns listed(String viewed, String... ids) {
+        List<PilotRuns.Listed> live = new ArrayList<>();
+        for (String id : ids) live.add(new PilotRuns.Listed(id, "Bot " + id, 1_000L * (live.size() + 1)));
+        return new PilotRuns() {
+            @Override public List<Listed> live() { return live; }
+            @Override public Optional<String> viewed() { return Optional.ofNullable(viewed); }
+        };
+    }
+
+    private static WebSocket connect(PilotServer.Endpoint ep, BlockingQueue<String> heard) throws Exception {
+        return HttpClient.newHttpClient().newWebSocketBuilder()
+                .connectTimeout(Duration.ofSeconds(5))
+                .buildAsync(URI.create("ws://127.0.0.1:" + ep.port() + "/ws?token=" + ep.token()),
+                        new WebSocket.Listener() {
+                            private final StringBuilder part = new StringBuilder();
+
+                            @Override public CompletionStage<?> onText(WebSocket w, CharSequence data, boolean last) {
+                                part.append(data);
+                                if (last) {
+                                    heard.add(part.toString());
+                                    part.setLength(0);
+                                }
+                                w.request(1);
+                                return null;
+                            }
+                        })
+                .get(5, TimeUnit.SECONDS);
+    }
+
+    /** The next message of {@code type}, skipping the others. */
+    private static String next(BlockingQueue<String> heard, String type) throws InterruptedException {
+        return next(heard, type, "");
+    }
+
+    /**
+     * The next message of {@code type} that holds {@code part}: a list or a state may be told twice while a phone
+     * connects, and a test waits for the one it is about.
+     */
+    private static String next(BlockingQueue<String> heard, String type, String part) throws InterruptedException {
+        long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (System.nanoTime() < until) {
+            String message = heard.poll(1, TimeUnit.SECONDS);
+            if (message != null && message.contains("\"type\":\"" + type + "\"") && message.contains(part)) {
+                return message;
+            }
+        }
+        throw new AssertionError("no " + type + " with " + part + " heard");
     }
 
     private static TraceLine line(int number) {
@@ -145,12 +199,83 @@ class PilotServerTest {
                         })
                 .get(5, TimeUnit.SECONDS);
 
-        assertContains("\"type\":\"state\"", heard.poll(5, TimeUnit.SECONDS));
         assertContains("\"type\":\"input\"", heard.poll(5, TimeUnit.SECONDS));
+        assertContains("\"type\":\"runs\"", heard.poll(5, TimeUnit.SECONDS));
+        String state = heard.poll(5, TimeUnit.SECONDS);
+        assertContains("\"type\":\"state\"", state);
+        assertFalse(state.contains("runId"), "no run is listed, so the message is what the released app was sent");
 
         runs.telemetry.forEach(l -> l.accept("{\"type\":\"telemetry\"}".getBytes(StandardCharsets.UTF_8)));
         assertEquals("{\"type\":\"telemetry\"}", heard.poll(5, TimeUnit.SECONDS), "the view writes the overlay");
 
+        ws.sendText("{\"cmd\":\"start\"}", true).get(5, TimeUnit.SECONDS);
+        assertTrue(runs.started.await(5, TimeUnit.SECONDS));
+        ws.abort();
+    }
+
+    @Test
+    void aPhoneIsShownTheRunTheProjectHoldsAndMayPickAnotherThatHasNoViewAndNoControl() throws Exception {
+        PilotServer.Endpoint ep = start(listed("run-b", "run-a", "run-b"));
+        BlockingQueue<String> heard = new LinkedBlockingQueue<>();
+        WebSocket ws = connect(ep, heard);
+
+        assertContains("\"id\":\"run-a\"", next(heard, "runs", "\"selected\":\"run-b\""));
+        next(heard, "state", "\"runId\":\"run-b\"");
+
+        ws.sendText("{\"cmd\":\"select\",\"run\":\"run-a\"}", true).get(5, TimeUnit.SECONDS);
+        next(heard, "runs", "\"selected\":\"run-a\"");
+        String noView = next(heard, "state", "no view");
+        assertContains("no view of this run yet", noView);
+        assertContains("\"runId\":\"run-a\"", noView);
+
+        // Its commands are refused, and so are its gestures: nothing of it is driven.
+        ws.sendText("{\"cmd\":\"interact\",\"on\":true}", true).get(5, TimeUnit.SECONDS);
+        ws.sendText("{\"cmd\":\"start\"}", true).get(5, TimeUnit.SECONDS);
+        assertContains("cannot be controlled", next(heard, "notice"));
+        assertEquals(1, runs.started.getCount());
+        assertEquals(List.of(), server.connected().stream().filter(PilotServer.Connected::interact).toList());
+
+        // A command names its run, and the one shown by the other phone's pick is not this one's.
+        ws.sendText("{\"cmd\":\"select\",\"run\":\"run-b\"}", true).get(5, TimeUnit.SECONDS);
+        next(heard, "runs", "\"selected\":\"run-b\"");
+        ws.sendText("{\"cmd\":\"start\",\"run\":\"run-a\"}", true).get(5, TimeUnit.SECONDS);
+        assertContains("cannot be controlled", next(heard, "notice"));
+        assertEquals(1, runs.started.getCount());
+        ws.sendText("{\"cmd\":\"start\",\"run\":\"run-b\"}", true).get(5, TimeUnit.SECONDS);
+        assertTrue(runs.started.await(5, TimeUnit.SECONDS));
+        ws.abort();
+    }
+
+    @Test
+    void aRunThatIsNotListedCannotBePicked() throws Exception {
+        PilotServer.Endpoint ep = start(listed("run-a", "run-a"));
+        BlockingQueue<String> heard = new LinkedBlockingQueue<>();
+        WebSocket ws = connect(ep, heard);
+        next(heard, "state");
+
+        ws.sendText("{\"cmd\":\"select\",\"run\":\"gone\"}", true).get(5, TimeUnit.SECONDS);
+        assertContains("not running any more", next(heard, "notice"));
+        next(heard, "runs", "\"selected\":\"run-a\"");
+        ws.abort();
+    }
+
+    @Test
+    void anOtherProcessRunIsShownWithNoViewButTheOpenProjectsBotCanStillStart() throws Exception {
+        PilotServer.Endpoint ep = start(listed(null, "run-x"));
+        BlockingQueue<String> heard = new LinkedBlockingQueue<>();
+        WebSocket ws = connect(ep, heard);
+
+        // A phone that picked nothing keeps the open project's idle views, as the released app always had.
+        String list = next(heard, "runs", "run-x");
+        assertFalse(list.contains("\"selected\":\"run-x\""), list);
+        assertFalse(next(heard, "state").contains("no view"));
+
+        // Picking the run shows its missing view.
+        ws.sendText("{\"cmd\":\"select\",\"run\":\"run-x\"}", true).get(5, TimeUnit.SECONDS);
+        next(heard, "runs", "\"selected\":\"run-x\"");
+        next(heard, "state", "no view of this run yet");
+
+        // Starting names no run and starts the project's own bot, which no run holds.
         ws.sendText("{\"cmd\":\"start\"}", true).get(5, TimeUnit.SECONDS);
         assertTrue(runs.started.await(5, TimeUnit.SECONDS));
         ws.abort();

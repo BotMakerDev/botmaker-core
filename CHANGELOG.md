@@ -9,6 +9,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- The pilot lists the PC's live runs (2026-11-27, pilot in core phase 4a): a `runs` message from the run registry
+  (each run by the core's run id, live runs only) and a `select` command, kept per socket; a `runId` on `state`,
+  `video`, `trace` and `notice`; a command's `run` must name the run its phone is shown. The open project's run has
+  the view; any other is "running" with the reason "no view of this run yet", and gets no picture, overlay or control.
+  The released app, which sends and reads none of it, is shown the open project as before. Per-run views and control
+  are phase 4b.
+
 - The phone page (2026-11-27, pilot in core phase 2c): a committed build of BotPilot's web client under
   `com/botmaker/core/pilot/web`, moved from the SDK, so a browser opening the pairing link gets the page. Its pin to a
   pilot release's `web.zip` is owed: the core has no pinned-asset step yet.
