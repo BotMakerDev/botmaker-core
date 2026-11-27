@@ -9,6 +9,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- **Remote Pilot is the core's** (2026-11-27, pilot in core): the server, tunnels, token and phone page moved here
+  from the SDK plugin. It is started from Studio's 🎮 Pilot window or `botmaker core pilot`, works on any project
+  whose plugins name what a run shows (`views(…)`), shows every live run of this PC, and each phone picks its own. A
+  phone paired with the SDK's pilot must scan the new code. The entries below are its steps.
 - **The pilot's overview wire** (2026-11-27, pilot in core phase 6a): a `runs` entry names its `instance` (the first
   short element the run holds, else `""`); a phone's command `overview {on}` makes the core send, on a thread of its own
   and at most once a second per run, a `thumb {runId, jpeg}` (base64, about 160 px wide) of every listed run that has a
@@ -59,11 +63,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - `pilot.RunViews` (2026-11-27): the core builds each plugin's `views(...)` view when a run starts, and one while no
   run goes, starts it with the project's services and drops it when the run starts or ends, so the Remote Pilot
-  (moving into the core) can ask what the project shows and draw each telemetry frame. What a view shows is asked on
+  can ask what the project shows and draw each telemetry frame. What a view shows is asked on
   the project's thread, since a view reads the project's values; the pilot gets the last answer without waiting.
 - `pilot.PilotServer` (2026-11-27): the Remote Pilot's server in the core, on Jetty's websocket, with its routes,
   capture, input, video and send queues. It shows what a view names, and a window or emulator that is missing as a
-  reason, never the desktop. Nothing starts it yet; the SDK's pilot still serves.
+  reason, never the desktop.
 - A plugin's pool deals a candidate to as many live runs as its `PluginPool.sharing` allows (2026-11-27), each
   held at that share in the registry; the plugin's order is kept, so a candidate with no limit (a desktop) takes the
   rows the ones listed before it leave, and a plugin lists it last. The dealer counts such a share as a long, so no limit never overflows.

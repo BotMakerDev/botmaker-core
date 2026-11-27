@@ -134,7 +134,14 @@ per user.
   from the frame loop (a view reads the project's values), `PilotRoutes` turns that into a `PilotRoute`
   and `TargetCapture`, `PilotVideo` and `PilotInputService` work on it. A missing window or emulator is a
   `PilotRoute.Missing` with its reason, never the desktop: the pilot may be on a public link. The wire is the phone
-  app's (`pilot-wire/wire-golden.json`, byte-identical in botmaker-pilot); a `telemetry.` message is the view's.
+  app's (`pilot-wire/wire-golden.json`, byte-identical in botmaker-pilot); a `telemetry.` message is the view's, and
+  the SDK keeps its own corpus of those. Several runs: the list is `PilotRuns`/`RegistryRuns` (the run registry;
+  another process's run gets no picture, and stop, pause and resume are a signal to its pid), each run with a view is
+  a `PilotStage`, and each phone picks its own. Nothing may cross from one run to another: `tell` sets the client's
+  stage before queueing `runs`, a frame or packet is queued only while the client is still on the stage it was
+  grabbed for (`SendQueue.frame`'s `wanted`), and a command's `run` must be the one the phone is shown (disarming
+  Interact excepted). The page a browser gets is the committed build under `resources/com/botmaker/core/pilot/web`,
+  not yet pinned to a pilot release.
 - JavaFX stays `provided` because the contract's signatures name it: `PluginHost` binds slot editors that return a
   `Node`, and `HostServices` implements `StudioServices`, whose `Theme` and `Dialogs` name `Scene` and `Window`.
   Import no javafx and construct no Node here.
