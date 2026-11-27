@@ -167,7 +167,7 @@ public final class PooledRuns {
             for (Dealer.Row row : dealt.rows()) {
                 String runId = RunRegistry.newRunId();
                 Optional<RunRegistry.Conflict> conflict = locked.hold(LiveRun.ofThisProcess(runId, bot,
-                        row.holds(read.pools())));
+                        row.holds(read.pools()), row.claims(read.pools())));
                 if (conflict.isPresent()) failed.add("run " + (row.index() + 1) + ": " + conflict.get().words());
                 else held.add(new Held(row, runId));
             }

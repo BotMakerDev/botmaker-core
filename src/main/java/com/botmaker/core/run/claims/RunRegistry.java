@@ -143,18 +143,26 @@ public final class RunRegistry {
 
         /** A run held by this process until {@link Locked#moveTo} gives it the run's own. */
         public static LiveRun ofThisProcess(String runId, String bot, List<Hold> holds) {
+            return ofThisProcess(runId, bot, holds, List.of());
+        }
+
+        /** {@link #ofThisProcess(String, String, List)}, holding {@code claims} alone from its start. */
+        public static LiveRun ofThisProcess(String runId, String bot, List<Hold> holds, List<String> claims) {
             ProcessHandle self = ProcessHandle.current();
-            return new LiveRun(runId, bot, self.pid(), startOf(self), holds, List.of());
+            return new LiveRun(runId, bot, self.pid(), startOf(self), holds, claims);
         }
     }
 
-    /** Why a run was not held: {@code hold} is already held by as many live runs as it allows, {@code by} among them. */
-    public record Conflict(Hold hold, Optional<LiveRun> by) {
+    /**
+     * Why a run was not held: {@code element} (an element as the grammar writes it, or a key the row holds alone) is
+     * already held by as many live runs as it allows, {@code by} among them.
+     */
+    public record Conflict(String element, Optional<LiveRun> by) {
 
         /** In words, naming the element and the run that holds it; no run when the row itself asks for it too often. */
         public String words() {
-            return by.map(run -> hold.element() + " is held by a run of " + run.bot() + " (" + run.runId() + ")")
-                    .orElseGet(() -> "The row asks for " + hold.element() + " more often than it may be held");
+            return by.map(run -> element + " is held by a run of " + run.bot() + " (" + run.runId() + ")")
+                    .orElseGet(() -> "The row asks for " + element + " more often than it may be held");
         }
     }
 
@@ -309,14 +317,20 @@ public final class RunRegistry {
                         .filter(hold::sameElement).toList();
                 int share = Stream.concat(same.stream(), Stream.of(hold)).mapToInt(Hold::share).min().orElseThrow();
                 if (same.size() >= share) {
-                    return Optional.of(new Conflict(hold, live.stream()
+                    return Optional.of(new Conflict(hold.element(), live.stream()
                             .filter(other -> other.holds().stream().anyMatch(hold::sameElement)).findFirst()));
                 }
                 // A run that was dealt nothing claimed it at its start: it plays there, so it is not free.
                 Optional<LiveRun> claimer = live.stream()
                         .filter(other -> other.claims().stream().anyMatch(hold::claimedBy)).findFirst();
-                if (claimer.isPresent()) return Optional.of(new Conflict(hold, claimer));
+                if (claimer.isPresent()) return Optional.of(new Conflict(hold.element(), claimer));
                 mine.add(hold);
+            }
+            // What the row holds alone beside its elements (a taken-over mouse): no other live run's claim or hold.
+            for (String key : run.claims()) {
+                Optional<LiveRun> by = live.stream().filter(other -> other.claims().contains(key)
+                        || other.holds().stream().anyMatch(hold -> hold.claimedBy(key))).findFirst();
+                if (by.isPresent()) return Optional.of(new Conflict(key, by));
             }
             write(run);
             return Optional.empty();

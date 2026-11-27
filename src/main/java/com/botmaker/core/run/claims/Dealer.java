@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -62,9 +63,12 @@ public final class Dealer {
      * @param rotates   whether the element used least recently is dealt first, rather than the row's last one
      * @param shares    by element, how many live runs may hold that one at once, in place of {@code each}: what a
      *                  plugin's {@code PluginPool.sharing} answered (2026-11-27)
+     * @param claims    by element, the keys a run dealt it holds alone: no live run holds or claims one, and no two
+     *                  rows of a dealing take one; what a plugin's {@code PluginPool.claiming} answered (2026-11-27)
      */
     public record Source(Hold.Kind kind, String owner, String parameter, String name, List<String> elements, int take,
-                         int each, boolean rotates, Narrowing narrowing, Map<String, Integer> shares) {
+                         int each, boolean rotates, Narrowing narrowing, Map<String, Integer> shares,
+                         Map<String, List<String>> claims) {
 
         public Source {
             Objects.requireNonNull(kind, "kind");
@@ -79,42 +83,60 @@ public final class Dealer {
             shares.forEach((element, n) -> {
                 if (n < 1) throw new IllegalArgumentException("share of " + element + " " + n + " < 1");
             });
+            Map<String, List<String>> keys = new HashMap<>();
+            Objects.requireNonNull(claims, "claims").forEach((element, held) -> {
+                if (!held.isEmpty()) keys.put(element, List.copyOf(new LinkedHashSet<>(held)));
+            });
+            claims = Map.copyOf(keys);
         }
 
         /** A bot's own pool: one element a run, held by one run, sticky. */
         public static Source bot(String bot, String parameter, String name, List<String> elements) {
-            return new Source(Hold.Kind.BOT, bot, parameter, name, elements, 0, 1, false, Narrowing.NONE, Map.of());
+            return new Source(Hold.Kind.BOT, bot, parameter, name, elements, 0, 1, false, Narrowing.NONE, Map.of(),
+                    Map.of());
         }
 
         /** A plugin's pool, held for every bot on this PC. */
         public static Source plugin(String coordinate, String parameter, String name, List<String> elements) {
             return new Source(Hold.Kind.PLUGIN, coordinate, parameter, name, elements, 0, 1, false, Narrowing.NONE,
-                    Map.of());
+                    Map.of(), Map.of());
         }
 
         /** This pool, each run taking {@code k} elements. */
         public Source taking(int k) {
-            return new Source(kind, owner, parameter, name, elements, k, each, rotates, narrowing, shares);
+            return new Source(kind, owner, parameter, name, elements, k, each, rotates, narrowing, shares, claims);
         }
 
         /** This pool, {@code n} live runs sharing an element. */
         public Source sharedBy(int n) {
-            return new Source(kind, owner, parameter, name, elements, take, n, rotates, narrowing, shares);
+            return new Source(kind, owner, parameter, name, elements, take, n, rotates, narrowing, shares, claims);
         }
 
         /** This pool, {@code byElement} live runs sharing each element it names, the others as {@link #each}. */
         public Source sharedBy(Map<String, Integer> byElement) {
-            return new Source(kind, owner, parameter, name, elements, take, each, rotates, narrowing, byElement);
+            return new Source(kind, owner, parameter, name, elements, take, each, rotates, narrowing, byElement,
+                    claims);
+        }
+
+        /** This pool, a run dealt an element {@code byElement} names holding those keys alone beside it. */
+        public Source claiming(Map<String, List<String>> byElement) {
+            return new Source(kind, owner, parameter, name, elements, take, each, rotates, narrowing, shares,
+                    byElement);
         }
 
         /** This pool, its least recently used element dealt first. */
         public Source rotating() {
-            return new Source(kind, owner, parameter, name, elements, take, each, true, narrowing, shares);
+            return new Source(kind, owner, parameter, name, elements, take, each, true, narrowing, shares, claims);
         }
 
         /** This pool, its free elements narrowed by the row's earlier picks. */
         public Source narrowedBy(Narrowing by) {
-            return new Source(kind, owner, parameter, name, elements, take, each, rotates, by, shares);
+            return new Source(kind, owner, parameter, name, elements, take, each, rotates, by, shares, claims);
+        }
+
+        /** The keys a run dealt {@code element} holds alone; none for most. */
+        public List<String> claims(String element) {
+            return claims.getOrDefault(element, List.of());
         }
 
         /** How many elements one run takes. */
@@ -153,6 +175,15 @@ public final class Dealer {
             List<Hold> out = new ArrayList<>();
             for (Source pool : pools) {
                 for (String element : picks.getOrDefault(pool.parameter(), List.of())) out.add(pool.hold(element));
+            }
+            return List.copyOf(out);
+        }
+
+        /** The keys this row holds alone beside its elements, each once ({@link Source#claims}). */
+        public List<String> claims(List<Source> pools) {
+            Set<String> out = new LinkedHashSet<>();
+            for (Source pool : pools) {
+                for (String element : picks.getOrDefault(pool.parameter(), List.of())) out.addAll(pool.claims(element));
             }
             return List.copyOf(out);
         }
@@ -307,6 +338,10 @@ public final class Dealer {
         private final Set<Integer> fitting = new LinkedHashSet<>();
         /** Why the row being dealt could not take its pin, the first time it was found. */
         private Reason pinMissed;
+        /** The keys rows of this dealing hold alone ({@link Source#claims}): no other row may take one. */
+        private final Set<String> keysTaken = new HashSet<>();
+        /** By key: how many rows not dealt yet pin an element that holds it. */
+        private final Map<String, Integer> keysReserved = new HashMap<>();
 
         Table(Request request) {
             this.request = request;
@@ -355,7 +390,28 @@ public final class Dealer {
 
         private void take(List<Row> rows, int index, Map<String, List<String>> picks) {
             picks.forEach((pool, pick) -> pick.forEach(element -> count(taken, pool, element, 1)));
+            keysTaken.addAll(new Row(index, picks).claims(pools));
             rows.add(new Row(index, picks));
+        }
+
+        /** The keys the elements of {@code pick} in the pool filling {@code parameter} hold alone; none for no pool. */
+        private List<String> keysOf(String parameter, List<String> pick) {
+            return pools.stream().filter(pool -> pool.parameter().equals(parameter)).findFirst()
+                    .map(pool -> pick.stream().flatMap(element -> pool.claims(element).stream()).distinct().toList())
+                    .orElse(List.of());
+        }
+
+        /** The live run that holds or claimed {@code key}, if one does. */
+        private Optional<LiveRun> keyHolder(String key) {
+            // As RunRegistry.hold reads it: a key claimed, or the key of an element a live run holds.
+            return request.live().stream().filter(run -> run.claims().contains(key)
+                    || run.holds().stream().anyMatch(hold -> hold.claimedBy(key))).findFirst();
+        }
+
+        /** Whether a row may take {@code key}: no live run holds it nor a dealt row; a pin ignores later rows' pins. */
+        private boolean keyFree(String key, boolean pinned) {
+            return keyHolder(key).isEmpty() && !keysTaken.contains(key)
+                    && (pinned || keysReserved.getOrDefault(key, 0) == 0);
         }
 
         private Map<String, List<String>> pinsOf(int row) {
@@ -364,7 +420,10 @@ public final class Dealer {
         }
 
         private void reserve(int row, int by) {
-            pinsOf(row).forEach((pool, pick) -> pick.forEach(element -> count(reserved, pool, element, by)));
+            pinsOf(row).forEach((pool, pick) -> {
+                pick.forEach(element -> count(reserved, pool, element, by));
+                keysOf(pool, pick).forEach(key -> keysReserved.merge(key, by, Integer::sum));
+            });
         }
 
         private static void count(Map<String, Map<String, Integer>> counts, String pool, String element, int by) {
@@ -393,7 +452,10 @@ public final class Dealer {
                                                 .findFirst()
                                                 .map(element -> element + " is held by a run of " + holder(pool.get(),
                                                         element).map(LiveRun::bot).orElse("another bot"))
-                                                .orElse(null));
+                                                .orElseGet(() -> keysOf(pin.getKey(), pick).stream()
+                                                        .flatMap(key -> keyHolder(key).stream()
+                                                                .map(run -> key + " is held by a run of " + run.bot()))
+                                                        .findFirst().orElse(null)));
                 if (why != null) {
                     return Optional.of(new Reason(Reason.Kind.PIN, pin.getKey(), pick, 1,
                             "Run " + (row + 1) + "'s pin: " + why));
@@ -462,8 +524,17 @@ public final class Dealer {
                     run + String.join(", ", pinned) + " does not go with the rest of its row");
         }
 
-        /** How many more rows may take {@code element}; a pin ignores what later rows pin. */
+        /**
+         * How many more rows may take {@code element}: none while a key it holds alone is not free; a pin ignores what
+         * later rows pin.
+         */
         private int slots(Source pool, String element, boolean pinned) {
+            if (!pool.claims(element).stream().allMatch(key -> keyFree(key, pinned))) return 0;
+            return roomFor(pool, element, pinned);
+        }
+
+        /** {@link #slots} as the element's own holds count it, its keys aside. */
+        private int roomFor(Source pool, String element, boolean pinned) {
             return share(pool, element) - held(pool, element) - counted(taken, pool.parameter(), element)
                     - (pinned ? 0 : counted(reserved, pool.parameter(), element));
         }
@@ -568,6 +639,7 @@ public final class Dealer {
                             missing + " more of " + pool.name() + (missing == 1 ? " is" : " are") + " needed"));
                 }
             }
+            explainKeys();
             Source first = pools.isEmpty() ? null : pools.getFirst();
             stuck.forEach((parameter, without) -> {
                 Source pool = pools.stream().filter(one -> one.parameter().equals(parameter)).findFirst()
@@ -585,6 +657,32 @@ public final class Dealer {
             if (reasons.size() == before && reasons.stream().noneMatch(reason -> reason.kind() == Reason.Kind.PIN)) {
                 reasons.add(new Reason(Reason.Kind.INCOMPLETE, "", List.of(), request.runs() - dealt,
                         "the free elements make no more complete rows"));
+            }
+        }
+
+        /**
+         * Each key that closes an element with room left ({@link Source#claims}), once: held by a live run, or taken
+         * by a row of this dealing.
+         */
+        private void explainKeys() {
+            Set<String> told = new HashSet<>();
+            for (Source pool : pools) {
+                for (String element : pool.elements()) {
+                    if (roomFor(pool, element, false) <= 0) continue;
+                    for (String key : pool.claims(element)) {
+                        if (!told.add(key)) continue;
+                        Optional<LiveRun> by = keyHolder(key);
+                        if (by.isPresent()) {
+                            reasons.add(new Reason(Reason.Kind.HELD, pool.parameter(), List.of(element), 1,
+                                    key + " is held by a run of " + by.get().bot()));
+                        } else if (keysTaken.contains(key)) {
+                            reasons.add(new Reason(Reason.Kind.INCOMPLETE, pool.parameter(), List.of(element), 1,
+                                    key + " is held by one run at a time"));
+                        } else {
+                            told.remove(key);
+                        }
+                    }
+                }
             }
         }
     }

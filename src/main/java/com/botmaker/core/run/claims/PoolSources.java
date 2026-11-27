@@ -239,13 +239,24 @@ public final class PoolSources {
             int share = pool.sharedBy(candidate);
             if (share > 1) shares.put(element, share);
         });
+        // What a run dealt each element holds alone beside it (PluginPool.claiming): a desktop's taken-over mouse.
+        Map<String, List<String>> claims = new HashMap<>();
+        values.forEach((element, candidate) -> {
+            List<String> keys;
+            try {
+                keys = pool.claimedWith(candidate, services);
+            } catch (RuntimeException | LinkageError e) {
+                throw new Dealer.Failed(coordinate, "failed while giving what a run of " + method + " claims", e);
+            }
+            if (!keys.isEmpty()) claims.put(element, keys);
+        });
         Dealer.Narrowing narrowing = (free, picks) -> {
             List<T> given = free.stream().map(values::get).toList();
             List<T> left = pool.left(given, picksOf(picks, typed), services);
             return free.stream().filter(element -> left.contains(values.get(element))).toList();
         };
         return Dealer.Source.plugin(coordinate, parameter.id(), method, List.copyOf(values.keySet()))
-                .narrowedBy(narrowing).sharedBy(shares);
+                .narrowedBy(narrowing).sharedBy(shares).claiming(claims);
     }
 
     /** The row's picks as a plugin reads them: its own parameters' and other plugins', each its typed value. */

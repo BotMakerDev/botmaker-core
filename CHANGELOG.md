@@ -48,6 +48,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   kept serving until the core ended, so a value the rebuild added was never written and each run's write of it was
   refused.
 
+### Changed
+
+- The dealer holds what a plugin's pool claims beside a candidate (`PluginPool.claiming`, 2026-11-27): a row whose
+  pick names a key another live run holds or claimed, or a row of the same dealing took, is not complete, and the
+  reason names the key and who holds it (`pointer:this-pc/desktop is held by a run of Firestone`). The run holds the
+  keys from its start (`LiveRun.claims`), so its own `Claims.claim` of one is granted and another run's is refused.
+
 ## [0.3.3] — 2026-11-24
 
 ### Changed

@@ -59,6 +59,26 @@ class RunRegistryTest {
     }
 
     @Test
+    void aKeyARowHoldsAloneIsRefusedToAnotherRowAndGrantedToItsOwnClaim() {
+        RunRegistry registry = registry();
+        String pointer = "pointer:this-pc/desktop";
+        Hold desktop = Hold.plugin(SDK, INSTANCE, "Place.desktop()").sharedBy(Integer.MAX_VALUE);
+        assertTrue(registry.hold(LiveRun.ofThisProcess("r1", "Firestone", List.of(desktop), List.of(pointer)))
+                .isEmpty());
+
+        var conflict = registry.hold(LiveRun.ofThisProcess("r2", "Arena", List.of(desktop), List.of(pointer)));
+        assertEquals(pointer + " is held by a run of Firestone (r1)", conflict.orElseThrow().words());
+        assertTrue(registry.hold(run("r3", "Arena", desktop)).isEmpty(), "a run that posts its input shares it");
+        assertTrue(registry.claim("r1", pointer), "the run's own claim of what it was dealt");
+        assertFalse(registry.claim("r3", pointer), "another run's escalation is refused");
+
+        registry.release("r1");
+        assertTrue(registry.claim("r3", pointer));
+        assertTrue(registry.hold(LiveRun.ofThisProcess("r4", "Firestone", List.of(desktop), List.of(pointer)))
+                .isPresent(), "a key claimed while running is held too");
+    }
+
+    @Test
     void aRefusedRowHoldsNothingAndALiveRunIdIsRefused() {
         RunRegistry registry = registry();
         registry.hold(run("r1", "farm", Hold.bot("farm", ACCOUNT, "\"b\"")));

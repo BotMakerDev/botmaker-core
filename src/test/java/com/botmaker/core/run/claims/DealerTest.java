@@ -133,6 +133,59 @@ class DealerTest {
         assertEquals("2 of 3 can run: 1 more of place is needed", short_.words());
     }
 
+    private static final String POINTER = "pointer:this-pc/desktop";
+
+    /** This desktop, shared by any number of runs; a run dealt it holds the pointer alone when {@code takesOver}. */
+    private static Source desktop(boolean takesOver, String... others) {
+        List<String> elements = new ArrayList<>(List.of(others));
+        elements.add("desktop");
+        Source places = Source.plugin(SDK, INSTANCE, "place", elements).sharedBy(Map.of("desktop", Integer.MAX_VALUE));
+        return takesOver ? places.claiming(Map.of("desktop", List.of(POINTER))) : places;
+    }
+
+    @Test
+    void twoTakeOverRowsOnOneDesktopMakeOneRun() {
+        Dealing dealing = Dealer.deal(Request.of(List.of(desktop(true)), 2, List.of()));
+
+        assertEquals(1, dealing.capacity());
+        assertEquals(List.of(POINTER), dealing.rows().getFirst().claims(List.of(desktop(true))));
+        assertEquals("1 of 2 can run: " + POINTER + " is held by one run at a time", dealing.words());
+
+        Dealing elsewhere = Dealer.deal(Request.of(List.of(desktop(true, "display-1")), 2, List.of()));
+        assertTrue(elsewhere.complete(), elsewhere.words());
+        assertEquals(List.of("display-1", "desktop"), picked(elsewhere, INSTANCE), "the other goes to a display");
+    }
+
+    @Test
+    void oneTakeOverRunLeavesThisDesktopToRunsThatPostTheirInput() {
+        Source taking = desktop(true);
+        LiveRun firestone = LiveRun.ofThisProcess("r1", "Firestone", List.of(taking.hold("desktop")),
+                List.of(POINTER));
+
+        Dealing posted = Dealer.deal(Request.of(List.of(desktop(false)), 2, List.of(firestone)));
+        assertTrue(posted.complete(), "1 taking over and 2 posting: 3 runs on this desktop; " + posted.words());
+
+        Dealing second = Dealer.deal(Request.of(List.of(taking), 1, List.of(firestone)));
+        assertEquals(0, second.capacity());
+        assertEquals("0 of 1 can run: " + POINTER + " is held by a run of Firestone", second.words());
+
+        Dealing pinned = Dealer.deal(Request.of(List.of(taking), 1, List.of(firestone))
+                .pinned(Map.of(0, Map.of(INSTANCE, List.of("desktop")))));
+        assertTrue(pinned.words().startsWith("0 of 1 can run: Run 1's pin: " + POINTER
+                + " is held by a run of Firestone"), pinned.words());
+
+        LiveRun claimedWhileRunning = new LiveRun("r2", "Arena bot", 1, 0, List.of(), List.of(POINTER));
+        assertEquals(0, Dealer.deal(Request.of(List.of(taking), 1, List.of(claimedWhileRunning))).capacity(),
+                "a run that took over during its run holds the pointer too");
+
+        // A key spelled as another pool's element: the run holding that element holds the key, as the registry reads it.
+        Hold element = Hold.plugin(SDK, INSTANCE, "i1");
+        Source keyed = desktop(false).claiming(Map.of("desktop", List.of(element.key())));
+        LiveRun holder = LiveRun.ofThisProcess("r3", "Arena bot", List.of(element));
+        assertEquals(0, Dealer.deal(Request.of(List.of(keyed), 1, List.of(holder))).capacity(),
+                "the registry would refuse it, so it is not dealt");
+    }
+
     @Test
     void anInstanceAnotherBotsRunHoldsIsNotDealt() {
         LiveRun arena = LiveRun.ofThisProcess("r1", "Arena bot", List.of(Hold.plugin(SDK, INSTANCE, "i1")));
