@@ -7,6 +7,7 @@ import org.eclipse.jetty.websocket.api.Callback;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayDeque;
+import java.util.function.BooleanSupplier;
 
 /**
  * One phone's outgoing messages: one write in flight at a time, in the order they were offered, and never
@@ -79,8 +80,17 @@ final class SendQueue {
      * @return false when it was refused: the phone is that far behind, or gone
      */
     boolean frame(byte[] payload, int limit) {
+        return frame(payload, limit, () -> true);
+    }
+
+    /**
+     * As {@link #frame(byte[], int)}, and refused unless {@code wanted} still holds at the moment of queueing:
+     * a picture grabbed before the phone was shown another run must not follow the message that says so. The
+     * caller changes what {@code wanted} reads before it queues that message.
+     */
+    boolean frame(byte[] payload, int limit, BooleanSupplier wanted) {
         synchronized (this) {
-            if (dead || frames >= limit) return false;
+            if (dead || frames >= limit || !wanted.getAsBoolean()) return false;
             frames++;
             waiting.add(payload);
         }

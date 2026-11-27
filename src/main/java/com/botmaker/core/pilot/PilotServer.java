@@ -41,6 +41,7 @@ import java.util.List;
 import java.util.UUID;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.function.BiFunction;
 import java.util.Optional;
 import java.util.Set;
@@ -156,6 +157,8 @@ public final class PilotServer implements AutoCloseable {
         volatile String selected;
         /** The stage this phone was last told it is shown ({@code null}: none), so a change is announced once. */
         volatile PilotStage stage;
+        /** The run this phone was last told it is shown, or null. */
+        volatile String shown;
         /** Whether this phone has its overview open, and so is sent a thumbnail of every listed run. */
         volatile boolean overview;
         /** Whether the phone has been told its first list and state, so the frame loop never races that first tell. */
@@ -674,7 +677,10 @@ public final class PilotServer implements AutoCloseable {
             controlOther(client, cmd, other);
             return;
         }
-        if (cmd != PilotCommand.HELLO && !mayControl(client, cmd, named)) {
+        // Disarming takes control away, so it is never refused: the phone disarms on its own when the run it is
+        // shown changes, whether or not the new one can be controlled.
+        boolean disarm = cmd == PilotCommand.INTERACT && !node.path("on").asBoolean(false);
+        if (cmd != PilotCommand.HELLO && !disarm && !mayControl(client, cmd, named)) {
             notice(client, NO_VIEW_NOTICE);
             return;
         }
@@ -1031,6 +1037,9 @@ public final class PilotServer implements AutoCloseable {
             PilotStage stage = stageOf(client, now, true);
             PilotStage was = client.stage;
             client.stage = stage;
+            // Another run on the same stage: its first picture is sent even if it looks like the last one.
+            if (!Objects.equals(shown, client.shown)) client.lastFrame = null;
+            client.shown = shown;
             client.told = true;
             client.out.text(PilotMessages.runsJson(shown, now.live().stream()
                     .map(run -> new PilotMessages.Listed(run.id(), run.bot(), run.instance(),
@@ -1226,7 +1235,7 @@ public final class PilotServer implements AutoCloseable {
             // A client that has not been given a decodable entry point yet waits for the next keyframe; the
             // encoder's GOP is what bounds that wait.
             if (!client.decoding.get() && !packet.keyframe()) continue;
-            client.decoding.set(client.out.frame(payload, H264_QUEUE));
+            client.decoding.set(client.out.frame(payload, H264_QUEUE, () -> client.stage == stage));
         }
     }
 
@@ -1422,7 +1431,8 @@ public final class PilotServer implements AutoCloseable {
             if (Arrays.equals(payload, client.lastFrame)) continue;
             // One frame at a time: a client still flushing the previous one skips this one — keeps the
             // real-time feel on a slow link.
-            if (client.out.frame(payload, 1)) client.lastFrame = payload;
+            // The grab took a while: a client shown another stage since then is not sent it.
+            if (client.out.frame(payload, 1, () -> client.stage == stage)) client.lastFrame = payload;
         }
     }
 }

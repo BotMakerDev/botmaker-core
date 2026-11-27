@@ -235,6 +235,12 @@ class PilotServerTest {
         assertEquals(1, runs.started.getCount());
         assertEquals(List.of(), server.connected().stream().filter(PilotServer.Connected::interact).toList());
 
+        // Disarming is never refused: the first notice heard after it is the next command's.
+        heard.clear();
+        ws.sendText("{\"cmd\":\"interact\",\"on\":false}", true).get(5, TimeUnit.SECONDS);
+        ws.sendText("{\"cmd\":\"select\",\"run\":\"gone\"}", true).get(5, TimeUnit.SECONDS);
+        assertContains("not running any more", next(heard, "notice"));
+
         // A command names its run, and the one shown by the other phone's pick is not this one's.
         ws.sendText("{\"cmd\":\"select\",\"run\":\"run-b\"}", true).get(5, TimeUnit.SECONDS);
         next(heard, "runs", "\"selected\":\"run-b\"");

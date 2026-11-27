@@ -60,6 +60,16 @@ class SendQueueTest {
     }
 
     @Test
+    void aFrameNoLongerWantedIsRefusedAndTakesNoPlace() {
+        HeldLink link = new HeldLink();
+        SendQueue queue = new SendQueue(link);
+
+        assertFalse(queue.frame(new byte[1], 1, () -> false));
+        assertEquals(List.of(), link.written);
+        assertTrue(queue.frame(new byte[1], 1, () -> true));
+    }
+
+    @Test
     void aPhoneTooFarBehindIsGivenUpOnce() {
         HeldLink link = new HeldLink();
         SendQueue queue = new SendQueue(link);
