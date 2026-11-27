@@ -49,9 +49,10 @@ class PilotBackgroundTest {
 
         assertTrue(background.status().offered());
         // "exe:game" is no launch target the launcher can isolate, so nothing comes up, whichever way it is refused.
-        background.start();
+        // A computer without the session backend refuses at once (the answer); one with it says why in the status.
+        boolean said = background.start().isPresent();
         assertFalse(background.status().running());
-        assertTrue(background.status().message() != null);
+        assertTrue(said || background.status().message() != null);
     }
 
     @Test
