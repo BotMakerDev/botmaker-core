@@ -9,6 +9,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- **`PilotQr.rows` is public** (2026-11-27, pilot in core phase 5b): Studio's pilot window draws the phone app's
+  download QR from it, as it draws the pairing one from `PilotState.qr`.
 - **Background mode in the pilot's protocol** (2026-11-27, pilot in core phase 5a): `PilotState.background` says
   whether the open bot offers a private display (`offered`), whether one is up (`running`, `display`, `game`, `size`)
   and the outcome of the last start or stop; `Request.PilotBackgroundStart`/`PilotBackgroundStop` (and
